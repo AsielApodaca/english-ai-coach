@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>English AI Coach</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">English AI Coach</div>
+      <nav class="tabs">
+        <button class="tab-btn active" data-tab="practice">Practice</button>
+        <button class="tab-btn" data-tab="chat">Free chat</button>
+        <button class="tab-btn" data-tab="progress">Progress</button>
+        <button class="tab-btn" data-tab="settings">Settings</button>
+      </nav>
+      <div id="health-pill" class="health-pill" title="Server / LLM status">…</div>
+    </header>
+
+    <main>
+      <!-- PRACTICE -->
+      <section id="tab-practice" class="tab-panel active">
+        <div id="setup-view">
+          <h1>Practice a spoken answer</h1>
+          <p class="muted">The coach asks a question, reads a fragment, you repeat it, and the coach grades your attempt.</p>
+          <div class="form-grid">
+            <label>Category
+              <select id="category">
+                <option value="interviews">Job interviews</option>
+                <option value="star">STAR method</option>
+                <option value="daily">Daily standup</option>
+                <option value="free">Free topic</option>
+              </select>
+            </label>
+            <label>Level
+              <select id="level">
+                <option value="B1">B1</option>
+                <option value="B2" selected>B2</option>
+                <option value="C1">C1</option>
+              </select>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="personalized" checked />
+              Personalize with my memory
+            </label>
+          </div>
+          <button id="start-practice" class="primary">Start practice</button>
+          <div id="practice-loading" class="loading hidden">Generating practice set…</div>
+        </div>
+
+        <div id="session-view" class="hidden">
+          <div class="session-head">
+            <span id="category-badge" class="badge"></span>
+            <span id="level-badge" class="badge alt"></span>
+            <button id="quit-session" class="ghost small">End session</button>
+          </div>
+          <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
+          <div class="question-card">
+            <div class="q-label">Coach asks</div>
+            <div id="question-text"></div>
+          </div>
+          <div id="coach-note" class="note"></div>
+
+          <div id="fragment-area">
+            <div id="stage-chip" class="chip"></div>
+            <div id="fragment-text" class="fragment"></div>
+            <div class="controls">
+              <button id="btn-play" class="primary soft">Repeat after me</button>
+              <button id="btn-record" class="record">Record</button>
+              <button id="btn-stop" class="danger hidden">Stop</button>
+              <button id="btn-check" class="primary disabled" disabled>Check my attempt</button>
+            </div>
+            <div id="listening-dot" class="listening hidden">Listening…</div>
+            <div id="transcript" class="transcript"></div>
+          </div>
+
+          <div id="feedback-area" class="hidden">
+            <div class="score-row">
+              <div id="score-ring"><span id="score-num">0</span></div>
+              <div id="verdict-text"></div>
+            </div>
+            <div id="issues" class="issues"></div>
+            <div id="tips" class="tips"></div>
+            <div class="controls">
+              <button id="btn-try-again" class="ghost">Try again</button>
+              <button id="btn-next" class="primary">Next fragment</button>
+            </div>
+          </div>
+
+          <div id="done-area" class="hidden">
+            <h2>Answer complete</h2>
+            <p id="session-summary" class="muted"></p>
+            <div class="controls">
+              <button id="btn-play-full" class="primary soft">Play full answer</button>
+              <button id="btn-record-full" class="record">Record full answer</button>
+              <button id="btn-stop-full" class="danger hidden">Stop</button>
+              <button id="btn-check-full" class="primary">Check full answer</button>
+            </div>
+            <div id="transcript-full" class="transcript"></div>
+            <div id="full-feedback" class="feedback-block hidden"></div>
+            <button id="btn-finish" class="ghost">Finish session</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CHAT -->
+      <section id="tab-chat" class="tab-panel">
+        <h1>Free chat</h1>
+        <p class="muted">Talk with the coach about anything. Try: "Give me a tricky interview question and evaluate my answer."</p>
+        <div id="chat-log" class="chat-log"></div>
+        <div class="chat-input-row">
+          <input id="chat-input" type="text" placeholder="Type a message…" />
+          <button id="chat-send" class="primary">Send</button>
+        </div>
+      </section>
+
+      <!-- PROGRESS -->
+      <section id="tab-progress" class="tab-panel">
+        <h1>Progress & memory</h1>
+        <div class="progress-grid">
+          <div class="card">
+            <h3>Snapshot</h3>
+            <div id="progress-snapshot"></div>
+          </div>
+          <div class="card">
+            <h3>Weak areas</h3>
+            <div id="progress-weak"></div>
+          </div>
+          <div class="card wide">
+            <h3>Trend of recent scores</h3>
+            <div id="trend-chart"></div>
+          </div>
+          <div class="card wide">
+            <h3>Recommended next step</h3>
+            <div id="next-step-box"></div>
+            <button id="btn-refresh-next" class="ghost small">Regenerate with AI</button>
+          </div>
+          <div class="card wide">
+            <h3>Vocabulary gaps</h3>
+            <div id="progress-vocab"></div>
+          </div>
+          <div class="card wide">
+            <h3>Session history</h3>
+            <div id="session-history"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="tab-settings" class="tab-panel">
+        <h1>Settings</h1>
+        <div class="form-grid">
+          <label>LLM provider
+            <select id="set-provider">
+              <option value="zen">OpenCode Zen (big-pickle, free)</option>
+              <option value="gemini">Google Gemini (free tier)</option>
+              <option value="cloudflare">Cloudflare Workers AI</option>
+              <option value="ollama">Ollama (local)</option>
+            </select>
+          </label>
+          <label>Listen with (STT)
+            <select id="set-stt">
+              <option value="browser">Chrome Web Speech</option>
+              <option value="whisper">Whisper (local)</option>
+            </select>
+          </label>
+          <label>TTS voice
+            <select id="set-voice"></select>
+          </label>
+          <label>Speech rate
+            <select id="set-rate">
+              <option value="0.8">Slow</option>
+              <option value="0.95" selected>Normal</option>
+              <option value="1.1">Fast</option>
+            </select>
+          </label>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="set-autoplay" checked />
+          Auto-play each fragment after a pass
+        </label>
+        <div id="whisper-status" class="note"></div>
+        <div id="env-hints" class="note muted"></div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

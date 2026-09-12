@@ -1,0 +1,17 @@
+# Secrets
+.env
+.env.*
+
+# Personal practice data (learner history, profile, tmp audio)
+data/
+
+# Node
+node_modules/
+*.log
+
+# OS / editor
+.DS_Store
+*.swp
+
+# TypeScript build artifacts (none expected; native type stripping)
+dist/
