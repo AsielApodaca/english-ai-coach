@@ -42,6 +42,7 @@ App web local para practicar inglés técnico con IA: entrevistas, método STAR,
 - No almacenar audio del usuario en el repositorio; usar `data/tmp/` (ignorada).
 - No usar `any` en TypeScript sin justificarlo.
 - No llamar al LLM sin incluir el bloque "Learner memory" disponible en el momento (memoria del aprendiz).
+- Después de un cambio importante en el sistema, evaluar si es necesario actualizar el `README.md` y actualizarlo si aplica.
 
 ## Flujo de trabajo
 - Antes de una tarea no trivial, propón un plan y espera OK.
