@@ -27,7 +27,7 @@ Monolito pequeño en Node/Express con feature-free frontend. El LLM se usa para 
 - **Relación determinista+LLM** — score híbrido: el word-match da estabilidad; el LLM dá correcciones ricas (1 llamada por intento).
 - **WAV en el navegador** — PCM16 16 kHz exportado en el cliente (AudioWorklet/offline) para no depender de ffmpeg.
 - **UI vanilla** — sin bundler ni framework; una sola página, JS modular.
-- **TTS del navegador** — `speechSynthesis` es gratis y suficiente; se ajusta rate/pitch. (Opción futura: `say`.)
+- **TTS del navegador** — fue gratis y suficiente para el MVP; queda como último fallback. Ver feature 007 (voz neural Piper).
 
 ## Riesgos
 
