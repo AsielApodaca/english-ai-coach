@@ -7,6 +7,7 @@ export class BrowserSTT {
     this.handlers = handlers;
     this.rec = null;
     this.finalText = "";
+    this.lastText = "";
   }
 
   isSupported() {
@@ -22,6 +23,7 @@ export class BrowserSTT {
     rec.continuous = continuous;
     rec.interimResults = true;
     this.finalText = "";
+    this.lastText = "";
 
     rec.onresult = (event) => {
       let interim = "";
@@ -30,7 +32,8 @@ export class BrowserSTT {
         if (res.isFinal) this.finalText += res[0].transcript + " ";
         else interim += res[0].transcript;
       }
-      this.handlers.onInterim?.(this.finalText + " " + interim);
+      this.lastText = (this.finalText + " " + interim).trim();
+      this.handlers.onInterim?.(this.lastText);
     };
     rec.onerror = (e) => {
       this.handlers.onError?.(e);
@@ -39,6 +42,7 @@ export class BrowserSTT {
       }
     };
     rec.onend = () => {
+      if (!this.finalText.trim() && this.lastText) this.finalText = this.lastText;
       this.rec = null;
       this.handlers.onEnd?.();
     };
@@ -58,7 +62,7 @@ export class BrowserSTT {
   }
 
   result() {
-    return this.finalText.trim();
+    return (this.finalText || this.lastText).trim();
   }
 
   abort() {
