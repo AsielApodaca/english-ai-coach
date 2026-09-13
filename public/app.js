@@ -117,6 +117,7 @@ const sess = {
   stt: null,
   recorder: null,
   checking: false,
+  lastEval: null,
 };
 
 function providerBody() {
@@ -160,8 +161,9 @@ function enterSession() {
 function setFragment(idx) {
   sess.idx = idx;
   const f = sess.fragments[idx];
+  sess.lastEval = null;
   $("stage-chip").textContent = f.stage || `Part ${idx + 1}`;
-  $("fragment-text").textContent = f.text;
+  $("fragment-text").innerHTML = `<span class="coach-line">${escapeHtml(f.text)}</span>`;
   $("progress-bar").style.width = `${((idx + 1) / sess.fragments.length) * 100}%`;
   showFragmentArea();
   resetTranscript();
@@ -176,11 +178,20 @@ function showFragmentArea() {
   $("feedback-area").classList.add("hidden");
   $("done-area").classList.add("hidden");
   $("fragment-area").classList.remove("hidden");
+  $("fragment-area").classList.remove("live-subs");
 }
 
 function showFeedback(evalData) {
-  $("fragment-area").classList.add("hidden");
+  sess.lastEval = evalData;
   $("feedback-area").classList.remove("hidden");
+  $("fragment-area").classList.add("live-subs");
+  const frag = currentFragment();
+  const missed = new Set((evalData.missing ?? []).map((w) => w.toLowerCase()));
+  const fragTokens = frag.text.split(/(\s+)/);
+  $("fragment-text").innerHTML = `<span class="coach-line">${fragTokens
+    .map((t) => (missed.has(t.toLowerCase()) ? `<span class="miss">${escapeHtml(t)}</span>` : escapeHtml(t)))
+    .join("")}</span>`;
+  renderUserTranscript();
   const ring = $("score-ring");
   const score = evalData.score;
   $("score-num").textContent = score;
@@ -195,6 +206,28 @@ function showFeedback(evalData) {
   renderTips(evalData.tips);
   $("btn-try-again").classList.toggle("hidden", evalData.next);
   $("btn-next").classList.toggle("hidden", !evalData.next);
+  if (settings.autoplay) speakCoachFeedback(evalData, verdict);
+}
+
+function renderUserTranscript() {
+  const evalData = sess.lastEval;
+  if (!evalData || !sess.transcript) {
+    $("transcript").textContent = sess.transcript || "Your words will appear here.";
+    return;
+  }
+  const wrong = new Set((evalData.extra ?? []).map((w) => w.toLowerCase()));
+  const tokens = sess.transcript.split(/(\s+)/);
+  $("transcript").innerHTML = `<span class="user-line">${tokens
+    .map((t) => (wrong.has(t.toLowerCase()) ? `<span class="miss">${escapeHtml(t)}</span>` : escapeHtml(t)))
+    .join("")}</span>`;
+}
+
+function speakCoachFeedback(evalData, verdict) {
+  tts.stop();
+  const issues = evalData.issues ?? [];
+  const fix = issues.find((i) => i.fix)?.fix;
+  const line = fix ? `${verdict} ${fix}` : verdict;
+  tts.speak(line, { rate: settings.rate, voiceURI: settings.voice });
 }
 
 function renderIssues(issues) {
@@ -261,7 +294,9 @@ async function startRecording() {
       },
       onEnd: () => {
         $("listening-dot").classList.add("hidden");
-        sess.transcript = sess.stt?.result() ?? "";
+        const text = sess.stt?.result();
+        sess.stt = null;
+        sess.transcript = text ?? "";
         $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
         updateCheckButton();
       },
@@ -282,7 +317,6 @@ function stopRecording() {
   resetButtonsIdle();
   if (sess.stt) {
     sess.stt.stop();
-    sess.stt = null;
   }
   if (sess.recorder) {
     sess.recorder.cancel();
@@ -420,7 +454,15 @@ $("btn-record-full").addEventListener("click", async () => {
   } else {
     sess.stt = new BrowserSTT({
       onInterim: (t) => ($("transcript-full").textContent = t),
-      onEnd: () => ($("listening-dot").classList.add("hidden")),
+      onEnd: () => {
+        $("listening-dot").classList.add("hidden");
+        const t = sess.stt?.result();
+        sess.stt = null;
+        if (t) {
+          $("transcript-full").textContent = t;
+          $("btn-check-full").disabled = false;
+        }
+      },
     });
     sess.stt.start();
   }
@@ -444,7 +486,6 @@ $("btn-stop-full").addEventListener("click", async () => {
   } else {
     sess.stt?.stop();
     text = sess.stt?.result() ?? "";
-    sess.stt = null;
   }
   $("transcript-full").textContent = text || "Nothing heard — try again.";
   const ok = text.trim().length > 0;
