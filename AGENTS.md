@@ -48,6 +48,7 @@ App web local para practicar inglés técnico con IA: entrevistas, método STAR,
 - Antes de una tarea no trivial, propón un plan y espera OK.
 - Una tarea a la vez; al terminar, di qué cambiaste para revisarlo.
 - Si no estás seguro al 80%, pregunta. No inventes.
+- Antes de abrir un PR: si la PR cierra/completa una feature, actualizar `spec/features/<n>/spec.md` (estado y criterios) y mover la feature en `spec/constitution/roadmap.md` a "Hecho ✅" dentro de la misma rama/PR.
 
 ## Documentación
 - Especificaciones en `spec/` (constitution + features). Ver `spec/constitution/roadmap.md` para el estado.
