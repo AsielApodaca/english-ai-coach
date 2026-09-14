@@ -175,12 +175,20 @@
               <option value="1.1">Fast</option>
             </select>
           </label>
+          <label>Piper voice
+            <select id="set-piper-voice">
+              <option value="en_US-amy-medium">Amy (medium, default)</option>
+              <option value="en_US-amy-low">Amy (low, fast)</option>
+              <option value="en_US-ryan-medium">Ryan (medium)</option>
+            </select>
+          </label>
         </div>
         <label class="check">
           <input type="checkbox" id="set-autoplay" checked />
           Auto-play each fragment after a pass
         </label>
         <div id="whisper-status" class="note"></div>
+        <div id="tts-status" class="note"></div>
         <div id="env-hints" class="note muted"></div>
       </section>
     </main>

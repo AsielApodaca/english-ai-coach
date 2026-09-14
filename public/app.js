@@ -11,6 +11,7 @@ const settings = {
   provider: localStorage.getItem("engcoach.provider") ?? "zen",
   stt: localStorage.getItem("engcoach.stt") ?? "browser",
   voice: localStorage.getItem("engcoach.voice") ?? "",
+  piperVoice: localStorage.getItem("engcoach.piperVoice") ?? "en_US-amy-medium",
   rate: Number(localStorage.getItem("engcoach.rate") ?? 0.95),
   autoplay: (localStorage.getItem("engcoach.autoplay") ?? "1") === "1",
 };
@@ -36,8 +37,10 @@ async function boot() {
   populateVoices();
   bindSettings();
   api("/api/health").then((h) => {
+    tts.setHealth(h);
     renderHealth(h);
     renderWhisperStatus(h);
+    renderTtsStatus(h);
     applySttDefault(h);
   });
 }
@@ -63,10 +66,19 @@ function bindSettings() {
   $("set-stt").value = settings.stt;
   $("set-rate").value = String(settings.rate);
   $("set-autoplay").checked = settings.autoplay;
+  $("set-piper-voice").value = settings.piperVoice;
   $("set-provider").addEventListener("change", (e) => saveSetting("provider", e.target.value));
   $("set-stt").addEventListener("change", (e) => saveSetting("stt", e.target.value));
   $("set-rate").addEventListener("change", (e) => saveSetting("rate", Number(e.target.value)));
   $("set-autoplay").addEventListener("change", (e) => saveSetting("autoplay", e.target.checked));
+  $("set-piper-voice").addEventListener("change", (e) => {
+    saveSetting("piperVoice", e.target.value);
+    // Re-check TTS status with the newly selected voice.
+    api("/api/health").then((h) => {
+      tts.setHealth(h);
+      renderTtsStatus(h);
+    });
+  });
 }
 
 function renderHealth(h) {
@@ -93,6 +105,30 @@ function renderWhisperStatus(h) {
     return;
   }
   el.textContent = "Not installed — brew install whisper-cpp, then npm run setup";
+}
+
+function renderTtsStatus(h) {
+  const el = $("tts-status");
+  const t = h.tts;
+  const p = t?.piper;
+  const e = t?.edge;
+  if (t?.engine === "piper") {
+    el.textContent = `TTS: Piper neural voice (${p.voice}) — local & offline`;
+    el.style.color = "var(--green)";
+    return;
+  }
+  if (t?.engine === "edge-tts") {
+    el.textContent = `TTS: Piper not installed — using edge-tts (${e?.voice ?? "online"})`;
+    el.style.color = "var(--amber)";
+    return;
+  }
+  if (p?.available) {
+    el.textContent = `TTS: Piper installed — run "npm run setup -- --tts" to download the voice model.`;
+    el.style.color = "var(--amber)";
+    return;
+  }
+  el.textContent = "TTS: using browser speechSynthesis. Install Piper locally for a neural voice: pipx install piper-tts";
+  el.style.color = "var(--muted)";
 }
 
 /** Auto-select whisper as the STT engine when it is ready and the user has not chosen otherwise. */
@@ -243,7 +279,7 @@ function speakCoachFeedback(evalData, verdict) {
   const issues = evalData.issues ?? [];
   const fix = issues.find((i) => i.fix)?.fix;
   const line = fix ? `${verdict} ${fix}` : verdict;
-  tts.speak(line, { rate: settings.rate, voiceURI: settings.voice });
+  tts.speak(line, { rate: settings.rate, voiceURI: settings.voice, piperVoice: settings.piperVoice });
 }
 
 function renderIssues(issues) {
@@ -285,8 +321,12 @@ function resetTranscript() {
 
 async function autoplayFragment(f) {
   tts.stop();
-  await tts.speak("Repeat after me.", { rate: settings.rate, voiceURI: settings.voice });
-  await tts.speak(f.text, { rate: settings.rate, voiceURI: settings.voice });
+  await tts.speak(["Repeat after me.", f.text], {
+    rate: settings.rate,
+    voiceURI: settings.voice,
+    piperVoice: settings.piperVoice,
+    pauseAfterMs: 500,
+  });
 }
 
 $("btn-play").addEventListener("click", () => autoplayFragment(currentFragment()));
@@ -497,7 +537,7 @@ function fullAnswerText() {
 
 $("btn-play-full").addEventListener("click", () => {
   tts.stop();
-  tts.speak(fullAnswerText(), { rate: settings.rate, voiceURI: settings.voice });
+  tts.speak(fullAnswerText(), { rate: settings.rate, voiceURI: settings.voice, piperVoice: settings.piperVoice });
 });
 
 $("btn-record-full").addEventListener("click", async () => {
