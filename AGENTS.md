@@ -28,6 +28,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 ## Convenciones
 - camelCase para variables y funciones; UpperCamelCase para tipos.
 - Funciones puras en `lib/`; efectos (I/O, red) acotados a una capa fina.
+- El código escrito debe llevar documentación (comentarios/JSDoc en funciones no triviales); la documentación debe ser en inglés.
 - Toda salida de LLM se asume texto ≥ JSON; extraer JSON robusto (tolera code fences y ruido) antes de usar.
 - Errores de red LLM: envolver en `ProviderError` y dejar que la cadena de fallback pruebe el siguiente proveedor.
 - La llave de Zen se lee de `~/.local/share/opencode/auth.json` (fallback: `ZEN_API_KEY` env). Nunca hardcodear llaves.
