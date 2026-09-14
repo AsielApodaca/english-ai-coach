@@ -1,6 +1,7 @@
 import { BrowserTTS } from "./speech/browser-tts.js";
 import { BrowserSTT } from "./speech/browser-stt.js";
 import { WaveRecorder } from "./speech/recorder-wave.js";
+import { pickStt } from "./speech/stt-pick.js";
 
 const $ = (id) => document.getElementById(id);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -18,7 +19,6 @@ const saveSetting = (k, v) => {
   localStorage.setItem(`engcoach.${k}`, String(v));
 };
 
-let whisperOk = false;
 let allSessionsLoaded = false;
 
 // ---------- tabs ----------
@@ -36,9 +36,9 @@ async function boot() {
   populateVoices();
   bindSettings();
   api("/api/health").then((h) => {
-    whisperOk = h.whisper?.available ?? false;
     renderHealth(h);
     renderWhisperStatus(h);
+    applySttDefault(h);
   });
 }
 boot();
@@ -83,24 +83,39 @@ function renderHealth(h) {
 function renderWhisperStatus(h) {
   const el = $("whisper-status");
   const w = h.whisper;
-  if (!w.available) {
-    el.textContent =
-      "Whisper (local STT) is optional. To enable it: brew install whisper-cpp, then npm run setup. For now the app uses Chrome's speech recognition.";
+  const ok = Boolean(w?.available && w?.modelReady);
+  if (ok) {
+    el.textContent = "Preferred — local & offline";
     return;
   }
-  el.textContent = w.modelReady
-    ? `Whisper ready (${w.model}). First recording downloads the model if needed.`
-    : `Whisper installed. Run "npm run setup" to download the ${w.model} model (or it will download on first use).`;
-  el.style.display = "";
+  if (w?.available) {
+    el.textContent = `Installed — run "npm run setup" to download the ${w.model} model (or it will download on first use).`;
+    return;
+  }
+  el.textContent = "Not installed — brew install whisper-cpp, then npm run setup";
+}
+
+/** Auto-select whisper as the STT engine when it is ready and the user has not chosen otherwise. */
+function applySttDefault(h) {
+  const userChoice = localStorage.getItem("engcoach.stt");
+  const stt = pickStt(h, userChoice);
+  if (stt !== settings.stt) {
+    settings.stt = stt;
+    $("set-stt").value = stt;
+  }
 }
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
-    headers: opts.body ? { "Content-Type": "application/json" } : undefined,
+    headers: typeof opts.body === "string" ? { "Content-Type": "application/json" } : undefined,
     ...opts,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.error ?? `HTTP ${res.status}`);
+    err.code = data.code;
+    throw err;
+  }
   return data;
 }
 
@@ -118,6 +133,7 @@ const sess = {
   recorder: null,
   checking: false,
   lastEval: null,
+  whisperWarned: false,
 };
 
 function providerBody() {
@@ -276,10 +292,11 @@ async function autoplayFragment(f) {
 $("btn-play").addEventListener("click", () => autoplayFragment(currentFragment()));
 
 async function startRecording() {
-  sess.recording = true;
-  $("listening-dot").classList.remove("hidden");
-  resetButtonsRecording();
+  if (sess.recording) return;
   if (settings.stt === "whisper") {
+    sess.recording = true;
+    $("listening-dot").classList.remove("hidden");
+    resetButtonsRecording();
     sess.recorder = new WaveRecorder();
     try {
       await sess.recorder.start();
@@ -288,27 +305,57 @@ async function startRecording() {
       stopRecording();
     }
   } else {
-    sess.stt = new BrowserSTT({
-      onInterim: (t) => {
-        $("transcript").innerHTML = `${escapeHtml(t)}<span class="interim">…</span>`;
-      },
-      onEnd: () => {
-        $("listening-dot").classList.add("hidden");
-        const text = sess.stt?.result();
-        sess.stt = null;
-        sess.transcript = text ?? "";
-        $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
-        updateCheckButton();
-      },
-      onError: (e) => {
-        if (e.error === "not-allowed") {
-          alert("Microphone permission denied. Allow it in Chrome and try again.");
-          stopRecording();
-        }
-      },
-    });
-    sess.stt.start();
+    startBrowserRecording();
   }
+}
+
+/** Start a browser (Web Speech) recording for the current fragment. */
+function startBrowserRecording() {
+  if (sess.recording) return;
+  sess.recording = true;
+  $("listening-dot").classList.remove("hidden");
+  resetButtonsRecording();
+  sess.stt = new BrowserSTT({
+    onInterim: (t) => {
+      $("transcript").innerHTML = `${escapeHtml(t)}<span class="interim">…</span>`;
+    },
+    onEnd: () => {
+      const text = sess.stt?.result();
+      sess.stt = null;
+      sess.transcript = text ?? "";
+      $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
+      updateCheckButton();
+      stopRecording();
+    },
+    onError: (e) => {
+      if (e.error === "not-allowed") {
+        alert("Microphone permission denied. Allow it in Chrome and try again.");
+        stopRecording();
+      }
+    },
+  });
+  let started = false;
+  try {
+    started = sess.stt.start() !== false;
+  } catch {
+    started = false;
+  }
+  if (!started) {
+    sess.stt = null;
+    stopRecording();
+  }
+}
+
+/** Warn once per session when whisper fails and browser recognition takes over. */
+function warnWhisperFallback() {
+  if (sess.whisperWarned) return;
+  sess.whisperWarned = true;
+  toast("Whisper unavailable — using browser recognition");
+}
+
+/** True when the server downloaded the whisper model on demand and asked to record again. */
+function isModelDownloaded(err) {
+  return err?.code === "MODEL_DOWNLOADED" || (err?.message ?? "").includes("Model downloaded");
 }
 
 function stopRecording() {
@@ -322,6 +369,12 @@ function stopRecording() {
     sess.recorder.cancel();
     sess.recorder = null;
   }
+}
+
+/** Stop recording and restore the full-answer controls to idle. */
+function stopFullRecording() {
+  stopRecording();
+  $("btn-record-full").classList.remove("hidden");
 }
 
 function resetButtonsRecording() {
@@ -348,17 +401,28 @@ $("btn-stop").addEventListener("click", async () => {
     const blob = sess.recorder.stop();
     sess.recorder = null;
     $("listening-dot").textContent = "Transcribing locally…";
+    let fallbackStarted = false;
     try {
       const { text } = await api("/api/transcribe", { method: "POST", body: blob });
       sess.transcript = text ?? "";
       $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
       updateCheckButton();
     } catch (err) {
-      $("transcript").textContent = `Transcription failed: ${err.message}`;
+      if (isModelDownloaded(err)) {
+        $("transcript").textContent = err.message;
+      } else {
+        warnWhisperFallback();
+        fallbackStarted = true;
+        sess.recording = false;
+        startBrowserRecording();
+      }
     } finally {
       $("listening-dot").textContent = "Listening…";
-      $("listening-dot").classList.add("hidden");
-      resetButtonsIdle();
+      if (!fallbackStarted) {
+        sess.recording = false;
+        $("listening-dot").classList.add("hidden");
+        resetButtonsIdle();
+      }
     }
   } else {
     stopRecording();
@@ -437,11 +501,12 @@ $("btn-play-full").addEventListener("click", () => {
 });
 
 $("btn-record-full").addEventListener("click", async () => {
-  sess.recording = true;
-  $("listening-dot").classList.remove("hidden");
-  $("btn-record-full").classList.add("hidden");
-  $("btn-stop-full").classList.remove("hidden");
+  if (sess.recording) return;
   if (settings.stt === "whisper") {
+    sess.recording = true;
+    $("listening-dot").classList.remove("hidden");
+    $("btn-record-full").classList.add("hidden");
+    $("btn-stop-full").classList.remove("hidden");
     sess.recorder = new WaveRecorder();
     try {
       await sess.recorder.start();
@@ -452,37 +517,72 @@ $("btn-record-full").addEventListener("click", async () => {
       $("btn-stop-full").classList.add("hidden");
     }
   } else {
-    sess.stt = new BrowserSTT({
-      onInterim: (t) => ($("transcript-full").textContent = t),
-      onEnd: () => {
-        $("listening-dot").classList.add("hidden");
-        const t = sess.stt?.result();
-        sess.stt = null;
-        if (t) {
-          $("transcript-full").textContent = t;
-          $("btn-check-full").disabled = false;
-        }
-      },
-    });
-    sess.stt.start();
+    startFullBrowserRecording();
   }
 });
 
+/** Start a browser (Web Speech) recording for the full answer. */
+function startFullBrowserRecording() {
+  if (sess.recording) return;
+  sess.recording = true;
+  $("listening-dot").classList.remove("hidden");
+  $("btn-record-full").classList.add("hidden");
+  $("btn-stop-full").classList.remove("hidden");
+  sess.stt = new BrowserSTT({
+    onInterim: (t) => ($("transcript-full").textContent = t),
+    onEnd: () => {
+      const t = sess.stt?.result();
+      sess.stt = null;
+      if (t) {
+        $("transcript-full").textContent = t;
+        $("btn-check-full").disabled = false;
+      }
+      stopFullRecording();
+    },
+  });
+  let started = false;
+  try {
+    started = sess.stt.start() !== false;
+  } catch {
+    started = false;
+  }
+  if (!started) {
+    sess.stt = null;
+    stopFullRecording();
+  }
+}
+
 $("btn-stop-full").addEventListener("click", async () => {
-  $("btn-record-full").classList.remove("hidden");
-  $("btn-stop-full").classList.add("hidden");
-  $("listening-dot").classList.add("hidden");
   let text = "";
+  let modelDownloaded = false;
   if (settings.stt === "whisper" && sess.recorder) {
     const blob = sess.recorder.stop();
     sess.recorder = null;
+    $("listening-dot").textContent = "Transcribing locally…";
+    let fallbackStarted = false;
     try {
       const r = await api("/api/transcribe", { method: "POST", body: blob });
       text = r.text ?? "";
     } catch (err) {
-      $("transcript-full").textContent = `Transcription failed: ${err.message}`;
-      return;
+      if (isModelDownloaded(err)) {
+        modelDownloaded = true;
+        $("transcript-full").textContent = err.message;
+      } else {
+        warnWhisperFallback();
+        fallbackStarted = true;
+        sess.recording = false;
+        startFullBrowserRecording();
+      }
+    } finally {
+      $("listening-dot").textContent = "Listening…";
+      if (!fallbackStarted) {
+        sess.recording = false;
+        $("listening-dot").classList.add("hidden");
+        $("btn-record-full").classList.remove("hidden");
+        $("btn-stop-full").classList.add("hidden");
+      }
     }
+    if (fallbackStarted || modelDownloaded) return;
   } else {
     sess.stt?.stop();
     text = sess.stt?.result() ?? "";

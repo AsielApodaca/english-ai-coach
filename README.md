@@ -9,7 +9,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - **Evaluación híbrida** — score 0-100 por word-match determinista + correcciones del LLM (grammar, word-choice, fluency, pronunciation).
 - **Memoria** — el perfil del aprendiz (nivel, debilidades, temas recientes, next step) se inyecta en cada generación/evaluación.
 - **Multi-proveedor LLM con fallback** — OpenCode Zen, Gemini, Cloudflare Workers AI y Ollama local.
-- **STT** — Chrome Web Speech por defecto; whisper.cpp local opcional.
+- **STT** — whisper.cpp local por defecto cuando está instalado (100% offline/privado); Chrome Web Speech como fallback automático.
 
 ## Requisitos
 
@@ -26,7 +26,7 @@ npm start
 Abre http://localhost:3000.
 
 - **Configura tu LLM** copiando `.env.example` a `.env` (ver `LLM_PROVIDER`, `GEMINI_API_KEY`, `CLOUDFLARE_API_TOKEN`). El default `cloudflare` auto-descubre el account id desde tu config de opencode.
-- **Whisper local (opcional)**: `npm run setup` instala `whisper-cpp` (Homebrew), descarga el modelo en `models/` y podrás elegir Whisper como STT en Settings.
+- **Whisper local (opcional)**: `npm run setup` instala `whisper-cpp` (Homebrew) y descarga el modelo en `models/`. Una vez listo, Whisper se auto-selecciona como STT por defecto (100% offline); Web Speech queda como fallback automático y puedes cambiarlo en Settings.
 
 ## Configuración
 
@@ -75,4 +75,4 @@ Los datos de práctica quedan en `data/` (fuera de git) y el audio no se persist
 
 ## Roadmap
 
-Próximo (ver `spec/constitution/roadmap.md`): whisper local por defecto, conversación hablada natural (003), evaluación fonética por audio (004), vocabulario con repaso espaciado, modo sin conexión total y voz humana neural (007).
+Próximo (ver `spec/constitution/roadmap.md`): conversación hablada natural (003), evaluación fonética por audio (004), vocabulario con repaso espaciado, modo sin conexión total y voz humana neural (007).

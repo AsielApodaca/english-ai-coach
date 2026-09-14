@@ -229,7 +229,7 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
     } catch (err) {
       return res.status(500).json({ error: `Model download failed: ${(err as Error).message}` });
     }
-    return res.status(400).json({ error: "Model downloaded. Please record again." });
+    return res.status(400).json({ error: "Model downloaded. Please record again.", code: "MODEL_DOWNLOADED" });
   }
   const tmpDir = join(rootDir, "data", "tmp");
   mkdirSync(tmpDir, { recursive: true });

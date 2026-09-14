@@ -3,10 +3,10 @@
 ## Hecho ✅
 
 1. **001 · Coach core** — flujo completo "Repeat after me": generación de práctica, evaluación híbrida, memoria/progreso, TTS/STT browser y whisper opcional, fallback multi-proveedor LLM, UI en inglés local.
+2. **002 · Whisper local por defecto** — whisper.cpp como motor STT predeterminado cuando está instalado (offline/privado; fallback automático a reconocimiento del navegador).
 
 ## Siguiente 🔜
 
-2. **002 · Whisper local por defecto** — whisper.cpp como motor STT predeterminado cuando esté instalado (offline/privado; fallback a reconocimiento del navegador).
 3. **003 · Conversación hablada natural** — la interacción pasa de "escuchá la frase y repetí" a una conversación viva con la IA: habla, escucha, responde con contexto y corrige sobre la marcha. **Depende de 002 (STT whisper) y 007 (voz neural).** (Renombrada desde "Entrevista simulada".)
    - Orden sugerido: hacer **007 antes de 003** para que la conversación nazca con voz humana, no robótica.
 4. **004 · Evaluación fonética por audio** — sidecar Python (parselmouth/librosa) que analiza fonemas, estrés, ritmo y entonación del audio. Reusa `whisper-cli` de la 002 con `-jt` (word timestamps); degrada a transcripción. (Renombrada desde "Pronunciación por sílabas".)
