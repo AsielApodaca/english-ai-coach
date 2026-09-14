@@ -11,6 +11,8 @@ import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./li
 import { evaluateFragment, generatePracticeSet } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, downloadModel } from "./lib/whisper.ts";
+import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
+import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import { createStorage, type Profile, type Session, type SessionAttempt } from "./lib/storage.ts";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -32,6 +34,9 @@ function candidates(providerRequested?: string): Candidate[] {
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(join(rootDir, "public")));
+
+/** True when the whole stack should stay local (feature 006). */
+const OFFLINE_MODE = env.OFFLINE_MODE === "1" || env.OFFLINE_MODE === "true";
 
 function isCategory(v: unknown): v is Category {
   return typeof v === "string" && v in CATEGORY_STAGES;
@@ -58,6 +63,7 @@ app.get("/api/health", async (_req, res) => {
       model: whisper.modelName,
       hint: whisper.hint,
     },
+    tts: ttsStatus(),
     dataDir: storage.dataDir,
   });
 });
@@ -229,7 +235,7 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
     } catch (err) {
       return res.status(500).json({ error: `Model download failed: ${(err as Error).message}` });
     }
-    return res.status(400).json({ error: "Model downloaded. Please record again." });
+    return res.status(400).json({ error: "Model downloaded. Please record again.", code: "MODEL_DOWNLOADED" });
   }
   const tmpDir = join(rootDir, "data", "tmp");
   mkdirSync(tmpDir, { recursive: true });
@@ -247,6 +253,151 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
 
 app.get("/api/whisper/status", (_req, res) => {
   res.json(checkWhisper(WHISPER_MODEL, rootDir));
+});
+
+// ---------------------------------------------------------------------------
+// TTS — Piper neural voice with edge-tts fallback (feature 007)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the active TTS engine and return a combined status payload.
+ *
+ * Engine resolution:
+ *   - Piper (local) is preferred whenever binary + voice model are present.
+ *   - edge-tts (online) is used only when Piper is missing AND the server is
+ *     not in OFFLINE_MODE (feature 006 forces the local stack).
+ *   - Otherwise no server engine is available and the browser must fall back
+ *     to `speechSynthesis`.
+ */
+function ttsStatus() {
+  const piper = checkPiper(rootDir);
+  const edge = checkEdgeTts();
+  let engine: "piper" | "edge-tts" | null = null;
+  if (piper.available && piper.voiceReady) {
+    engine = "piper";
+  } else if (!OFFLINE_MODE && edge.available) {
+    engine = "edge-tts";
+  }
+  return {
+    engine,
+    offline: OFFLINE_MODE,
+    piper: {
+      available: piper.available,
+      voiceReady: piper.voiceReady,
+      voice: piper.voiceName,
+      hint: piper.hint,
+    },
+    edge: {
+      available: edge.available,
+      voice: DEFAULT_EDGE_VOICE,
+      hint: edge.hint,
+    },
+  };
+}
+
+/** Report TTS readiness for the frontend (same shape as `/api/health`'s tts). */
+app.get("/api/tts/status", (_req, res) => {
+  res.json(ttsStatus());
+});
+
+const TTS_MAX_CHARS = 1000;
+const TTS_MAX_PAUSE_MS = 10_000;
+const RATE_MIN = 0.5;
+const RATE_MAX = 2;
+
+/** Parse a numeric query param within bounds, falling back to `fallback`. */
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+/**
+ * Serve TTS audio as a binary file.
+ *
+ * Query params:
+ *   text        — text to speak (required unless `segments` given; ≤ 1000 chars)
+ *   segments    — repeatable param for multi-fragment synthesis with measured
+ *                 silence *between* them (e.g. "Repeat after me" + fragment);
+ *                 `pauseAfterMs` is the inter-fragment silence
+ *   pauseAfterMs — silence appended after `text` (single-text route), or the
+ *                 pause inserted between `segments` — ≤ 10 s
+ *   rate        — speed factor 0.5–2 (Piper length_scale / edge --rate)
+ *   voice       — Piper voice id (optional; validated against supported voices)
+ *
+ * Engine chain (server-side): Piper → edge-tts (unless OFFLINE_MODE) →
+ * 503 so the frontend can fall back to browser `speechSynthesis`.
+ */
+app.get("/api/tts", async (req, res) => {
+  const segmentsParam = req.query.segments;
+  const segments = Array.isArray(segmentsParam)
+    ? segmentsParam.map(String)
+    : typeof segmentsParam === "string" && segmentsParam
+      ? [segmentsParam]
+      : [];
+  const text = typeof req.query.text === "string" ? req.query.text.trim() : "";
+  const pauseAfterMs = clampNumber(req.query.pauseAfterMs, 0, TTS_MAX_PAUSE_MS, 0);
+  const rate = clampNumber(req.query.rate, RATE_MIN, RATE_MAX, 1);
+  const voice = typeof req.query.voice === "string" && req.query.voice ? req.query.voice : undefined;
+
+  const cleanSegments = segments.map((s) => s.trim()).filter(Boolean);
+  const totalChars = cleanSegments.length
+    ? cleanSegments.reduce((sum, s) => sum + s.length, 0)
+    : text.length;
+
+  if (!cleanSegments.length && !text) {
+    return res.status(400).json({ error: "text or segments query parameter is required." });
+  }
+  if (totalChars === 0) {
+    return res.status(400).json({ error: "Text must not be empty." });
+  }
+  if (totalChars > TTS_MAX_CHARS) {
+    return res.status(400).json({ error: `Text exceeds ${TTS_MAX_CHARS} character limit.` });
+  }
+
+  const status = ttsStatus();
+  if (status.engine === null) {
+    return res.status(503).json({
+      error: "tts-unavailable",
+      hint: status.piper.hint || status.edge.hint || "No local TTS engine is installed.",
+    });
+  }
+
+  // Voice selection only applies to Piper; edge-tts keeps its default voice.
+  if (status.engine === "piper" && voice && !SUPPORTED_VOICES.includes(voice)) {
+    return res.status(400).json({ error: `Unsupported voice "${voice}". Supported: ${SUPPORTED_VOICES.join(", ")}.` });
+  }
+
+  const tmpDir = join(rootDir, "data", "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const ext = status.engine === "edge-tts" ? "mp3" : "wav";
+  const outPath = join(tmpDir, `tts-${randomUUID()}.${ext}`);
+
+  try {
+    let audio: Buffer;
+    let mime: string;
+    if (status.engine === "piper") {
+      const lengthScale = 1 / rate;
+      audio = cleanSegments.length
+        ? await piperSynthesizeSegments(cleanSegments, rootDir, { pauseBetweenMs: pauseAfterMs, lengthScale, voice })
+        : await piperSynthesize(text, rootDir, { pauseAfterMs, lengthScale, voice });
+      mime = "audio/wav";
+    } else {
+      audio = await synthesizeEdge(cleanSegments.length ? cleanSegments.join(" ") : text, rootDir, {
+        rate,
+      });
+      mime = "audio/mpeg";
+    }
+    writeFileSync(outPath, audio);
+    res.setHeader("Content-Type", mime);
+    res.setHeader("Content-Length", String(audio.length));
+    res.sendFile(outPath, () => {
+      rmSync(outPath, { force: true });
+    });
+  } catch (err) {
+    rmSync(outPath, { force: true });
+    res.status(500).json({ error: (err as Error).message });
+  }
 });
 
 app.post("/api/chat", async (req, res) => {

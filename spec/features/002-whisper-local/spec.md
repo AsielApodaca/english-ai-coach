@@ -1,6 +1,6 @@
 # 002 · Whisper local predeterminado
 
-**Estado:** en curso
+**Estado:** implementado ✅
 
 ## Qué hace
 
@@ -29,9 +29,9 @@ Sin credenciales, sin límites de peticiones, 100% offline y privado: las transc
 - [x] `/api/health` reporta `whisper.available` y `modelReady` reales.
 - [x] `/api/transcribe` WAV → texto con `whisper-cli`; si el binario falta, error claro con instrucción (`brew install whisper-cpp`).
 - [x] La UI permite seleccionar Whisper como motor STT y transcribe en local (subiendo el WAV).
-- [ ] Whisper se auto-selecciona como motor por defecto cuando está instalado y con modelo listo.
-- [ ] Web Speech es fallback automático si whisper falla o no está instalado (flujo nunca se rompe).
-- [ ] Settings muestra "Whisper (local)" y lo marca como preferido cuando está listo.
+- [x] Whisper se auto-selecciona como motor por defecto cuando está instalado y con modelo listo (si no hay elección previa del usuario).
+- [x] Web Speech es fallback automático si whisper falla o no está instalado (flujo nunca se rompe).
+- [x] Settings muestra "Whisper (local)" y lo marca como preferido cuando está listo.
 
 ## Fuera de alcance
 
