@@ -36,6 +36,7 @@ async function boot() {
   await tts.allVoices();
   populateVoices();
   bindSettings();
+  bindChat();
   api("/api/health").then((h) => {
     tts.setHealth(h);
     renderHealth(h);
@@ -723,29 +724,98 @@ function exitToSetup() {
 }
 
 // ---------- chat ----------
-$("chat-send").addEventListener("click", sendChat);
-$("chat-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") sendChat();
-});
+const chat = {
+  mode: "text", // "text" | "spoken" | "interview"
+  history: [], // Array<{role:"user"|"assistant", content}> for /api/chat
+  turns: [], // Array<{role:"user"|"assistant", text}> for session save
+  sessionId: null,
+  recording: false,
+  stt: null,
+  recorder: null,
+  whisperWarned: false,
+  interview: null, // { topic, total, index }
+  busy: false, // true while a /api/chat request is in flight
+  epoch: 0, // bumped on mode switch so stale responses are discarded
+};
 
-async function sendChat() {
+function bindChat() {
+  $("chat-send").addEventListener("click", () => sendChat());
+  $("chat-input").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sendChat();
+  });
+  $("chat-mic").addEventListener("click", toggleChatMic);
+  $("chat-interview").addEventListener("click", startInterview);
+  $("chat-end-session").addEventListener("click", endChatSession);
+}
+
+/** Send a chat message. `text` is used when the message came from the mic (spoken mode). */
+async function sendChat(text) {
+  if (chat.busy) return;
   const input = $("chat-input");
-  const msg = input.value.trim();
+  const msg = (text ?? input.value).trim();
   if (!msg) return;
+  chat.busy = true;
+  $("chat-send").disabled = true;
+  const epoch = chat.epoch;
   input.value = "";
-  appendMsg("user", msg);
+  // A pending bubble (live caption from browser STT) becomes the final user message.
+  const pending = $("chat-log").querySelector(".msg.user[data-pending]");
+  if (pending) {
+    pending.textContent = msg;
+    pending.removeAttribute("data-pending");
+  } else {
+    appendMsg("user", msg);
+  }
+  chat.turns.push({ role: "user", text: msg });
+  chat.history.push({ role: "user", content: msg });
+  if (text && chat.mode === "text") enterSpokenMode();
   appendMsg("coach", "…", true);
+  // Mirror the server cap (sanitizeHistory keeps the last 30) so payloads stay bounded.
+  const body = { ...providerBody(), message: msg, history: chat.history.slice(-30) };
+  if (chat.mode === "interview") {
+    body.mode = "interview";
+    body.interview = { index: chat.interview.index, total: chat.interview.total, category: "interviews", level: "B2" };
+  } else {
+    body.mode = "chat";
+  }
   try {
-    const data = await api("/api/chat", { method: "POST", body: JSON.stringify({ ...providerBody(), message: msg }) });
+    const data = await api("/api/chat", { method: "POST", body: JSON.stringify(body) });
+    if (epoch !== chat.epoch) return; // a mode switch invalidated this response
     updateLastMsg(data.reply);
+    chat.history.push({ role: "assistant", content: data.reply });
+    chat.turns.push({ role: "assistant", text: data.reply });
+    if (chat.mode === "spoken" || chat.mode === "interview") {
+      await speakChat(data.reply);
+    }
+    if (chat.mode === "interview" && chat.interview && !data.done) {
+      if (data.nextQuestion) {
+        appendMsg("coach", data.nextQuestion);
+        chat.history.push({ role: "assistant", content: data.nextQuestion });
+        chat.turns.push({ role: "assistant", text: data.nextQuestion });
+        chat.interview.index += 1;
+        showChatBadge(`Interview — question ${chat.interview.index}/${chat.interview.total}`);
+        await speakChat(data.nextQuestion);
+      }
+    }
+    if (chat.mode === "interview" && chat.interview && data.done) {
+      await finishInterview();
+    }
+    if (data.correction) {
+      appendMsg("coach", data.correction, false, "note");
+      if (data.correction.length < 120) await speakChat(data.correction);
+    }
   } catch (err) {
-    updateLastMsg(`(error) ${err.message}`);
+    if (epoch === chat.epoch) updateLastMsg(`(error) ${err.message}`);
+  } finally {
+    chat.busy = false;
+    $("chat-send").disabled = false;
+    if (epoch === chat.epoch) setChatMicIdle();
   }
 }
 
-function appendMsg(role, text, isPlaceholder = false) {
+function appendMsg(role, text, isPlaceholder = false, extraClass = "") {
   const div = document.createElement("div");
-  div.className = `msg ${role}`;
+  div.className = `msg ${role}${extraClass ? ` ${extraClass}` : ""}`;
   if (isPlaceholder) div.dataset.placeholder = "";
   div.textContent = text;
   $("chat-log").appendChild(div);
@@ -758,6 +828,335 @@ function updateLastMsg(text) {
   const last = nodes[nodes.length - 1];
   last.textContent = text;
   $("chat-log").scrollTop = $("chat-log").scrollHeight;
+}
+
+/** Update the last user bubble with a plain-text caption (safe: content is escaped). */
+function updateLastUserMsg(text, live = false) {
+  const nodes = $("chat-log").querySelectorAll(".msg.user");
+  let last = nodes[nodes.length - 1];
+  if (!last) last = appendMsg("user", "");
+  last.innerHTML = `${escapeHtml(text)}${live ? '<span class="interim">…</span>' : ""}`;
+  $("chat-log").scrollTop = $("chat-log").scrollHeight;
+}
+
+// --- mic / spoken input ---
+
+function toggleChatMic() {
+  if (chat.recording) {
+    if (settings.stt === "whisper" && chat.recorder) {
+      transcribeChatRecording();
+    } else {
+      chat.stt?.stop(); // onEnd fires and sends the turn
+    }
+  } else {
+    startChatRecording();
+  }
+}
+
+async function startChatRecording() {
+  if (chat.recording) return;
+  const engine = settings.stt === "whisper" ? "whisper" : "browser";
+  if (engine === "browser" && !new BrowserSTT({}).isSupported()) {
+    toast("Speech recognition unavailable — type your message instead.");
+    return;
+  }
+  chat.recording = true;
+  setChatMicRecording();
+  $("chat-listening").classList.remove("hidden");
+  $("chat-listening").textContent = "Listening…";
+  if (engine === "whisper") {
+    chat.recorder = new WaveRecorder();
+    try {
+      await chat.recorder.start();
+    } catch (err) {
+      alert(`Microphone error: ${err.message}`);
+      stopChatRecording();
+    }
+  } else {
+    startBrowserRecordingChat();
+  }
+}
+
+/** Start a browser (Web Speech) recording for a chat message. */
+function startBrowserRecordingChat() {
+  if (chat.recording) return;
+  chat.recording = true;
+  setChatMicRecording();
+  $("chat-listening").classList.remove("hidden");
+  $("chat-listening").textContent = "Listening…";
+  const bubble = appendMsg("user", "");
+  bubble.dataset.pending = "";
+  chat.stt = new BrowserSTT({
+    onInterim: (t) => {
+      updateLastUserMsg(t, true);
+    },
+    onEnd: () => {
+      const text = chat.stt?.result();
+      chat.stt = null;
+      stopChatRecording();
+      if (text) {
+        sendChat(text);
+      } else {
+        updateLastUserMsg("Nothing heard — try again.");
+      }
+    },
+    onError: (e) => {
+      if (e.error === "not-allowed") {
+        alert("Microphone permission denied. Allow it in Chrome and try again.");
+        stopChatRecording();
+      }
+    },
+  });
+  let started = false;
+  try {
+    started = chat.stt.start() !== false;
+  } catch {
+    started = false;
+  }
+  if (!started) {
+    chat.stt = null;
+    stopChatRecording();
+  }
+}
+
+/** Stop whisper recording and transcribe the captured audio. */
+async function transcribeChatRecording() {
+  const blob = chat.recorder.stop();
+  chat.recorder = null;
+  $("chat-listening").textContent = "Transcribing locally…";
+  let fallbackStarted = false;
+  try {
+    const { text } = await api("/api/transcribe", { method: "POST", body: blob });
+    stopChatRecording();
+    if (text) {
+      sendChat(text);
+    } else {
+      updateLastUserMsg("Nothing heard — try again.");
+    }
+  } catch (err) {
+    if (isModelDownloaded(err)) {
+      stopChatRecording();
+      appendMsg("coach", `${err.message} — press the mic and record again.`, false, "note");
+    } else {
+      warnChatFallback();
+      fallbackStarted = true;
+      chat.recording = false;
+      startBrowserRecordingChat();
+    }
+  } finally {
+    $("chat-listening").textContent = "Listening…";
+    if (!fallbackStarted) $("chat-listening").classList.add("hidden");
+  }
+}
+
+/** Warn once per chat session when whisper fails and browser recognition takes over. */
+function warnChatFallback() {
+  if (chat.whisperWarned) return;
+  chat.whisperWarned = true;
+  toast("Whisper unavailable — using browser recognition");
+}
+
+function stopChatRecording() {
+  chat.recording = false;
+  $("chat-listening").classList.add("hidden");
+  $("chat-listening").textContent = "Listening…";
+  setChatMicIdle();
+  if (chat.stt) {
+    chat.stt.stop();
+    chat.stt = null;
+  }
+  if (chat.recorder) {
+    chat.recorder.cancel();
+    chat.recorder = null;
+  }
+}
+
+function setChatMicRecording() {
+  const mic = $("chat-mic");
+  mic.textContent = "⏹";
+  mic.classList.add("recording");
+  mic.title = "Stop recording";
+}
+
+function setChatMicIdle() {
+  const mic = $("chat-mic");
+  mic.textContent = "🎤";
+  mic.classList.remove("recording");
+  mic.title = "Speak your message";
+  mic.disabled = false;
+}
+
+/** Speak a coach reply; the mic stays locked until TTS finishes. */
+async function speakChat(text) {
+  $("chat-mic").disabled = true;
+  try {
+    await tts.speak(text, { rate: settings.rate, voiceURI: settings.voice, piperVoice: settings.piperVoice });
+  } finally {
+    $("chat-mic").disabled = false;
+  }
+}
+
+// --- modes ---
+
+function showChatBadge(text) {
+  const badge = $("chat-mode-badge");
+  badge.textContent = text;
+  badge.classList.remove("hidden");
+}
+
+function enterSpokenMode() {
+  chat.mode = "spoken";
+  if (!chat.sessionId) chat.sessionId = crypto.randomUUID();
+  showChatBadge("Spoken mode — reply aloud");
+  $("chat-end-session").classList.remove("hidden");
+}
+
+async function startInterview() {
+  if (chat.mode === "interview") return;
+  if (chat.recording) stopChatRecording();
+  chat.epoch++; // invalidate in-flight /api/chat responses
+  $("chat-interview").disabled = true;
+  try {
+    const data = await api("/api/interview/start", {
+      method: "POST",
+      body: JSON.stringify({ ...providerBody(), category: "interviews", level: "B2" }),
+    });
+    chat.mode = "interview";
+    if (!chat.sessionId) chat.sessionId = crypto.randomUUID();
+    chat.history = [];
+    chat.turns = [];
+    chat.interview = { topic: data.topic, total: data.total, index: 1 };
+    $("chat-log").innerHTML = "";
+    $("interview-score").classList.add("hidden");
+    $("interview-score").innerHTML = "";
+    appendMsg("coach", data.question);
+    chat.history.push({ role: "assistant", content: data.question });
+    chat.turns.push({ role: "assistant", text: data.question });
+    showChatBadge(`Interview — question 1/${data.total}`);
+    $("chat-end-session").classList.remove("hidden");
+    await speakChat(data.question);
+  } catch (err) {
+    alert(`Could not start the interview: ${err.message}`);
+  } finally {
+    $("chat-interview").disabled = chat.mode === "interview";
+  }
+}
+
+/** Score and save the finished interview; returns false when scoring failed. */
+async function finishInterview() {
+  showChatBadge("Interview complete");
+  $("chat-interview").disabled = false;
+  if (!chat.turns.some((t) => t.role === "user")) {
+    chat.mode = "text";
+    $("chat-end-session").classList.add("hidden");
+    return true;
+  }
+  try {
+    const data = await api("/api/interview/score", {
+      method: "POST",
+      body: JSON.stringify({ transcript: buildChatTranscript(), level: "B2", ...providerBody() }),
+    });
+    renderInterviewScore(data);
+    await saveChatSession("interview", data);
+    chat.mode = "text";
+    $("chat-end-session").classList.add("hidden");
+    return true;
+  } catch (err) {
+    alert(`Could not score the interview: ${err.message}`);
+    return false;
+  }
+}
+
+function buildChatTranscript() {
+  return chat.turns.map((t) => (t.role === "user" ? `A: ${t.text}` : `Q: ${t.text}`)).join("\n");
+}
+
+function renderInterviewScore(data) {
+  const el = $("interview-score");
+  el.classList.remove("hidden");
+  const score = data.score;
+  const color = score >= 70 ? "#34d399" : score >= 50 ? "#fbbf24" : "#f87171";
+  const verdict = score >= 70 ? "Great interview!" : score >= 50 ? "Solid effort — keep practicing." : "Good start — review the feedback below.";
+  const strengths = (data.strengths ?? []).map((s) => `<div class="tip">${escapeHtml(s)}</div>`).join("");
+  const improvements = (data.improvements ?? []).map((i) => `<div class="issue"><span class="cat">Improve</span> — ${escapeHtml(i)}</div>`).join("");
+  el.innerHTML = `
+    <div class="interview-score-head">Interview score</div>
+    <div class="score-row">
+      <div class="score-ring" style="background:conic-gradient(${color} ${score * 3.6}deg, var(--panel-2) 0deg)">
+        <span class="score-num" style="color:${color}">${score}</span>
+      </div>
+      <div class="verdict-text">${verdict}</div>
+    </div>
+    <div class="issues">${improvements || `<div class="tip">No improvements needed — clean interview.</div>`}</div>
+    <div class="tips">${strengths || `<div class="tip">No strengths recorded.</div>`}</div>`;
+}
+
+async function endChatSession() {
+  let ok = true;
+  if (chat.mode === "interview") {
+    ok = await finishInterview();
+  } else if (chat.turns.length > 0) {
+    await saveChatSession("chat");
+  }
+  if (ok) {
+    resetChatSession();
+    toast("Session saved");
+  }
+}
+
+function resetChatSession() {
+  stopChatRecording();
+  chat.mode = "text";
+  chat.history = [];
+  chat.turns = [];
+  chat.sessionId = null;
+  chat.interview = null;
+  chat.whisperWarned = false;
+  $("chat-log").innerHTML = "";
+  $("chat-mode-badge").classList.add("hidden");
+  $("chat-end-session").classList.add("hidden");
+  $("chat-interview").disabled = false;
+  $("chat-listening").classList.add("hidden");
+  setChatMicIdle();
+}
+
+async function saveChatSession(category, scoreData) {
+  const firstUserTurn = chat.turns.find((t) => t.role === "user");
+  const payload = {
+    id: chat.sessionId,
+    category,
+    level: "B2",
+    provider: settings.provider,
+    question: firstUserTurn?.text ?? "Free spoken conversation",
+    context: chat.interview?.topic ?? category,
+    turns: chat.turns,
+  };
+  if (category === "interview" && scoreData) {
+    payload.fragments = [
+      {
+        id: "overall",
+        stage: "Interview",
+        text: chat.interview?.topic ?? "Overall",
+        attempts: [
+          {
+            text: buildChatTranscript(),
+            score: scoreData.score,
+            missing: [],
+            extra: [],
+            issues: (scoreData.improvements ?? []).map((i) => ({ category: "other", message: i })),
+            verdict: scoreData.score >= 70 ? "great" : "almost",
+          },
+        ],
+        passed: scoreData.score >= 70,
+      },
+    ];
+  }
+  try {
+    const r = await api("/api/session/save", { method: "POST", body: JSON.stringify(payload) });
+    if (r.nextStep) toast(`Next step: ${r.nextStep.focus}`);
+  } catch (err) {
+    alert(`Could not save the session: ${err.message}`);
+  }
 }
 
 // ---------- progress ----------

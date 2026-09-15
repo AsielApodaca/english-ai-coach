@@ -63,3 +63,31 @@ test("storage: corrupted profile falls back to defaults", () => {
   const p = s.loadProfile();
   assert.equal(p.level, "B1");
 });
+
+test("storage: session turns round-trip through save and load", () => {
+  const s = createStorage(dir);
+  const session: Session = {
+    id: "conv1",
+    date: new Date().toISOString(),
+    category: "free",
+    level: "B2",
+    provider: "zen",
+    question: "",
+    context: "",
+    fragments: [],
+    turns: [
+      { role: "user", text: "I decided for this approach." },
+      { role: "assistant", text: "Nice — why did you pick it?" },
+    ],
+  };
+  s.saveSession(session);
+  const loaded = s.loadSession("conv1");
+  assert.deepEqual(loaded?.turns, session.turns);
+});
+
+test("storage: session without turns loads with turns undefined", () => {
+  const s = createStorage(dir);
+  s.saveSession({ id: "no-turns", date: "2026-01-01", category: "free", level: "B1", provider: "zen", question: "q", context: "", fragments: [] });
+  const loaded = s.loadSession("no-turns");
+  assert.equal(loaded?.turns, undefined);
+});

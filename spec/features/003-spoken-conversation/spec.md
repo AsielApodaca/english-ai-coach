@@ -1,6 +1,6 @@
 # 003 · Conversación hablada natural
 
-**Estado:** backlog (no iniciado)
+**Estado:** hecho ✅ (rama `feature/spoken-conversation`)
 
 ## Qué hace
 
@@ -14,15 +14,15 @@ El objetivo es que el usuario practique inglés técnico hablado como en una con
 
 ## Criterios de aceptación
 
-- [ ] Un botón de micrófono en la tab de chat convierte la conversación a hablada (habla → escucha → responde) sin "Repeat after me".
-- [ ] La respuesta de la IA se reproduce por TTS al terminar de escribir; mientras el usuario habla se muestra su subtítulo en vivo.
-- [ ] La voz de la IA es neural y natural (depende de la feature 007); si 007 no está, usa `speechSynthesis` sin romper.
-- [ ] La IA responde según lo que el usuario dijo (contexto), hace follow-ups y aclaraciones como un humano.
-- [ ] Correcciones sobre la marcha: el LLM detecta errores graves y los aclara sin romper el flujo; `extractJSON` tolerante igual que en 001.
-- [ ] El turno hablado funciona con Whisper local (preferido, feature 002) o browser STT como fallback.
-- [ ] Modo 'Interview' derivado: 4-6 preguntas encadenadas, follow-up según la respuesta, puntuación compuesta al terminar.
-- [ ] La conversación se guarda como sesión (reutiliza `Session`/`storage`) y alimenta el perfil/next-step.
-- [ ] Degrada con elegancia si STT/TTS del navegador no están disponibles (aviso claro, el chat por texto sigue funcionando).
+- [x] Un botón de micrófono en la tab de chat convierte la conversación a hablada (habla → escucha → responde) sin "Repeat after me".
+- [x] La respuesta de la IA se reproduce por TTS al terminar de escribir; mientras el usuario habla se muestra su subtítulo en vivo.
+- [x] La voz de la IA es neural y natural (depende de la feature 007); si 007 no está, usa `speechSynthesis` sin romper.
+- [x] La IA responde según lo que el usuario dijo (contexto), hace follow-ups y aclaraciones como un humano.
+- [x] Correcciones sobre la marcha: el LLM detecta errores graves y los aclara sin romper el flujo; `extractJSON` tolerante igual que en 001.
+- [x] El turno hablado funciona con Whisper local (preferido, feature 002) o browser STT como fallback.
+- [x] Modo 'Interview' derivado: 4-6 preguntas encadenadas, follow-up según la respuesta, puntuación compuesta al terminar.
+- [x] La conversación se guarda como sesión (reutiliza `Session`/`storage` y añade `turns`) y alimenta el perfil/next-step.
+- [x] Degrada con elegancia si STT/TTS del navegador no están disponibles (aviso claro, el chat por texto sigue funcionando).
 
 ## Fuera de alcance
 

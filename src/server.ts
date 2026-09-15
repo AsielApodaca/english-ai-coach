@@ -5,15 +5,16 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
-import { buildProviders, completeWithFallback, providerById, providerStatus } from "./lib/providers/index.ts";
+import { buildProviders, providerById, providerStatus } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
 import { evaluateFragment, generatePracticeSet } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
+import { conversationTurn, interviewTurn, startInterview, interviewScore } from "./lib/conversation.ts";
 import { checkWhisper, transcribeWav, downloadModel } from "./lib/whisper.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
-import { createStorage, type Profile, type Session, type SessionAttempt } from "./lib/storage.ts";
+import { createStorage, type Profile, type Session, type SessionAttempt, type ConversationTurn } from "./lib/storage.ts";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = process.env as NodeJS.ProcessEnv;
@@ -43,6 +44,20 @@ function isCategory(v: unknown): v is Category {
 }
 function isLevel(v: unknown): v is Level {
   return v === "B1" || v === "B2" || v === "C1";
+}
+
+/** Keep only valid conversation turns from a client payload, capped at the last 30. */
+function sanitizeHistory(history: unknown): ChatMessage[] {
+  if (!Array.isArray(history)) return [];
+  const clean: ChatMessage[] = [];
+  for (const entry of history) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const { role, content } = entry as { role?: unknown; content?: unknown };
+    if ((role === "user" || role === "assistant") && typeof content === "string") {
+      clean.push({ role, content });
+    }
+  }
+  return clean.slice(-30);
 }
 
 app.get("/api/health", async (_req, res) => {
@@ -144,8 +159,15 @@ function persistAttempt(params: {
 }
 
 app.post("/api/session/save", async (req, res) => {
-  const { id, category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer } =
+  const { id, category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer, turns } =
     req.body ?? {};
+  const turnsArray: ConversationTurn[] = Array.isArray(turns)
+    ? turns.filter((t): t is ConversationTurn => {
+        if (typeof t !== "object" || t === null) return false;
+        const { role, text } = t as { role?: unknown; text?: unknown };
+        return (role === "user" || role === "assistant") && typeof text === "string";
+      })
+    : [];
   const session: Session = {
     id: typeof id === "string" && id ? id : randomUUID(),
     date: new Date().toISOString(),
@@ -163,6 +185,7 @@ app.post("/api/session/save", async (req, res) => {
           passed: Boolean(f.passed),
         }))
       : [],
+    ...(turnsArray.length ? { turns: turnsArray } : {}),
     ...(fullAnswer ? { fullAnswer } : {}),
   };
   storage.saveSession(session);
@@ -401,26 +424,86 @@ app.get("/api/tts", async (req, res) => {
 });
 
 app.post("/api/chat", async (req, res) => {
-  const { message, provider: providerReq } = req.body ?? {};
+  const { message, provider: providerReq, mode = "chat", history, interview } = req.body ?? {};
   if (typeof message !== "string" || message.trim().length === 0) {
     return res.status(400).json({ error: "message is required." });
   }
   const profile = storage.loadProfile();
   const sessions = storage.loadAllSessions();
   const memory = buildLearnerMemory(profile, sessions);
-  const messages: ChatMessage[] = [
-    { role: "system", content: `You are a friendly English speaking coach. Answer in plain English. Keep it helpful and concise.\nLearner memory: ${memory}` },
-    { role: "user", content: message },
-  ];
+  const messages: ChatMessage[] = [...sanitizeHistory(history), { role: "user", content: message }];
+  const isInterview = mode === "interview";
   try {
-    const result = await completeWithFallback(candidates(providerReq), messages, { maxTokens: 4096 });
-    res.json({ reply: result.text, provider: result.provider });
+    if (isInterview) {
+      const idx = Math.max(0, Math.floor(Number(interview?.index) || 0));
+      const tot = Math.min(6, Math.max(4, Math.floor(Number(interview?.total) || 5)));
+      const cat = isCategory(interview?.category) ? (interview.category as Category) : "interviews";
+      const lvl = isLevel(interview?.level) ? (interview.level as Level) : "B2";
+      const result = await interviewTurn(candidates(providerReq), {
+        messages,
+        learnerMemory: memory,
+        category: cat,
+        level: lvl,
+        index: idx,
+        total: tot,
+      });
+      return res.json({ reply: result.reply, nextQuestion: result.nextQuestion, done: result.done, provider: result.provider });
+    }
+    const result = await conversationTurn(candidates(providerReq), { messages, learnerMemory: memory });
+    return res.json({ reply: result.reply, correction: result.correction, provider: result.provider });
   } catch (err) {
+    if (isInterview) {
+      return res.json({
+        reply: "Got it — good answer. Let's move to the next question.",
+        nextQuestion: null,
+        done: true,
+        provider: "local",
+        offline: true,
+      });
+    }
     const mail = /^\S+@\S+\.\S+$/.test(message.trim());
     const fallback = mail
       ? "Got it. Try: \"I'm writing to ask about…\" or \"Would it be possible to…?\" — phrase requests as questions for a more professional tone."
       : "Here's a cleaner way to say it. You can ask me to correct any specific phrase you're unsure about.";
-    res.json({ reply: fallback, provider: "local", offline: true });
+    res.json({ reply: fallback, correction: null, provider: "local", offline: true });
+  }
+});
+
+app.post("/api/interview/start", async (req, res) => {
+  const { category = "interviews", level = "B2", provider: providerReq, topicHint } = req.body ?? {};
+  if (!isCategory(category) || !isLevel(level)) {
+    return res.status(400).json({ error: "Invalid category or level." });
+  }
+  const profile = storage.loadProfile();
+  const sessions = storage.loadAllSessions();
+  const learnerMemory = buildLearnerMemory(profile, sessions);
+  try {
+    const result = await startInterview(candidates(providerReq), {
+      category,
+      level,
+      learnerMemory,
+      topicHint: typeof topicHint === "string" ? topicHint : undefined,
+    });
+    res.json({ topic: result.topic, total: result.total, question: result.question, provider: result.provider });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/api/interview/score", async (req, res) => {
+  const { transcript, level = "B2", provider: providerReq } = req.body ?? {};
+  if (typeof transcript !== "string" || transcript.trim().length === 0) {
+    return res.status(400).json({ error: "transcript is required." });
+  }
+  if (!isLevel(level)) return res.status(400).json({ error: "Invalid level." });
+  const profile = storage.loadProfile();
+  const sessions = storage.loadAllSessions();
+  const learnerMemory = buildLearnerMemory(profile, sessions);
+  try {
+    const result = await interviewScore(candidates(providerReq), { transcript, learnerMemory, level });
+    res.json({ score: result.score, strengths: result.strengths, improvements: result.improvements, provider: result.provider });
+  } catch (err) {
+    res.status(502).json({ error: (err as Error).message });
   }
 });
 

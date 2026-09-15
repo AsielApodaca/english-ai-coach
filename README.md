@@ -5,7 +5,8 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 ## Funcionalidades
 
 - **Práctica guiada** — elige categoría (Entrevistas, Método STAR, Daily standup, Tema libre) y nivel (B1–C1); la IA genera pregunta + respuesta modelo fragmentada.
-- **Conversación hablada** — subtítulos en vivo etiquetados Coach/You, palabras faltantes resaltadas en la frase del coach, extras resaltadas en lo que dijiste, y feedback hablado (voz mejorable; roadmap → feature 007).
+- **Conversación hablada** — el chat libre pasa a voz↔voz: micrófono (Whisper local o Web Speech), la IA responde con contexto por TTS neural, correcciones sobre la marcha y subtítulos en vivo Coach/You.
+- **Modo Interview** — entrevista simulada de 4-6 preguntas encadenadas con follow-ups según tu respuesta y puntuación compuesta al terminar.
 - **Evaluación híbrida** — score 0-100 por word-match determinista + correcciones del LLM (grammar, word-choice, fluency, pronunciation).
 - **Memoria** — el perfil del aprendiz (nivel, debilidades, temas recientes, next step) se inyecta en cada generación/evaluación.
 - **Multi-proveedor LLM con fallback** — OpenCode Zen, Gemini, Cloudflare Workers AI y Ollama local.
@@ -44,7 +45,9 @@ Abre http://localhost:3000.
 - `GET /api/health` — estado de proveedores LLM + Whisper.
 - `POST /api/practice/new` — genera un set de práctica `{ category?, level?, provider?, personalized? }`.
 - `POST /api/evaluate` — evalúa un intento `{ target, userText, question?, level?, sessionId?, fragmentId? }`.
-- `POST /api/session/save` — guarda la sesión y calcula next step.
+- `POST /api/chat` — turno de conversación `{ message, mode?: "chat"|"interview", history?, interview? }`; respuestas con contexto.
+- `POST /api/interview/start` · `POST /api/interview/score` — inicia una entrevista encadenada y la puntúa al terminar.
+- `POST /api/session/save` — guarda la sesión (acepta `turns` de conversaciones) y calcula next step.
 - `GET /api/history` · `GET /api/profile` · `GET /api/next-step` — historial, perfil y siguiente paso.
 - `POST /api/transcribe` — transcripción local con whisper.cpp.
 
@@ -75,4 +78,4 @@ Los datos de práctica quedan en `data/` (fuera de git) y el audio no se persist
 
 ## Roadmap
 
-Próximo (ver `spec/constitution/roadmap.md`): conversación hablada natural (003), evaluación fonética por audio (004), vocabulario con repaso espaciado, modo sin conexión total y voz humana neural (007).
+Próximo (ver `spec/constitution/roadmap.md`): evaluación fonética por audio (004), vocabulario con repaso espaciado (005) y modo sin conexión total (006).

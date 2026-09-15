@@ -106,13 +106,23 @@
 
       <!-- CHAT -->
       <section id="tab-chat" class="tab-panel">
-        <h1>Free chat</h1>
-        <p class="muted">Talk with the coach about anything. Try: "Give me a tricky interview question and evaluate my answer."</p>
+        <div class="chat-head">
+          <h1>Free chat</h1>
+          <div class="chat-actions">
+            <button id="chat-interview" class="ghost">Interview</button>
+            <button id="chat-end-session" class="ghost hidden">End session</button>
+          </div>
+        </div>
+        <p class="muted">Talk with the coach about anything — type a message or press 🎤 to speak. Try: "Give me a tricky interview question and evaluate my answer."</p>
+        <div id="chat-mode-badge" class="note hidden"></div>
         <div id="chat-log" class="chat-log"></div>
+        <div id="chat-listening" class="listening hidden">Listening…</div>
         <div class="chat-input-row">
+          <button id="chat-mic" class="record" title="Speak your message">🎤</button>
           <input id="chat-input" type="text" placeholder="Type a message…" />
           <button id="chat-send" class="primary">Send</button>
         </div>
+        <div id="interview-score" class="feedback-block hidden"></div>
       </section>
 
       <!-- PROGRESS -->

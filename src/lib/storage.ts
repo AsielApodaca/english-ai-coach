@@ -24,6 +24,12 @@ export interface SessionFragment {
   passed: boolean;
 }
 
+/** One spoken/text turn of a free conversation, as persisted in a session. */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
 export interface Session {
   id: string;
   date: string;
@@ -33,6 +39,7 @@ export interface Session {
   question: string;
   context: string;
   fragments: SessionFragment[];
+  turns?: ConversationTurn[];
   fullAnswer?: {
     text: string;
     score?: number;
