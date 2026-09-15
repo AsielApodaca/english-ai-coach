@@ -5,8 +5,8 @@ import type { ChatMessage, Provider, CompleteOptions } from "./types.ts";
 import { ProviderError } from "./types.ts";
 
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
-/** GLM-4.7-flash: free on Workers Free plan as of Sep 2026 (frontier GLM-5.x require paid). */
-export const CLOUDFLARE_DEFAULT_MODEL = "@cf/zai-org/glm-4.7-flash";
+/** Llama-4-Scout-17B: free on Workers Free plan (10k neurons/day) and fast (~500ms), best fit for live tutor replies. GLM-4.7-flash burns tokens on reasoning; GLM-5.x need paid plan. */
+export const CLOUDFLARE_DEFAULT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 function discoverAccountId(): string | undefined {
   const candidates = ["opencode.json", "opencode.jsonc"];

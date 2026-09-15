@@ -8,7 +8,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const tts = new BrowserTTS();
 const settings = {
-  provider: localStorage.getItem("engcoach.provider") ?? "zen",
+  provider: localStorage.getItem("engcoach.provider") ?? "cloudflare",
   stt: localStorage.getItem("engcoach.stt") ?? "browser",
   voice: localStorage.getItem("engcoach.voice") ?? "",
   piperVoice: localStorage.getItem("engcoach.piperVoice") ?? "en_US-amy-medium",
