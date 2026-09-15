@@ -13,5 +13,8 @@ node_modules/
 .DS_Store
 *.swp
 
+# Downloaded model weights (whisper, piper voices)
+models/
+
 # TypeScript build artifacts (none expected; native type stripping)
 dist/

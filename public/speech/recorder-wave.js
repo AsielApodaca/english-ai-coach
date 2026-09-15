@@ -1,10 +1,21 @@
-/** Records microphone audio and exports it as a WAV blob (for local whisper). */
+/** Records microphone audio and exports it as a WAV blob (for local whisper).
+ *  Supports an optional `onSilenceStop` callback for auto-flow: when audio
+ *  level stays below a threshold for a sustained period the recording
+ *  stops automatically. */
 export class WaveRecorder {
-  constructor() {
+  /** @param {{onSilenceStop?: ()=>void}} [opts] */
+  constructor(opts) {
     this.ctx = null;
     this.stream = null;
     this.recording = false;
     this.samples = [];
+    /** Callback fired when silence is detected and recording auto-stops. */
+    this.onSilenceStop = opts?.onSilenceStop ?? null;
+    // silence detection state
+    this._silenceThreshold = 0.015;
+    this._silenceDurationMs = 2000;
+    this._silenceStart = 0;
+    this._hasSpeech = false;
   }
 
   async start() {
@@ -12,12 +23,29 @@ export class WaveRecorder {
     this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     this.ctx = new AudioContext();
     this.sampleRate = this.ctx.sampleRate;
+    this._hasSpeech = false;
+    this._silenceStart = 0;
     const source = this.ctx.createMediaStreamSource(this.stream);
     const processor = this.ctx.createScriptProcessor(4096, 1, 1);
     processor.onaudioprocess = (e) => {
-      if (this.recording) {
-        const ch = e.inputBuffer.getChannelData(0);
-        this.samples.push(new Float32Array(ch));
+      if (!this.recording) return;
+      const ch = e.inputBuffer.getChannelData(0);
+      this.samples.push(new Float32Array(ch));
+      // Silence detection: compute RMS of this block
+      let sum = 0;
+      for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
+      const rms = Math.sqrt(sum / ch.length);
+      const now = performance.now();
+      if (rms > this._silenceThreshold) {
+        this._hasSpeech = true;
+        this._silenceStart = 0;
+      } else if (this._hasSpeech) {
+        if (!this._silenceStart) this._silenceStart = now;
+        else if (now - this._silenceStart > this._silenceDurationMs) {
+          // Silence sustained long enough → auto-stop
+          this.recording = false;
+          this.onSilenceStop?.();
+        }
       }
     };
     source.connect(processor);

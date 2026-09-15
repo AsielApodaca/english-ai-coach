@@ -11,6 +11,7 @@ export interface PracticeFragment {
   id: string;
   stage: string;
   text: string;
+  coach_intro?: string;
 }
 
 export interface PracticeSet {
@@ -41,11 +42,18 @@ const SYSTEM_GENERATE = `You are an expert English speaking coach for software e
 You create interview/practice answers split into short spoken fragments. Each fragment must be a natural, short chunk (5 to 12 words). The complete answer must be 60 to 140 words total.
 The user is a Spanish speaker; level tells you the target difficulty (B1 = simple vocabulary and short sentences, C1 = richer and more technical).
 Use the learner memory block to personalize the answer: reuse words the user struggles with, reference recent topics if useful, and keep difficulty around the user's level.
+IMPORTANT: Each fragment must include a "coach_intro" — a short, natural 1-sentence intro the coach speaks BEFORE the fragment. This intro explains the context or gives a quick tip. Examples:
+- "In an interview, you'd start by introducing yourself. Here's how:"
+- "When describing a challenge, be specific. Listen:"
+- "This is a great closing line for any answer."
+- "For daily standups, keep it brief and focused."
+The "coach_intro" should be conversational, encouraging, and help the learner understand WHY they are saying this fragment. Keep it under 15 words.
 Respond ONLY with strict JSON matching this schema (no markdown, no commentary):
-{"question": string, "context": string, "fragments": [{"id": string, "stage": string, "text": string}]}
+{"question": string, "context": string, "fragments": [{"id": string, "stage": string, "text": string, "coach_intro": string}]}
 - question: the question the coach asks aloud.
 - context: a short coaching note (what to focus on while repeating this answer).
 - fragments: consecutive chunks that assemble into the full spoken answer, ordered. Use exactly these allowed stages: {stages}.
+- coach_intro: a short natural intro sentence the coach speaks before reading the fragment. Under 15 words.
 - id: sequential like "f1", "f2"...`.replace(/\n\s+/g, "\n");
 
 function generatePrompt(category: Category, level: Level, learnerMemory: string, personalized: boolean): { system: string; user: string } {
@@ -71,7 +79,7 @@ export async function generatePracticeSet(
     set: {
       question: res.data.question,
       context: res.data.context,
-      fragments: fragments.map((f, i) => ({ id: f.id || `f${i + 1}`, stage: f.stage, text: f.text })),
+      fragments: fragments.map((f, i) => ({ id: f.id || `f${i + 1}`, stage: f.stage, text: f.text, coach_intro: f.coach_intro })),
     },
   };
 }

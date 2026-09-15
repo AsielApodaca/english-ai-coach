@@ -14,6 +14,7 @@ const settings = {
   piperVoice: localStorage.getItem("engcoach.piperVoice") ?? "en_US-amy-medium",
   rate: Number(localStorage.getItem("engcoach.rate") ?? 0.95),
   autoplay: (localStorage.getItem("engcoach.autoplay") ?? "1") === "1",
+  autoConversation: (localStorage.getItem("engcoach.autoConversation") ?? "1") === "1",
 };
 const saveSetting = (k, v) => {
   settings[k] = v;
@@ -67,11 +68,13 @@ function bindSettings() {
   $("set-stt").value = settings.stt;
   $("set-rate").value = String(settings.rate);
   $("set-autoplay").checked = settings.autoplay;
+  $("set-auto-conversation").checked = settings.autoConversation;
   $("set-piper-voice").value = settings.piperVoice;
   $("set-provider").addEventListener("change", (e) => saveSetting("provider", e.target.value));
   $("set-stt").addEventListener("change", (e) => saveSetting("stt", e.target.value));
   $("set-rate").addEventListener("change", (e) => saveSetting("rate", Number(e.target.value)));
   $("set-autoplay").addEventListener("change", (e) => saveSetting("autoplay", e.target.checked));
+  $("set-auto-conversation").addEventListener("change", (e) => saveSetting("autoConversation", e.target.checked));
   $("set-piper-voice").addEventListener("change", (e) => {
     saveSetting("piperVoice", e.target.value);
     // Re-check TTS status with the newly selected voice.
@@ -113,6 +116,9 @@ function renderTtsStatus(h) {
   const t = h.tts;
   const p = t?.piper;
   const e = t?.edge;
+  // Hide the browser-voice dropdown when Piper is active (it's not used).
+  const voiceLabel = $("set-voice")?.closest("label");
+  if (voiceLabel) voiceLabel.style.display = t?.engine === "piper" ? "none" : "";
   if (t?.engine === "piper") {
     el.textContent = `TTS: Piper neural voice (${p.voice}) — local & offline`;
     el.style.color = "var(--green)";
@@ -280,7 +286,24 @@ function speakCoachFeedback(evalData, verdict) {
   const issues = evalData.issues ?? [];
   const fix = issues.find((i) => i.fix)?.fix;
   const line = fix ? `${verdict} ${fix}` : verdict;
-  tts.speak(line, { rate: settings.rate, voiceURI: settings.voice, piperVoice: settings.piperVoice });
+  tts.speak(line, { rate: settings.rate, voiceURI: settings.voice, piperVoice: settings.piperVoice }).then(() => {
+    if (!settings.autoConversation) return;
+    // Guard: never auto-advance once the user has left this session view.
+    if ($("session-view").classList.contains("hidden")) return;
+    if (evalData.next) {
+      // Passed: move to the next fragment (or finish if no more remain).
+      if (sess.idx + 1 < sess.fragments.length) {
+        setFragment(sess.idx + 1);
+      } else {
+        finishFragmentsUI();
+      }
+    } else {
+      // Retry the same fragment naturally after feedback.
+      showFragmentArea();
+      resetTranscript();
+      autoplayFragment(currentFragment());
+    }
+  });
 }
 
 function renderIssues(issues) {
@@ -322,12 +345,14 @@ function resetTranscript() {
 
 async function autoplayFragment(f) {
   tts.stop();
-  await tts.speak(["Repeat after me.", f.text], {
+  const intro = f.coach_intro ? f.coach_intro : "Repeat after me.";
+  await tts.speak([intro, f.text], {
     rate: settings.rate,
     voiceURI: settings.voice,
     piperVoice: settings.piperVoice,
     pauseAfterMs: 500,
   });
+  if (settings.autoConversation) startRecording();
 }
 
 $("btn-play").addEventListener("click", () => autoplayFragment(currentFragment()));
@@ -338,7 +363,12 @@ async function startRecording() {
     sess.recording = true;
     $("listening-dot").classList.remove("hidden");
     resetButtonsRecording();
-    sess.recorder = new WaveRecorder();
+    sess.recorder = new WaveRecorder({
+      onSilenceStop: async () => {
+        // Whisper silence detected: transcribe and (in auto mode) evaluate.
+        await handleWhisperSilenceStop();
+      },
+    });
     try {
       await sess.recorder.start();
     } catch (err) {
@@ -347,6 +377,45 @@ async function startRecording() {
     }
   } else {
     startBrowserRecording();
+  }
+}
+
+/** Whisper auto-stop hook: stop the recorder, transcribe, then act on the result. */
+async function handleWhisperSilenceStop() {
+  if (!sess.recorder) return;
+  const blob = sess.recorder.stop();
+  sess.recorder = null;
+  await endWhisperTurn(blob);
+}
+
+/** Transcribe a captured whisper blob and (in auto mode) evaluate the attempt. */
+async function endWhisperTurn(blob) {
+  $("listening-dot").textContent = "Transcribing locally…";
+  let fallbackStarted = false;
+  try {
+    const { text } = await api("/api/transcribe", { method: "POST", body: blob });
+    sess.transcript = text ?? "";
+    $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
+    updateCheckButton();
+    if (settings.autoConversation && sess.transcript.trim()) {
+      await evaluateCurrent();
+    }
+  } catch (err) {
+    if (isModelDownloaded(err)) {
+      $("transcript").textContent = err.message;
+    } else {
+      warnWhisperFallback();
+      fallbackStarted = true;
+      sess.recording = false;
+      startBrowserRecording();
+    }
+  } finally {
+    $("listening-dot").textContent = "Listening…";
+    if (!fallbackStarted) {
+      sess.recording = false;
+      $("listening-dot").classList.add("hidden");
+      resetButtonsIdle();
+    }
   }
 }
 
@@ -367,6 +436,9 @@ function startBrowserRecording() {
       $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
       updateCheckButton();
       stopRecording();
+      if (settings.autoConversation && sess.transcript.trim()) {
+        evaluateCurrent();
+      }
     },
     onError: (e) => {
       if (e.error === "not-allowed") {
@@ -441,30 +513,7 @@ $("btn-stop").addEventListener("click", async () => {
   if (settings.stt === "whisper" && sess.recorder) {
     const blob = sess.recorder.stop();
     sess.recorder = null;
-    $("listening-dot").textContent = "Transcribing locally…";
-    let fallbackStarted = false;
-    try {
-      const { text } = await api("/api/transcribe", { method: "POST", body: blob });
-      sess.transcript = text ?? "";
-      $("transcript").textContent = sess.transcript || "Nothing heard — try again.";
-      updateCheckButton();
-    } catch (err) {
-      if (isModelDownloaded(err)) {
-        $("transcript").textContent = err.message;
-      } else {
-        warnWhisperFallback();
-        fallbackStarted = true;
-        sess.recording = false;
-        startBrowserRecording();
-      }
-    } finally {
-      $("listening-dot").textContent = "Listening…";
-      if (!fallbackStarted) {
-        sess.recording = false;
-        $("listening-dot").classList.add("hidden");
-        resetButtonsIdle();
-      }
-    }
+    await endWhisperTurn(blob);
   } else {
     stopRecording();
     sess.transcript = sess.stt?.result() ?? sess.transcript;
@@ -473,7 +522,8 @@ $("btn-stop").addEventListener("click", async () => {
   }
 });
 
-$("btn-check").addEventListener("click", async () => {
+/** Evaluate the current transcript against the current fragment. */
+async function evaluateCurrent() {
   if (sess.checking || !sess.transcript.trim()) return;
   sess.checking = true;
   $("btn-check").disabled = true;
@@ -500,7 +550,9 @@ $("btn-check").addEventListener("click", async () => {
   } finally {
     sess.checking = false;
   }
-});
+}
+
+$("btn-check").addEventListener("click", evaluateCurrent);
 
 $("btn-try-again").addEventListener("click", () => {
   showFragmentArea();
@@ -804,12 +856,17 @@ async function sendChat(text) {
       appendMsg("coach", data.correction, false, "note");
       if (data.correction.length < 120) await speakChat(data.correction);
     }
+    // Natural hands-free loop: after the whole turn has been said aloud,
+    // hand the mic back to the user automatically in spoken modes.
+    if (settings.autoConversation && (chat.mode === "spoken" || chat.mode === "interview")) {
+      startChatRecording();
+    }
   } catch (err) {
     if (epoch === chat.epoch) updateLastMsg(`(error) ${err.message}`);
   } finally {
     chat.busy = false;
     $("chat-send").disabled = false;
-    if (epoch === chat.epoch) setChatMicIdle();
+    if (epoch === chat.epoch && !chat.recording) setChatMicIdle();
   }
 }
 
@@ -865,7 +922,12 @@ async function startChatRecording() {
   $("chat-listening").classList.remove("hidden");
   $("chat-listening").textContent = "Listening…";
   if (engine === "whisper") {
-    chat.recorder = new WaveRecorder();
+    chat.recorder = new WaveRecorder({
+      onSilenceStop: async () => {
+        // Whisper detected sustained silence: transcribe and send the turn.
+        await transcribeChatRecording();
+      },
+    });
     try {
       await chat.recorder.start();
     } catch (err) {
@@ -1035,6 +1097,7 @@ async function startInterview() {
     showChatBadge(`Interview — question 1/${data.total}`);
     $("chat-end-session").classList.remove("hidden");
     await speakChat(data.question);
+    if (settings.autoConversation) startChatRecording();
   } catch (err) {
     alert(`Could not start the interview: ${err.message}`);
   } finally {
