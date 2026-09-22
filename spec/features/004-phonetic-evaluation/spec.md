@@ -1,6 +1,6 @@
 # 004 · Evaluación fonética por audio
 
-**Estado:** backlog (no iniciado)
+**Estado:** backlog (no iniciado) — **realineado con el rediseño v2:** depende de `106-word-timestamps` (word-level timestamps) para alimentar el **ámbar/rojo** del karaoke con fonética real y añadir métricas de pronunciación. Mientras 004 no exista, 106 resuelve verde/ámbar/rojo por alineación textual + issues del LLM (degradación sin sidecar).
 
 ## Qué hace
 

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "references": {
+    "english-ai-coach-documentation": {
+      "path": "../english-ai-coach-documentation",
+      "description": "Casos de uso (CU1, CU2, CU3) del producto. Consultar al diseñar, implementar o validar features de configuración de conversación, conversación/practica y sesiones de aprendizaje."
+    }
+  },
+  "mcp": {
+    "stitch": {
+      "type": "remote",
+      "url": "https://stitch.googleapis.com/mcp",
+      "enabled": true,
+      "headers": {
+        "X-Goog-Api-Key": "{env:STITCH_API_KEY}"
+      }
+    }
+  }
+}

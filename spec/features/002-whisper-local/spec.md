@@ -33,6 +33,10 @@ Sin credenciales, sin límites de peticiones, 100% offline y privado: las transc
 - [x] Web Speech es fallback automático si whisper falla o no está instalado (flujo nunca se rompe).
 - [x] Settings muestra "Whisper (local)" y lo marca como preferido cuando está listo.
 
+## Nota (rediseño v2)
+
+- `106-word-timestamps` añade transcripción con **word-level timestamps** (`-ml 1`, JSON) para el coloreado palabra a palabra del karaoke (CU2). El `transcribeWav` actual (`-nt -np`) queda intacto; se añade un modo paralelo.
+
 ## Fuera de alcance
 
 - Streaming de transcripción en tiempo real (solo transcripción de audio grabado).

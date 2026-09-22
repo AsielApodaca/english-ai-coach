@@ -27,6 +27,10 @@ Permite practicar respuestas de entrevista y lenguaje técnico hablado de forma 
 - [x] La UI está en inglés.
 - [x] Seleccionar Whisper local como motor STT muestra estado "not installed" con instrucciones si falta (`brew install whisper-cpp`).
 
+## Nota (rediseño v2)
+
+- El motor de práctica/evaluación de esta feature **se reutiliza tal cual** en el rediseño: `103` (config), `105` (práctica karaoke) y `106` (coloreado por palabra) consumen `practice.ts`/`evaluate`/`learner.ts`. La **UI v1** (tabs y selector de categoría/nivel) es reemplazada por el shell v2 (`101`) y la config CU1 (`103`). El enum de nivel se amplía de B1/B2/C1 a **A1–C2** (`102`).
+
 ## Fuera de alcance
 
 - Evaluación fonética de pronunciación (solo basada en transcripto por STT).
