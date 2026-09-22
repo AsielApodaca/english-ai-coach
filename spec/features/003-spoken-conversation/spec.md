@@ -1,6 +1,6 @@
 # 003 · Conversación hablada natural
 
-**Estado:** backlog (no iniciado)
+**Estado:** **SUPERADA / ABSORBIDA** por el rediseño v2 → `105-karaoke-practice-cu2` + `107-continuous-session`. Se conserva como referencia histórica, **sin desarrollo activo**. El "Free chat" de la tab chat queda **eliminado del MVP** (decisión de rediseño, ver `101-frontend-shell`).
 
 ## Qué hace
 

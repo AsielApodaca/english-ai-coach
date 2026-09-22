@@ -1,6 +1,6 @@
 # 006 · Modo sin conexión total
 
-**Estado:** backlog (no iniciado)
+**Estado:** backlog (no iniciado) — en el roadmap v2 se ubica tras `107/108` (la UI propone Ollama + whisper + Piper; `OFFLINE_MODE` también descarta los artefactos de `104` si no hay red para LLM).
 
 ## Qué hace
 

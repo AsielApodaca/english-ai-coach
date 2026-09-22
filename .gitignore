@@ -5,6 +5,9 @@
 # Personal practice data (learner history, profile, tmp audio)
 data/
 
+# Downloaded models (whisper STT + piper TTS voices), fetched by scripts/setup.sh
+models/
+
 # Node
 node_modules/
 *.log

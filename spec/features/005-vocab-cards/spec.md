@@ -1,6 +1,6 @@
 # 005 · Vocabulario técnico (repaso espaciado)
 
-**Estado:** backlog (no iniciado)
+**Estado:** backlog (no iniciado) — en el roadmap v2 se ejecuta como modalidad "vocab" dentro del shell (`101`); fuente de gaps: `profile.vocabGaps` (alimentado por 105/106/practice).
 
 ## Qué hace
 
