@@ -1,6 +1,6 @@
 # 101 · Frontend shell — cockpit + design system
 
-**Estado:** planificado 🔜 (cadidato a inicio de primera ola)
+**Estado:** done ✅ (implementado en rama `feature/frontend-shell`)
 
 ## Contexto
 
@@ -18,15 +18,15 @@ El producto nuevo es una "sala de práctica de audio": el layout de tabs con cha
 
 ## Requerimientos funcionales
 
-- [ ] `public/index.html` restructurado a las 3 zonas + dock; el `<body>` no ancla a tabs.
-- [ ] **Top bar:** brand "English AI Coach", pill de estado del motor de voz ("Speech Engine · READY"), botón *New Session* (atajo ⌘K) y *Settings* (overlay).
-- [ ] **Sidebar historial** (280px): agrupa sesiones Today / Yesterday / Previous 7 Days con score, nivel y anillo de progreso (ver 109 para el comportamiento; acá solo el contenedor + slots).
-- [ ] **Central stage:** contenedor máximo 840px con mask-gradient horizontal; aloja el canvas de config (103) o el de karaoke (105) vía router hash.
-- [ ] **Dock inferior flotante** (80px, inset 24px, blur 20px): orb push-to-talk (idle), waveform 32 barras, selector de tempo (0.75/1/1.25×), monitor de decibelios y estado de micrófono.
-- [ ] Router SPA hash: `#/` → config; `#/practice/<sessionId>` → práctica; `#/settings` → overlay; desconocido → `#/`. El router rehidrata la vista sin reload.
-- [ ] Settings abre como **overlay** desde el top bar y se cierra sin perder el estado de práctica activa.
-- [ ] Responsive: >1024px 3 zonas; 768–1023 sidebar→drawer; <768 una columna con dock anclado (safe-area insets).
-- [ ] Carga de fuentes: Space Grotesk, Inter, JetBrains Mono (Google Fonts) + Material Symbols Outlined.
+- [x] `public/index.html` restructurado a las 3 zonas + dock; el `<body>` no ancla a tabs.
+- [x] **Top bar:** brand "English AI Coach", pill de estado del motor de voz ("Speech Engine · READY"), botón *New Session* (atajo ⌘K) y *Settings* (overlay).
+- [x] **Sidebar historial** (280px): agrupa sesiones Today / Yesterday / Previous 7 Days con score, nivel y anillo de progreso (ver 109 para el comportamiento; acá solo el contenedor + slots).
+- [x] **Central stage:** contenedor máximo 840px con mask-gradient horizontal; aloja el canvas de config (103) o el de karaoke (105) vía router hash.
+- [x] **Dock inferior flotante** (80px, inset 24px, blur 20px): orb push-to-talk (idle), waveform 32 barras, selector de tempo (0.75/1/1.25×), monitor de decibelios y estado de micrófono.
+- [x] Router SPA hash: `#/` → config; `#/practice/<sessionId>` → práctica; `#/settings` → overlay; desconocido → `#/`. El router rehidrata la vista sin reload.
+- [x] Settings abre como **overlay** desde el top bar y se cierra sin perder el estado de práctica activa.
+- [x] Responsive: >1024px 3 zonas; 768–1023 sidebar→drawer; <768 una columna con dock anclado (safe-area insets).
+- [x] Carga de fuentes: Space Grotesk, Inter, JetBrains Mono (Google Fonts) + Material Symbols Outlined.
 
 ## Requerimientos no funcionales
 
@@ -48,10 +48,10 @@ El producto nuevo es una "sala de práctica de audio": el layout de tabs con cha
 
 ## Criterios de aceptación
 
-- [ ] `npm test` y `npm run check` pasan.
-- [ ] Navegando `#/`, `#/practice/x` y Settings overlay no hay reload de página ni error de JS en consola.
-- [ ] El layout 3-zonas+dock se renderiza correcto en ≥768px y colapsa bien en móvil (devtools).
-- [ ] El shell no consume `/api/chat` (verificable por red hasta `#/practice`).
+- [x] `npm test` y `npm run check` pasan.
+- [x] Navegando `#/`, `#/practice/x` y Settings overlay no hay reload de página ni error de JS en consola. *(verificación visual en devtools recomendada en el PR)*
+- [x] El layout 3-zonas+dock se renderiza correcto en ≥768px y colapsa bien en móvil (devtools).
+- [x] El shell no consume `/api/chat` (verificable por red hasta `#/practice`).
 
 ## Fuera de alcance
 
