@@ -8,9 +8,10 @@ import { dirname } from "node:path";
 import { buildProviders, completeWithFallback, providerById, providerStatus } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
-import { evaluateFragment, generatePracticeSet } from "./lib/practice.ts";
+import { evaluateFragment, generatePracticeSet, tokenize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
-import { checkWhisper, transcribeWav, downloadModel } from "./lib/whisper.ts";
+import { checkWhisper, transcribeWav, transcribeWords, downloadModel } from "./lib/whisper.ts";
+import { alignWords } from "./lib/align.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import {
@@ -18,6 +19,8 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_SETTINGS_SNAPSHOT,
   fallbackTitle,
+  type AttemptWord,
+  type FeedbackIssue,
   type Profile,
   type SessionV2,
 } from "./lib/storage.ts";
@@ -124,8 +127,12 @@ function persistAttempt(params: {
   fragmentId?: string;
   userText: string;
   target: string;
+  /** Colored word-level alignment (feature 106); empty for text-only attempts. */
+  words?: AttemptWord[];
+  /** Fragment score override (feature 106: align score, coherent with words). */
+  score?: number;
 }): void {
-  const { evaluation, sessionId, fragmentId, userText } = params;
+  const { evaluation, sessionId, fragmentId, userText, words = [], score } = params;
   if (!sessionId || !fragmentId) return;
   const session = storage.loadSession(sessionId);
   if (!session) return;
@@ -133,8 +140,8 @@ function persistAttempt(params: {
   if (!frag) return;
   frag.attempts.push({
     text: userText,
-    words: [],
-    score: evaluation.score,
+    words,
+    score: score ?? evaluation.score,
     startedAt: new Date().toISOString(),
     durationMs: 0,
   });
@@ -275,9 +282,15 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
   mkdirSync(tmpDir, { recursive: true });
   const wavPath = join(tmpDir, `rec-${randomUUID()}.wav`);
   writeFileSync(wavPath, buf);
+  const withWords = req.query.words === "1" || req.query.words === "true";
   try {
-    const result = await transcribeWav(wavPath, whisper.modelPath!, rootDir);
-    res.json({ text: result.text, durationMs: result.durationMs });
+    if (withWords) {
+      const result = await transcribeWords(wavPath, whisper.modelPath!, rootDir);
+      res.json({ text: result.text, words: result.words, durationMs: result.durationMs });
+    } else {
+      const result = await transcribeWav(wavPath, whisper.modelPath!, rootDir);
+      res.json({ text: result.text, durationMs: result.durationMs });
+    }
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   } finally {
@@ -287,6 +300,106 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
 
 app.get("/api/whisper/status", (_req, res) => {
   res.json(checkWhisper(WHISPER_MODEL, rootDir));
+});
+
+/**
+ * Collect words the LLM evaluator flagged so the aligner can downgrade them to
+ * amber: quoted words in any issue's fix/message, plus words mentioned in
+ * pronunciation issues that are actually part of the target fragment.
+ */
+function forcedAmberWordsFromIssues(issues: FeedbackIssue[], target: string): string[] {
+  const targetTokens = new Set(tokenize(target));
+  const words = new Set<string>();
+  for (const issue of issues) {
+    const texts = [issue.fix, issue.message].filter((t): t is string => typeof t === "string" && t.length > 0);
+    for (const t of texts) {
+      for (const quoted of t.match(/"[^"]+"/g) ?? []) {
+        for (const w of tokenize(quoted)) words.add(w);
+      }
+      if (issue.category === "pronunciation") {
+        for (const w of tokenize(t)) {
+          if (targetTokens.has(w)) words.add(w);
+        }
+      }
+    }
+  }
+  return [...words];
+}
+
+/**
+ * Consolidated attempt endpoint (feature 106): transcribes the raw recording
+ * with word-level timestamps, evaluates it against the target, aligns the
+ * spoken words (green/amber/red) and persists the colored attempt. This is the
+ * single endpoint the karaoke UI (feature 105) will call.
+ *
+ * Query params: target (required), question, level (B1|B2|C1), optional
+ * sessionId + fragmentId for persistence.
+ */
+app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
+  const buf = req.body as Buffer | undefined;
+  const target = typeof req.query.target === "string" ? req.query.target.trim() : "";
+  const question = typeof req.query.question === "string" ? req.query.question : "";
+  const level = typeof req.query.level === "string" ? req.query.level : "B2";
+  const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : undefined;
+  const fragmentId = typeof req.query.fragmentId === "string" ? req.query.fragmentId : undefined;
+
+  if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
+  if (!target) return res.status(400).json({ error: "target is required." });
+  if (!isLevel(level)) return res.status(400).json({ error: "Invalid level." });
+
+  const whisper = checkWhisper(WHISPER_MODEL, rootDir);
+  if (!whisper.available) return res.status(400).json({ error: whisper.hint });
+  if (!whisper.modelReady) {
+    try {
+      await downloadModel(WHISPER_MODEL, rootDir);
+    } catch (err) {
+      return res.status(500).json({ error: `Model download failed: ${(err as Error).message}` });
+    }
+    return res.status(400).json({ error: "Model downloaded. Please record again.", code: "MODEL_DOWNLOADED" });
+  }
+
+  const tmpDir = join(rootDir, "data", "tmp");
+  mkdirSync(tmpDir, { recursive: true });
+  const wavPath = join(tmpDir, `attempt-${randomUUID()}.wav`);
+  writeFileSync(wavPath, buf);
+  try {
+    const { text, words, durationMs } = await transcribeWords(wavPath, whisper.modelPath!, rootDir);
+    const { evaluation } = await evaluateFragment(candidates(), {
+      target,
+      userText: text,
+      question,
+      level,
+    });
+    const forcedAmberWords = evaluation.provider === "none" ? [] : forcedAmberWordsFromIssues(evaluation.issues, target);
+    const align = alignWords(words, target, { forcedAmberWords });
+    persistAttempt({
+      evaluation,
+      sessionId,
+      fragmentId,
+      userText: text,
+      target,
+      words: align.words,
+      score: align.score,
+    });
+    res.json({
+      text,
+      words: align.words,
+      score: align.score,
+      matched: align.matched,
+      missing: align.missing,
+      extra: align.extra,
+      issues: evaluation.issues,
+      verdict: evaluation.verdict,
+      next: evaluation.next,
+      tips: evaluation.tips,
+      provider: evaluation.provider,
+      durationMs,
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  } finally {
+    rmSync(wavPath, { force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------
