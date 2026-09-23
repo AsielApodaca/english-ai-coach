@@ -101,6 +101,9 @@ export type WordStatus = "green" | "amber" | "red";
 export interface AttemptWord {
   word: string;
   status: WordStatus;
+  /** Optional per-word timestamps (ms) for the karaoke animation (feature 106). */
+  startMs?: number;
+  endMs?: number;
 }
 
 /** A single spoken attempt at a fragment (or the full answer). */
