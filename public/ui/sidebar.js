@@ -3,7 +3,8 @@
  *
  * Feature 109 owns the real history data; in 101 this renders the
  * Today / Yesterday / Previous 7 Days groups as empty placeholder slots.
- * It also binds the sidebar toggle (top bar) and the drawer backdrop.
+ * It also binds the collapse button (brand header, desktop), the reopen
+ * button (top bar) and the drawer backdrop (tablet/mobile).
  */
 
 import { h } from "./dom.js";
@@ -39,11 +40,13 @@ export function initSidebar(store, root) {
   }
 
   const toggleBtn = document.getElementById("btn-sidebar-toggle");
+  const closeBtn = document.getElementById("btn-sidebar-close");
   const backdrop = document.getElementById("sidebar-backdrop");
 
   toggleBtn?.addEventListener("click", () => {
     store.set({ sidebarOpen: !store.state.sidebarOpen });
   });
+  closeBtn?.addEventListener("click", () => store.set({ sidebarOpen: false }));
   backdrop?.addEventListener("click", () => store.set({ sidebarOpen: false }));
 
   const apply = (s) => document.body.classList.toggle("sidebar-open", s.sidebarOpen);

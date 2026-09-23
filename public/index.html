@@ -17,104 +17,101 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <!-- Top bar: brand · status pill · global actions -->
-      <header class="topbar">
-        <button id="btn-sidebar-toggle" class="icon-btn" title="Toggle history sidebar" aria-label="Toggle history sidebar">
-          <span class="material-symbols-outlined" aria-hidden="true">dock_to_right</span>
-        </button>
-        <div class="brand">
+    <!-- Full-height sidebar: brand · new session · history · footer (speech + user) -->
+    <aside id="sidebar" class="sidebar" aria-label="Navigation and session history">
+      <div class="sidebar-brand">
+        <div class="side-brand">
           <span class="material-symbols-outlined brand-icon" aria-hidden="true">graphic_eq</span>
           <span class="brand-name">English AI Coach</span>
         </div>
-        <div class="topbar-actions">
-          <div id="speech-pill" class="status-pill" title="Speech engine status">
-            <span class="status-dot" aria-hidden="true"></span>
-            <span class="status-label">Speech Engine</span>
-            <span id="speech-pill-state" class="status-state">…</span>
+        <button id="btn-sidebar-close" class="icon-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+        </button>
+      </div>
+
+      <button id="btn-new-session" class="btn new-session" title="New session (⌘K)">
+        <span class="material-symbols-outlined" aria-hidden="true">add</span>
+        <span class="new-session-label">New Session</span>
+        <kbd>⌘K</kbd>
+      </button>
+
+      <div id="history-slots" class="history-slots"></div>
+
+      <div class="sidebar-footer">
+        <div id="speech-pill" class="status-pill" title="Speech engine status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-label">Speech Engine</span>
+          <span id="speech-pill-state" class="status-state">…</span>
+        </div>
+        <div class="sidebar-user">
+          <div class="user-avatar" aria-hidden="true">
+            <span class="material-symbols-outlined">person</span>
           </div>
-          <button id="btn-new-session" class="btn ghost" title="New session (⌘K)">
-            <span class="material-symbols-outlined" aria-hidden="true">add</span>
-            <span>New Session</span>
-            <kbd>⌘K</kbd>
-          </button>
+          <div class="user-meta">
+            <div class="user-name">Guest</div>
+            <div class="user-role">local profile</div>
+          </div>
           <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
             <span class="material-symbols-outlined" aria-hidden="true">settings</span>
           </button>
         </div>
-      </header>
-
-      <!-- 3-zone body: sidebar | central stage | right panel (reserved) -->
-      <div class="shell-body">
-        <aside id="sidebar" class="sidebar" aria-label="Session history">
-          <div class="sidebar-head">
-            <span class="sidebar-title">History</span>
-          </div>
-          <div id="history-slots" class="history-slots"></div>
-        </aside>
-        <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
-
-        <main id="stage" class="stage">
-          <div class="stage-inner">
-            <!-- Config slot (feature 103) -->
-            <section id="view-config" class="stage-view" data-view="config">
-              <div class="stage-placeholder">
-                <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">tune</span>
-                <h2 class="placeholder-title">Config</h2>
-                <p class="placeholder-text">Session configuration slot — feature 103 arrives here.</p>
-              </div>
-            </section>
-            <!-- Practice slot (feature 105) -->
-            <section id="view-practice" class="stage-view" data-view="practice" hidden>
-              <div class="stage-placeholder">
-                <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">record_voice_over</span>
-                <h2 class="placeholder-title">Practice</h2>
-                <p class="placeholder-text">Karaoke practice slot — feature 105 arrives here.</p>
-              </div>
-            </section>
-          </div>
-        </main>
-
-        <!-- Reserved for the IPA inspector (feature 004); hidden in 101. -->
-        <aside class="panel-right" aria-hidden="true"></aside>
       </div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
 
-      <!-- Floating audio dock: orb · waveform · tempo · dB · mic state -->
-      <div id="dock" class="dock" role="toolbar" aria-label="Audio dock">
-        <button id="orb" class="orb" aria-label="Push to talk" title="Push to talk">
-          <span class="material-symbols-outlined orb-icon" aria-hidden="true">mic</span>
-        </button>
-        <canvas id="waveform" class="waveform" aria-label="Audio waveform"></canvas>
-        <div class="dock-controls">
-          <div class="tempo" role="group" aria-label="Tempo">
-            <span class="material-symbols-outlined tempo-icon" aria-hidden="true">speed</span>
-            <button class="tempo-btn" data-tempo="0.75">0.75×</button>
-            <button class="tempo-btn active" data-tempo="1">1×</button>
-            <button class="tempo-btn" data-tempo="1.25">1.25×</button>
-          </div>
-          <div class="mic-monitor">
-            <span id="db-value" class="db-value">–∞ dB</span>
-            <span id="mic-state" class="mic-state">idle</span>
+    <!-- Content column: top bar (right of the sidebar) + central stage -->
+    <div class="app-main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="btn-sidebar-toggle" class="icon-btn" title="Show history sidebar" aria-label="Show history sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">dock_to_right</span>
+          </button>
+          <div class="breadcrumb">
+            <span class="material-symbols-outlined crumb-icon" aria-hidden="true">terminal</span>
+            <span class="crumb">Studio</span>
+            <span class="crumb-sep" aria-hidden="true">/</span>
+            <span id="crumb-current" class="crumb-current">Config</span>
           </div>
         </div>
-      </div>
+      </header>
 
-      <!-- Settings overlay (feature 108) -->
-      <div id="settings-overlay" class="overlay" hidden>
-        <div class="overlay-panel" role="dialog" aria-modal="true" aria-label="Settings">
-          <div class="overlay-head">
-            <h2 class="overlay-title">Settings</h2>
-            <button id="btn-settings-close" class="icon-btn" title="Close" aria-label="Close settings">
-              <span class="material-symbols-outlined" aria-hidden="true">close</span>
-            </button>
-          </div>
-          <div class="overlay-body">
-            <div class="settings-placeholder">
-              <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-              <p>Settings arriving with feature 108.</p>
+      <main id="stage" class="stage">
+        <div class="stage-inner">
+          <!-- Config slot (feature 103) -->
+          <section id="view-config" class="stage-view" data-view="config">
+            <div class="stage-placeholder">
+              <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">tune</span>
+              <h2 class="placeholder-title">Config</h2>
+              <p class="placeholder-text">Session configuration slot — feature 103 arrives here.</p>
             </div>
-            <div id="engine-status" class="engine-status"></div>
+          </section>
+          <!-- Practice slot (feature 105) -->
+          <section id="view-practice" class="stage-view" data-view="practice" hidden>
+            <div class="stage-placeholder">
+              <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">record_voice_over</span>
+              <h2 class="placeholder-title">Practice</h2>
+              <p class="placeholder-text">Karaoke practice slot — feature 105 arrives here.</p>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <!-- Settings overlay (feature 108) -->
+    <div id="settings-overlay" class="overlay" hidden>
+      <div class="overlay-panel" role="dialog" aria-modal="true" aria-label="Settings">
+        <div class="overlay-head">
+          <h2 class="overlay-title">Settings</h2>
+          <button id="btn-settings-close" class="icon-btn" title="Close" aria-label="Close settings">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
+        </div>
+        <div class="overlay-body">
+          <div class="settings-placeholder">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+            <p>Settings arriving with feature 108.</p>
           </div>
+          <div id="engine-status" class="engine-status"></div>
         </div>
       </div>
     </div>

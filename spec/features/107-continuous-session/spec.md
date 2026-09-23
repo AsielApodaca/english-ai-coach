@@ -42,7 +42,7 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 
 ## Dependencias
 
-- 105 (flujo por pregunta), 102 (questions[]), 108 (settings: autoAdvance, tempo, prepTime, thresholds). Se apoya en 101 (dock/tempo).
+- 105 (flujo por pregunta), 102 (questions[]), 108 (settings: autoAdvance, tempo, prepTime, thresholds). Se apoya en 101 (shell/layout).
 
 ## Criterios de aceptación
 

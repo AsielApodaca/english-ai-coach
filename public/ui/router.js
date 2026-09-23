@@ -40,6 +40,8 @@ export function parseHash(hash) {
  */
 export function initRouter(store, elements) {
   const { stage, configView, practiceView, settingsOverlay } = elements;
+  const crumbCurrent = document.getElementById("crumb-current");
+  const CRUMB_LABEL = { config: "Config", practice: "Practice" };
   let returnHash = null;
 
   /** Render the current hash into the stage and store. */
@@ -63,6 +65,7 @@ export function initRouter(store, elements) {
     configView.hidden = !showConfig;
     practiceView.hidden = showConfig;
     stage.dataset.view = route.view;
+    if (crumbCurrent) crumbCurrent.textContent = CRUMB_LABEL[route.view] ?? "Config";
   }
 
   /** Navigate to a hash path, re-rendering immediately if already there. */

@@ -38,9 +38,7 @@
   /* Layout */
   --sidebar-w: 280px;
   --panel-right-w: 320px;
-  --topbar-h: 56px;
-  --dock-h: 80px;
-  --dock-inset: 24px;
+  --topbar-h: 48px;
 }
 
 /* ---------- Base ---------- */
@@ -67,12 +65,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.app-shell {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-}
-
 h1,
 h2,
 h3 {
@@ -84,42 +76,6 @@ h3 {
   font-size: 20px;
   line-height: 1;
   user-select: none;
-}
-
-/* ---------- Top bar ---------- */
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: var(--topbar-h);
-  padding: 0 20px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--font-display);
-  font-weight: 700;
-  font-size: 16px;
-  letter-spacing: -0.01em;
-}
-
-.brand .brand-icon {
-  font-size: 22px;
-  color: var(--accent);
-}
-
-.topbar-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-left: auto;
 }
 
 /* ---------- Buttons ---------- */
@@ -157,6 +113,10 @@ h3 {
   background: var(--panel);
 }
 
+.btn.new-session {
+  margin: 4px 12px 10px;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -178,15 +138,17 @@ h3 {
 
 /* ---------- Status pill ---------- */
 .status-pill {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding: 5px 12px;
+  width: 100%;
+  padding: 6px 10px;
   border-radius: 9999px;
   background: var(--panel-2);
   border: 1px solid var(--border);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
 }
@@ -196,10 +158,6 @@ h3 {
   height: 6px;
   border-radius: 50%;
   background: var(--subtle);
-}
-
-.status-pill .status-state {
-  color: var(--muted);
 }
 
 .status-pill.ok .status-dot {
@@ -219,50 +177,56 @@ h3 {
   color: var(--red);
 }
 
-/* ---------- Shell body: 3-zone grid ----------
-   Right panel (320px, IPA inspector) is reserved but hidden in 101;
-   the track is added when feature 004 ships. */
-.shell-body {
-  display: grid;
-  grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
-  flex: 1;
-  min-height: calc(100vh - var(--topbar-h));
-}
-
-.panel-right {
-  display: none;
-}
-
-/* ---------- Sidebar ---------- */
+/* ============================================================
+   Full-height sidebar (collapsible / drawer on smaller screens)
+   ============================================================ */
 .sidebar {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--sidebar-w);
+  z-index: 40;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
 }
 
-.sidebar-head {
+.sidebar-brand {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
+  padding: 14px 12px 8px;
 }
 
-.sidebar-title {
+.side-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brand-icon {
+  font-size: 22px;
+  color: var(--accent);
+}
+
+.brand-name {
   font-family: var(--font-display);
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--muted);
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .history-slots {
   flex: 1;
   overflow-y: auto;
-  padding: 14px 12px;
+  padding: 0 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -292,30 +256,149 @@ h3 {
   font-size: 18px;
 }
 
+.sidebar-footer {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: rgba(13, 15, 18, 0.35);
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.user-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.user-avatar .material-symbols-outlined {
+  font-size: 15px;
+}
+
+.user-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.user-role {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
 .sidebar-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 39;
+  z-index: 35;
   background: rgba(13, 15, 18, 0.6);
   display: none;
+}
+
+/* ============================================================
+   Content column: top bar (right of the sidebar) + central stage
+   ============================================================ */
+.app-main {
+  min-height: 100vh;
+}
+
+/* Top bar spans from the sidebar's right edge; collapses with it. */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: var(--sidebar-w);
+  right: 0;
+  z-index: 30;
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: rgba(22, 25, 31, 0.82);
+  backdrop-filter: blur(12px) saturate(180%);
+  -webkit-backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 1px solid var(--border);
+  transition: left 0.25s ease;
+}
+
+body:not(.sidebar-open) .topbar {
+  left: 0;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.crumb-icon {
+  font-size: 16px;
+  color: var(--subtle);
+}
+
+.crumb-sep {
+  color: var(--outline);
+}
+
+.crumb-current {
+  color: var(--text);
+  font-weight: 500;
 }
 
 /* ---------- Central stage ---------- */
 .stage {
   min-width: 0;
-  padding: 24px 32px calc(var(--dock-h) + var(--dock-inset) + 24px);
+  margin-left: var(--sidebar-w);
+  padding: var(--topbar-h) 32px 48px;
+  transition: margin-left 0.25s ease;
+}
+
+body:not(.sidebar-open) .stage {
+  margin-left: 0;
 }
 
 .stage-inner {
   width: 100%;
   max-width: 840px;
   margin: 0 auto;
+  padding-top: 28px;
   mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
   -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
 }
 
 .stage-view {
-  min-height: 100%;
+  min-height: 60vh;
 }
 
 .stage-placeholder {
@@ -350,153 +433,16 @@ h3 {
   font-size: 14px;
 }
 
-/* ---------- Floating dock ---------- */
-.dock {
-  position: fixed;
-  left: var(--dock-inset);
-  right: var(--dock-inset);
-  bottom: var(--dock-inset);
-  z-index: 30;
-  height: var(--dock-h);
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 0 20px;
-  background: rgba(22, 25, 31, 0.82);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(6, 182, 212, 0.25);
-  border-radius: 16px;
-}
-
-/* Push-to-talk orb */
-.orb {
-  position: relative;
-  flex: none;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: radial-gradient(circle at 35% 30%, #34d399, var(--accent) 60%, #0b7a5c);
-  border: none;
-  color: #fff;
-  cursor: pointer;
-  box-shadow: 0 0 24px -6px rgba(16, 185, 129, 0.45);
-  transition: box-shadow 0.2s;
-}
-
-.orb:hover {
-  box-shadow: 0 0 32px -4px rgba(16, 185, 129, 0.6);
-}
-
-.orb .orb-icon {
-  font-size: 28px;
-}
-
-.orb::before,
-.orb::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  border: 2px solid rgba(16, 185, 129, 0.3);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.orb.pressed::before {
-  animation: orb-ring 1.1s ease-out infinite;
-}
-
-.orb.pressed::after {
-  animation: orb-ring 1.1s ease-out 0.45s infinite;
-}
-
-.orb.recording {
-  animation: orb-blink 1.4s ease-in-out infinite;
-}
-
-/* Waveform */
-.waveform {
-  flex: 1;
-  min-width: 0;
-  height: 64px;
-}
-
-/* Dock controls */
-.dock-controls {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex: none;
-}
-
-.tempo {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px;
-  background: var(--panel-2);
-  border: 1px solid var(--border);
-  border-radius: 9999px;
-}
-
-.tempo .tempo-icon {
-  font-size: 16px;
-  color: var(--subtle);
-  margin: 0 4px;
-}
-
-.tempo-btn {
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 5px 10px;
-  border-radius: 9999px;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-}
-
-.tempo-btn:hover {
-  color: var(--text);
-}
-
-.tempo-btn.active {
-  background: var(--panel-3);
-  color: var(--text);
-}
-
-.mic-monitor {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  min-width: 76px;
-}
-
-.db-value {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--subtle);
-}
-
-.mic-state {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
-.mic-state.recording {
-  color: var(--accent-cyan);
+/* Reserved for the future IPA inspector (feature 004). */
+.panel-right {
+  display: none;
 }
 
 /* ---------- Settings overlay ---------- */
+body.overlay-open {
+  overflow: hidden;
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -596,38 +542,26 @@ h3 {
   background: rgba(239, 68, 68, 0.12);
 }
 
-/* ---------- Animations ---------- */
-@keyframes orb-ring {
-  0% {
-    transform: scale(1);
-    opacity: 0.7;
-  }
-  100% {
-    transform: scale(1.9);
-    opacity: 0;
-  }
-}
-
-@keyframes orb-blink {
-  0%,
-  100% {
-    box-shadow: 0 0 24px -6px rgba(6, 182, 212, 0.5);
-  }
-  50% {
-    box-shadow: 0 0 44px -4px rgba(6, 182, 212, 0.8);
-  }
-}
-
 /* ---------- Responsive ---------- */
 
-/* Desktop: sidebar collapses in place */
+/* Desktop: sidebar collapses in place; top bar follows it. */
 @media (min-width: 1025px) {
+  .sidebar {
+    transform: none;
+  }
+
   body:not(.sidebar-open) .sidebar {
+    transform: translateX(-100%);
+  }
+
+  /* On desktop the sidebar carries its own collapse; the top-bar
+     button only appears when the sidebar is hidden (to reopen it). */
+  body.sidebar-open #btn-sidebar-toggle {
     display: none;
   }
 
-  body:not(.sidebar-open) .shell-body {
-    grid-template-columns: minmax(0, 1fr);
+  body:not(.sidebar-open) #btn-sidebar-close {
+    display: none;
   }
 
   .sidebar-backdrop {
@@ -635,22 +569,10 @@ h3 {
   }
 }
 
-/* Tablet: sidebar becomes a drawer */
+/* Tablet: sidebar becomes an off-canvas drawer; top bar spans full width. */
 @media (max-width: 1024px) {
-  .shell-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .sidebar {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
-    width: var(--sidebar-w);
-    z-index: 40;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    border-right: 1px solid var(--border);
   }
 
   body.sidebar-open .sidebar {
@@ -660,43 +582,32 @@ h3 {
   body.sidebar-open .sidebar-backdrop {
     display: block;
   }
+
+  .topbar,
+  body:not(.sidebar-open) .topbar {
+    left: 0;
+  }
+
+  .stage,
+  body:not(.sidebar-open) .stage {
+    margin-left: 0;
+  }
 }
 
-/* Mobile: single column, dock anchored to the bottom edge */
+/* Mobile: single column, tighter stage padding. */
 @media (max-width: 767px) {
   .stage {
-    padding: 16px 16px calc(var(--dock-h) + 24px);
+    padding-left: 16px;
+    padding-right: 16px;
   }
 
-  .dock {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: calc(var(--dock-h) + env(safe-area-inset-bottom));
-    padding-bottom: env(safe-area-inset-bottom);
-    border-radius: 16px 16px 0 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-  }
-
-  .dock-controls {
-    gap: 10px;
-  }
-
-  .tempo .tempo-icon {
+  .btn.new-session kbd {
     display: none;
   }
 
-  .mic-monitor {
-    min-width: 0;
-  }
-
-  .topbar-actions .btn span:not(.material-symbols-outlined) {
-    display: none;
-  }
-
-  .topbar-actions .btn kbd {
+  .breadcrumb .crumb,
+  .breadcrumb .crumb-sep,
+  .breadcrumb .crumb-icon {
     display: none;
   }
 }

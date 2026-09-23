@@ -18,7 +18,7 @@
 - **STT:** `whisper-cli` local (WAV subido) como motor primario de práctica; **Chrome Web Speech API** (`webkitSpeechRecognition`) como fallback en navegadores sin whisper instalado. Para el coloreado palabra a palabra se usa la **salida word-timestamps** de whisper (`-ml 1` / JSON).
 - **Fonética (pronunciación por audio):** sidecar local Python (parselmouth/librosa) que recibe el WAV y devuelve análisis fonético (fonemas, estrés, ritmo, entonación); opcional (backlog, `004`), con fallback a solo transcripción. Hasta que exista, el ámbar/rojo se determina por alineación de palabras + evaluación LLM.
 - **TTS:** voz neural local **Piper** (subprocess, offline, prosodia y pausas controladas); «edge-tts» como alternativa online si Piper no está instalado. `speechSynthesis` del navegador queda como último fallback.
-- **Frontend:** SPA vanilla en `public/` (sin build, continuo con el stack); layout "cockpit" de 3 zonas + dock (ver `../design/design-system.md`). Estilos en `styles.css` con tokens CSS del design system; componentes en `public/ui/`. Funciones de voz en `public/speech/`. Material Symbols + Google Fonts como hoy.
+- **Frontend:** SPA vanilla en `public/` (sin build, continuo con el stack); layout "cockpit" (sidebar full-height + top bar a la derecha + central stage; ver `../design/design-system.md`). Estilos en `styles.css` con tokens CSS del design system; componentes en `public/ui/`. Funciones de voz en `public/speech/`. Material Symbols + Google Fonts como hoy.
 - **Ingesta de archivos de contexto (CU1 dropzone):** extracción de PDF y DOCX con las únicas dependencias npm permitidas además de Express: `pdf-parse` y `mammoth`. TXT/MD se leen directamente. **Excepción documentada y única a la regla de "sin dependencias"** (ver feature `104-context-files`).
 
 ## Decisión de herramientas / arquitectura modular
@@ -42,7 +42,7 @@
 - `src/lib/learner.ts` — resumen del aprendiz, métricas de progreso, motor de "next step".
 - `src/lib/storage.ts` — carga/guardado de `data/profile.json` y `data/sessions/*.json`.
 - `src/lib/whisper.ts` — subprocess `whisper-cli` para transcripción local (modos texto plano y word-timestamps JSON).
-- `public/` — frontend vanilla SPA: `index.html` (shell 3 zonas + dock), `styles.css` (design system), `app.js` (router SPA), `ui/` (componentes), `speech/` (browser-stt, browser-tts, recorder-wave, stt-pick).
+- `public/` — frontend vanilla SPA: `index.html` (shell cockpit: sidebar + top bar + stage), `styles.css` (design system), `app.js` (router SPA), `ui/` (componentes), `speech/` (browser-stt, browser-tts, recorder-wave, stt-pick).
 - `scripts/setup.sh` — instalador de whisper.cpp, Piper y edge-tts.
 
 ## Comandos
@@ -79,7 +79,7 @@
 - **Tema oscuro "Resonance Dark AI"** (referencia normativa: `../design/design-system.md`).
 - Tokens CSS: `--bg`, `--panel`, `--panel-2`, `--panel-3`, `--border`, `--text`, `--muted`, `--subtle`, `--accent (#10b981)`, `--accent-cyan`, `--amber`, `--red`, `--surface-variant`, `--outline`.
 - Tipografía tri: Space Grotesk (display/karaoke) · Inter (diálogo/config) · JetBrains Mono (IPA/técnico). Material Symbols para iconos.
-- Layout: **cockpit** — top bar + sidebar historial (280px) + central stage + panel derecho opcional + dock inferior flotante (push-to-talk, waveform, tempo, VU meter).
+- Layout: **cockpit** — sidebar full-height (brand, New Session, historial 280px, footer usuario/motores) + top bar a la derecha (breadcrumb, toggle) + central stage + panel derecho opcional. El dock de audio (push-to-talk, waveform, tempo, VU meter) llega con 105/CU2.
 
 ## Límites duros
 

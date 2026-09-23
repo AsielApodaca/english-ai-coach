@@ -10,8 +10,6 @@
  * @typedef {Object} ShellState
  * @property {{ view: string, sessionId?: string|null }} route
  * @property {string|null} sessionId
- * @property {boolean} micActive
- * @property {number} tempo
  * @property {boolean} speechReady
  * @property {boolean} sidebarOpen
  */
@@ -28,8 +26,6 @@ export function createShellStore() {
   const state = {
     route: { view: "config" },
     sessionId: null,
-    micActive: false,
-    tempo: 1,
     speechReady: false,
     sidebarOpen: true,
   };

@@ -52,30 +52,33 @@ Token chart (fuentes cargadas desde Google Fonts como hoy):
 | Label code | JetBrains Mono 500 | 13px / 18px | 0.02em | Chips técnicos, rutas, badges |
 | Label phoneme | JetBrains Mono 600 | 15px / 20px | 0.04em | **Anotaciones IPA** sobre las palabras |
 
-## Layout — "cockpit" de 3 zonas + dock
+## Layout — "cockpit": sidebar full-height + columna de contenido
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Top bar (brand · breadcrumb · status pill(s) · acciones globales)     │
-├───────────────┬──────────────────────────────────────────┬───────────┤
-│  Sidebar 280px │        Central stage (fluido ≤840px)      │ Panel der │
-│  collapsible   │   dual-mode canvas: config o karaoke      │ (opcional │
-│  · New Session │                                          │ 320px,     │
-│  · Historial   │                                          │  IPA inspector)│
-│  (Today/Yday/  │                                          │           │
-│   7 días)      │                                          │           │
-│  · Navegación  │                                          │           │
-├───────────────┴──────────────────────────────────────────┴───────────┤
-│  Bottom floating dock (80px, inset 24px)                              │
-│  push-to-talk orb · waveform · tempo · dB monitor · estado mic         │
-└─────────────────────────────────────────────────────────────────────┘
+┌────────────┬───────────────────────────────────────────────────────────┐
+│  Sidebar   │ Top bar (breadcrumb · toggle sidebar)                     │
+│  280px,    ├───────────────────────────────────────────────────────────┤
+│  full-     │                                                           │
+│  height    │     Central stage (fluido ≤840px)                         │
+│            │     dual-mode canvas: config o karaoke                    │
+│  · brand   │                                                           │
+│  (logo +   │                                                           │
+│   title)   │                                                           │
+│  · New     │                                                           │
+│    Session │                                                           │
+│  · Historial (Today/Yday/7 días)                                       │
+│  · Footer: pill Speech Engine READY                                     │
+│            fila usuario (avatar · Guest · ⚙ settings)                   │
+└─────────┬──┴───────────────────────────────────────────────────────────┘
+          └─ top bar y stage acompañan a la sidebar al colapsar/drawer
 ```
 
-- **Sidebar izquierda (280px fija)**: historial de sesiones, colección de drills/decks, métricas; colapsa a dibujable en tablet (<1024px) y drawer en mobile.
-- **Central stage (fluido, max-width 840px)**: el canvas dual — configuración (CU1) o práctica karaoke (CU2). Modo chatbot (reto futuro) o modos combinados.
-- **Dock inferior flotante (80px, inset 24px)**: la consola táctil constante: push-to-talk, waveform visualizer, control de tempo (0.75x–1.25x), monitor de decibeles y estado de micrófono.
-- **Panel derecho (opcional, 320px)**: "IPA inspector" en modos avanzados (futuro con 004).
-- Breakpoints: desktop >1024px (3 columnas, margin 2rem, gutter 1.5rem); tablet 768–1023 (sidebar → drawer, stage full con 1.5rem); móvil <767 (1 columna, letra karaoke compacta, dock anclado al borde con safe-area insets).
+- **Sidebar izquierda (280px fija, full-height):** brand (logo `graphic_eq` + "English AI Coach") + botón colapso, botón *New Session* (⌘K), historial de sesiones (Today/Yesterday/Previous 7 Days), y footer con pill de estado del motor de voz ("Speech Engine · READY") arriba y fila de usuario (avatar, nombre —Guest por defecto—, engranaje de settings) debajo. Colapsa en desktop y se vuelve drawer off-canvas con backdrop en tablet/móvil (<1024px).
+- **Top bar (48px, frosted, ancho adaptativo):** solo a la derecha de la sidebar; contiene el breadcrumb ("Studio / Config|Practice") y el toggle de apertura de la sidebar. `left: var(--sidebar-w)` en desktop con sidebar visible; `left: 0` cuando la sidebar está oculta o en tablet/móvil (la sidebar se superpone).
+- **Central stage (fluido, max-width 840px):** el canvas dual — configuración (CU1) o práctica karaoke (CU2). Modo chatbot (reto futuro) o modos combinados.
+- **Dock de audio (orb push-to-talk, waveform, tempo, VU meter):** **no pertenece al shell**; es componente de la vista de práctica (CU2, feature 105).
+- **Panel derecho (opcional, 320px):** "IPA inspector" en modos avanzados (futuro con 004).
+- Breakpoints: desktop >1024px (sidebar full-height colapsable; top bar la sigue); tablet 768–1023 (sidebar → drawer con backdrop, stage/top bar full width); móvil <767 (1 columna, letra karaoke compacta). UI de audio solo desde 105.
 
 ## Elevación y efectos
 
@@ -146,7 +149,7 @@ Token chart (fuentes cargadas desde Google Fonts como hoy):
 
 - Todo el styling vive en `public/styles.css` (CSS plano + variables), reemplazando el tema actual.
 - Archivos nuevos de módulos UI se crean bajo `public/ui/` (componentes) — ver `101-frontend-shell`.
-- La GUI nueva es una SPA: `index.html` reestructura el body a las 3 zonas + dock; el JS de `app.js` se modulariza.
+- La GUI nueva es una SPA: `index.html` reestructura el body al shell cockpit (sidebar full-height + columna de contenido); el JS de `app.js` se modulariza.
 - Fuentes: mantener la carga actual de Google Fonts y añadir Space Grotesk + JetBrains Mono + Material Symbols.
 
 ## Elegibilidad / contraste

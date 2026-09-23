@@ -26,8 +26,8 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 **Objetivo:** pantalla de configuración de CU1. Es el **home del producto** (se muestra al entrar al sistema, según CU3).
 
 **Estructura de layout:**
-- **Top bar:** logo/brand "Vocalis AI" (en producción "English AI Coach") + pill de estado del motor ("Speech Engine · READY") + acciones (nueva sesión ⌘K, ajustes ⚙, perfil).
-- **Sidebar izquierda (historial):** agrupación Today / Previous 7 Days; cada item: título, score, level badge, anillo de progreso.
+- **Sidebar izquierda full-height (280px):** brand "English AI Coach" (logo `graphic_eq` + título) + botón colapso en el header; botón **New Session** (⌘K); historial agrupado Today / Previous 7 Days (cada item: título, score, level badge, anillo de progreso); footer con pill "Speech Engine · READY" arriba y fila de usuario (avatar, **Guest**, engranaje ⚙ settings) debajo.
+- **Top bar (derecha de la sidebar, ancho adaptativo):** toggle de apertura de la sidebar + breadcrumb "Studio / Config|Practice": logo/brand no vive aquí.
 - **Central stage (config):**
   - Header "Iniciar nueva práctica" + breadcrumb.
   - **Instrucción de Rol para el AI Coach** (textarea de 2000 chars, contador `156/2000`): ejemplo del diseño — "Simula ser un Engineering Manager senior de Google realizando una entrevista técnica. Mi rol es el candidato. Hazme preguntas técnicas desafiantes…".
@@ -39,7 +39,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
   - **Bloque "Audio I/O":** micrófono (p.ej. `Rode NT-USB`, nivel `-14 dB`), botón "Prueba de sonido".
   - **Botón "Iniciar práctica":** deshabilitado → se habilita con texto+level.
 - **Modal de lanzamiento "Iniciando Sala de Audio":** pasos "DSP 48kHz → Whisper Aligner → Role Topic" con botones **Cancelar** y **Entrar al Estudio** (o "Ingresar").
-- **Shell dock inferior:** orb push-to-talk visibles también en config (estado idle).
+- **Sin UI de audio en config:** el orb push-to-talk, waveform y controles de micrófono solo aparecen en la vista de práctica (CU2, feature 105). Hasta 105 no hay controles de grabación visibles.
 
 **Mapeo:** feature `103-session-config-cu1`; dependencias 101/102/104.
 

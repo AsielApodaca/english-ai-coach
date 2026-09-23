@@ -61,7 +61,7 @@ Abre http://localhost:3000.
 ## Arquitectura
 
 - **Backend**: Node + Express 5, TypeScript ESM sin build (`src/server.ts` + `src/lib/`).
-- **Frontend**: vanilla (`public/`): shell cockpit `app.js` + módulos `ui/` (router, store, dock, sidebar), `index.html`, `styles.css`, `speech/`.
+- **Frontend**: vanilla (`public/`): shell cockpit `app.js` + módulos `ui/` (router, store, sidebar, settings-overlay), `index.html`, `styles.css`, `speech/`.
 - **Datos**: JSON local en `data/` (`profile.json` + `sessions/*.json`), para un usuario único.
 - **Decisiones de futuro** (roadmap): core Node + sidecar Python para fonética (parselmouth/librosa), voz neural local Piper, conversación natural. Documentado en `spec/constitution/`.
 

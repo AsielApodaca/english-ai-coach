@@ -1,21 +1,21 @@
 /**
  * Shell bootstrap for the cockpit layout (feature 101).
  *
- * Wires the singleton store, hash router, dock, sidebar and settings overlay,
- * and keeps the top-bar "Speech Engine" pill in sync with `/api/health`.
+ * Wires the singleton store, hash router, sidebar and settings overlay,
+ * and keeps the sidebar "Speech Engine" pill in sync with `/api/health`.
  * The old tab-based fabric (practice / free chat / progress / settings) is
  * gone; the stage zones are placeholders owned by features 103/105/109/108.
+ * The audio dock (push-to-talk orb / waveform) belongs to feature 105 (CU2).
  */
 
 import { createShellStore } from "./ui/store.js";
 import { initRouter } from "./ui/router.js";
-import { initDock } from "./ui/dock.js";
 import { initSidebar } from "./ui/sidebar.js";
 import { initSettingsOverlay } from "./ui/settings-overlay.js";
 
 const store = createShellStore();
 
-// ---------- top bar ----------
+// ---------- sidebar footer (status pill + user actions) ----------
 const speechPill = document.getElementById("speech-pill");
 const speechPillState = document.getElementById("speech-pill-state");
 const btnNewSession = document.getElementById("btn-new-session");
@@ -55,7 +55,6 @@ const router = initRouter(store, {
   practiceView: document.getElementById("view-practice"),
   settingsOverlay,
 });
-initDock(store, document.getElementById("dock"));
 
 // ---------- global actions ----------
 btnNewSession.addEventListener("click", () => router.navigate("#/"));
