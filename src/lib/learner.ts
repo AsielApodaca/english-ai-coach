@@ -1,9 +1,7 @@
 import type { CompleteOptions } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
 import type { Candidate } from "./practice.ts";
-import type { CategoryStats, NextStep, Profile, Session } from "./storage.ts";
-
-const LEVEL_ORDER = ["A1", "A2", "B1", "B2", "C1", "C2"];
+import { fallbackTitle, LEVELS, type CategoryStats, type Level, type NextStep, type Profile, type SessionV2 } from "./storage.ts";
 
 export interface LearnerStats {
   sessions: number;
@@ -16,23 +14,30 @@ export interface LearnerStats {
   recentTopics: string[];
 }
 
-/** Aggregate all past sessions into a stats snapshot. */
-export function computeStats(profile: Profile, sessions: Session[]): LearnerStats {
+/** Aggregate all past sessions into a stats snapshot (v2 session model). */
+export function computeStats(profile: Profile, sessions: SessionV2[]): LearnerStats {
   const byCategory: Record<string, CategoryStats> = {};
   const weakErrors: Record<string, number> = {};
   const vocabCount: Record<string, number> = {};
   for (const s of sessions) {
-    const scores = s.fragments.flatMap((f) => f.attempts.filter((a) => a.verdict !== "retry").map((a) => a.score));
-    for (const f of s.fragments) {
-      for (const a of f.attempts) {
-        for (const iss of a.issues ?? []) weakErrors[iss.category] = (weakErrors[iss.category] ?? 0) + 1;
-        const missing = a.missing ?? [];
-        const set = new Set(missing.map((w) => w.toLowerCase()));
-        for (const w of set) vocabCount[w] = (vocabCount[w] ?? 0) + 1;
+    const fragments = s.questions.flatMap((q) => q.fragments);
+    const attempts = fragments.flatMap((f) => f.attempts);
+    const scores = attempts.filter((a) => a.score >= 50).map((a) => a.score);
+    for (const a of attempts) {
+      for (const w of a.words) {
+        if (w.status === "red") {
+          const key = w.word.toLowerCase();
+          vocabCount[key] = (vocabCount[key] ?? 0) + 1;
+        }
+      }
+    }
+    for (const q of s.questions) {
+      for (const iss of q.eval?.issues ?? []) {
+        weakErrors[iss.category] = (weakErrors[iss.category] ?? 0) + 1;
       }
     }
     if (scores.length === 0) continue;
-    const cat = byCategory[s.category] ?? { sessions: 0, avgScore: 0, trend: [] as number[] };
+    const cat = byCategory[s.config.category] ?? { sessions: 0, avgScore: 0, trend: [] as number[] };
     cat.sessions += 1;
     cat.trend.push(Math.round(scores.reduce((a, b) => a + b, 0) / scores.length));
     if (cat.trend.length > 20) cat.trend = cat.trend.slice(-20);
@@ -48,30 +53,31 @@ export function computeStats(profile: Profile, sessions: Session[]): LearnerStat
     .slice(0, 10)
     .map(([w]) => w);
 
-  const allScores = sessions.flatMap((s) => s.fragments.flatMap((f) => f.attempts.map((a) => a.score)));
+  const allScores = sessions.flatMap((s) => s.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score))));
   const avg = allScores.length > 0 ? Math.round(allScores.reduce((a, b) => a + b, 0) / allScores.length) : 0;
 
   const recentTopics = sessionTopics(sessions).slice(0, 8);
   return { sessions: sessions.length, avg, byCategory, weakErrorsTop: weakEntries, trend: [], recentTopics, weakErrors, vocabGaps };
 }
 
-export function sessionTopics(sessions: Session[]): string[] {
+export function sessionTopics(sessions: SessionV2[]): string[] {
   return sessions
-    .flatMap((s) => (s.context?.length ? [s.question] : []))
+    .flatMap((s) => (s.config.topicPrompt?.length ? [s.questions[0]?.q ?? s.config.topicPrompt] : []))
     .slice(-10)
     .reverse();
 }
 
-export function estimateLevel(profile: Profile, stats: LearnerStats): string {
+export function estimateLevel(profile: Profile, stats: LearnerStats): Level {
   const avg = stats.avg;
-  const idx = LEVEL_ORDER.indexOf(profile.level || "B2");
-  if (avg >= 80) return LEVEL_ORDER[Math.min(5, idx + 1)];
-  if (avg < 50) return LEVEL_ORDER[Math.max(0, idx - 1)];
-  return profile.level || "B2";
+  const idx = LEVELS.indexOf(profile.level);
+  const base = idx === -1 ? LEVELS.indexOf("B2") : idx;
+  if (avg >= 80) return LEVELS[Math.min(LEVELS.length - 1, base + 1)];
+  if (avg < 50) return LEVELS[Math.max(0, base - 1)];
+  return LEVELS[base];
 }
 
 /** Compact, prompt-friendly summary of who the learner is right now. */
-export function buildLearnerMemory(profile: Profile, sessions: Session[]): string {
+export function buildLearnerMemory(profile: Profile, sessions: SessionV2[]): string {
   const stats = computeStats(profile, sessions);
   const parts: string[] = [];
   parts.push(`Estimated level: ${profile.level || "B2"}.`);
@@ -92,13 +98,16 @@ export function buildLearnerMemory(profile: Profile, sessions: Session[]): strin
 }
 
 /** Recompute and persist the profile from all stored sessions. */
-export function updateProfile(profile: Profile, sessions: Session[], level?: string): Profile {
+export function updateProfile(profile: Profile, sessions: SessionV2[], level?: Level): Profile {
   const stats = computeStats(profile, sessions);
   profile.level = level ?? estimateLevel(profile, stats);
   profile.categories = stats.byCategory;
   profile.weakErrors = stats.weakErrors;
   profile.vocabGaps = stats.vocabGaps;
-  profile.lastSessionAt = sessions[sessions.length - 1]?.date;
+  profile.lastSessionAt = sessions.reduce<string | undefined>(
+    (acc, s) => (acc === undefined || s.updatedAt > acc ? s.updatedAt : acc),
+    undefined,
+  );
   return profile;
 }
 
@@ -111,14 +120,22 @@ Respond ONLY with strict JSON (no markdown):
 - why: one short sentence linking to the learner's weaknesses.
 - targetLevel: the recommended level (A2-B2/C1).`;
 
+/** The most recently updated session (by updatedAt). */
+function mostRecentSession(sessions: SessionV2[]): SessionV2 | undefined {
+  return sessions.reduce<SessionV2 | undefined>(
+    (acc, s) => (acc === undefined || s.updatedAt > acc.updatedAt ? s : acc),
+    undefined,
+  );
+}
+
 export async function buildNextStep(
   candidates: Candidate[],
   profile: Profile,
-  sessions: Session[],
+  sessions: SessionV2[],
 ): Promise<{ nextStep: NextStep; provider: string }> {
   const memory = buildLearnerMemory(profile, sessions);
-  const lastTopic = sessions[sessions.length - 1];
-  const user = `Learner memory: ${memory}\nLast session category: ${lastTopic?.category ?? "none"}. Last question: ${lastTopic?.question ?? "none"}.`;
+  const lastTopic = mostRecentSession(sessions);
+  const user = `Learner memory: ${memory}\nLast session category: ${lastTopic?.config.category ?? "none"}. Last question: ${lastTopic?.questions[0]?.q ?? "none"}.`;
   const options: CompleteOptions = { temperature: 0.5, maxTokens: 4096 };
   try {
     const res = await chatJSON<Omit<NextStep, "generatedAt">>(candidates, { system: SYSTEM_NEXT_STEP, user, options });
@@ -135,4 +152,28 @@ export async function buildNextStep(
     };
     return { nextStep, provider: "local" };
   }
+}
+
+const SYSTEM_TITLE = `You are a learning coach. Summarize the user's role instruction for an English speaking practice session into ONE short title line (max 8 words, no quotes, no trailing period).
+Respond ONLY with strict JSON (no markdown):
+{"title": string}`;
+
+/**
+ * Derive a one-line session title from the topic prompt via LLM.
+ * Falls back to the first words of the topic prompt when the LLM is
+ * unavailable or returns no usable title.
+ */
+export async function deriveSessionTitle(
+  candidates: Candidate[],
+  topicPrompt: string,
+): Promise<{ title: string; provider: string }> {
+  const options: CompleteOptions = { temperature: 0.3, maxTokens: 1024 };
+  try {
+    const res = await chatJSON<{ title?: unknown }>(candidates, { system: SYSTEM_TITLE, user: topicPrompt, options });
+    const title = typeof res.data.title === "string" ? res.data.title.trim() : "";
+    if (title) return { title, provider: res.provider };
+  } catch {
+    // LLM unavailable -> fall back to the first words of the topic prompt
+  }
+  return { title: fallbackTitle(topicPrompt), provider: "local" };
 }

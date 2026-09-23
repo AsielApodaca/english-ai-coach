@@ -1,6 +1,6 @@
 # 102 · Session model v2 — sesión continua reanudable
 
-**Estado:** planificado 🔜 (primera ola)
+**Estado:** done ✅
 
 ## Contexto
 
@@ -47,9 +47,9 @@ CU3 exige sesiones separadas con progreso diferenciado y reanudables; el modelo 
 
 ## Criterios de aceptación
 
-- [ ] Tests unitarios de `storage` cubren create/load/save idempotente/migración v1→v2/groupByRecency.
-- [ ] Crear una sesión sin start no genera archivo (`tests/storage`).
-- [ ] `npm test` y `npm run check` pasan.
+- [x] Tests unitarios de `storage` cubren create/load/save idempotente/migración v1→v2/groupByRecency.
+- [x] Crear una sesión sin start no genera archivo (`tests/storage`).
+- [x] `npm test` y `npm run check` pasan.
 
 ## Fuera de alcance
 

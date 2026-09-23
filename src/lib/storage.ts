@@ -1,5 +1,27 @@
 import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+
+// ---------------------------------------------------------------------------
+// Levels — CEFR A1–C2 (expanded from the v1 B1/B2/C1 enum)
+// ---------------------------------------------------------------------------
+
+export const LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
+export type Level = (typeof LEVELS)[number];
+
+export function isLevel(v: unknown): v is Level {
+  return typeof v === "string" && (LEVELS as readonly string[]).includes(v);
+}
+
+/** Coerce an unknown value to a valid CEFR level, falling back to `fallback`. */
+export function normalizeLevel(v: unknown, fallback: Level = "B2"): Level {
+  return isLevel(v) ? v : fallback;
+}
+
+// ---------------------------------------------------------------------------
+// v1 model (legacy) — kept exported so the transitional v1 app code can still
+// read/write its own sessions; v1 files are migrated to v2 on read only.
+// ---------------------------------------------------------------------------
 
 export interface SessionAttempt {
   text: string;
@@ -24,6 +46,7 @@ export interface SessionFragment {
   passed: boolean;
 }
 
+/** @deprecated v1 session model — single question with fragments. */
 export interface Session {
   id: string;
   date: string;
@@ -50,11 +73,12 @@ export interface NextStep {
 }
 
 export interface Profile {
-  level: string;
+  level: Level;
   categories: Record<string, CategoryStats>;
   weakErrors: Record<string, number>;
   vocabGaps: string[];
   recentTopics: string[];
+  focusPhonemes?: string[];
   lastSessionAt?: string;
   nextStep?: NextStep;
 }
@@ -64,6 +88,116 @@ export interface CategoryStats {
   avgScore: number;
   lastScore?: number;
   trend: number[];
+}
+
+// ---------------------------------------------------------------------------
+// v2 model — continuous resumable session (feature 102)
+// ---------------------------------------------------------------------------
+
+export type SessionStatus = "active" | "completed";
+export type WordStatus = "green" | "amber" | "red";
+
+/** One word of a spoken attempt, colored for the karaoke line (feature 106). */
+export interface AttemptWord {
+  word: string;
+  status: WordStatus;
+}
+
+/** A single spoken attempt at a fragment (or the full answer). */
+export interface FragmentAttempt {
+  text: string;
+  words: AttemptWord[];
+  score: number;
+  startedAt: string;
+  durationMs: number;
+}
+
+export interface SessionFragmentV2 {
+  id: string;
+  text: string;
+  attempts: FragmentAttempt[];
+  passed: boolean;
+}
+
+/** Evaluation of the full answer of a question (shape mirrors practice.ts). */
+export interface SessionEval {
+  score: number;
+  verdict: "great" | "almost" | "retry";
+  matched: string[];
+  missing: string[];
+  extra: string[];
+  issues: FeedbackIssue[];
+  tips: string[];
+  next: boolean;
+}
+
+export interface SessionQuestion {
+  q: string;
+  answer: string;
+  fragments: SessionFragmentV2[];
+  fullAttempt: FragmentAttempt | null;
+  eval: SessionEval | null;
+}
+
+/** Settings captured at session creation: only user overrides (delta) + version. */
+export interface SettingsSnapshot {
+  version: number;
+  overrides: Record<string, unknown>;
+}
+
+export interface SessionConfig {
+  topicPrompt: string;
+  level: Level;
+  category: string;
+  accent: string;
+  phonemes: string[];
+  contextFiles: string[];
+  settingsSnapshot: SettingsSnapshot;
+}
+
+export interface SessionV2 {
+  id: string;
+  status: SessionStatus;
+  createdAt: string;
+  updatedAt: string;
+  config: SessionConfig;
+  provider: string;
+  questions: SessionQuestion[];
+  /** One-line summary for history listings (never the raw topicPrompt). */
+  title: string;
+}
+
+export interface CreateSessionOptions {
+  /** LLM-derived one-line title; falls back to the first words of topicPrompt. */
+  title?: string;
+  /** LLM provider that generated the first question / title. */
+  provider?: string;
+}
+
+export interface ListSessionsOptions {
+  status?: SessionStatus;
+  /** Only sessions with updatedAt >= since (ISO string). */
+  since?: string;
+  /** Maximum number of sessions to return (newest first). */
+  limit?: number;
+}
+
+export interface RecencyGroup {
+  key: "today" | "yesterday" | "last7" | "older";
+  label: string;
+  sessions: SessionV2[];
+}
+
+export const DEFAULT_ACCENT = "General American (US)";
+
+/** Snapshot used when no settings were captured (e.g. migrated v1 sessions). */
+export const DEFAULT_SETTINGS_SNAPSHOT: SettingsSnapshot = { version: 0, overrides: {} };
+
+/** Derive a short title from the topic prompt (first `maxWords` words). */
+export function fallbackTitle(topicPrompt: string, maxWords = 8): string {
+  const words = topicPrompt.trim().split(/\s+/).filter(Boolean);
+  const title = words.slice(0, maxWords).join(" ");
+  return title || "Untitled session";
 }
 
 interface Storage {
@@ -77,20 +211,125 @@ function mkdirp(dir: string): void {
   mkdirSync(dir, { recursive: true });
 }
 
-/** Write file atomically: temp file + rename. */
+/** Write file atomically: temp file + rename (avoids corruption on crash). */
 function writeJSONAtomic(file: string, value: unknown): void {
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(value, null, 2), "utf8");
   renameSync(tmp, file);
 }
 
+/** Start of the local calendar day for `d`. */
+function startOfDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+/** Session ids are generated UUIDs; reject anything that could escape the sessions dir. */
+function isValidSessionId(id: string): boolean {
+  return /^[a-zA-Z0-9-]+$/.test(id);
+}
+
+function sessionFile(sessionsDir: string, id: string): string {
+  if (!isValidSessionId(id)) throw new Error(`refusing unsafe session id: ${JSON.stringify(id)}`);
+  return join(sessionsDir, `${id}.json`);
+}
+
+/**
+ * Migrate a v1 session to the v2 shape (read-only compatibility).
+ * The v1 file is NEVER rewritten; this is a companion read view.
+ */
+function migrateV1ToV2(v1: Session): SessionV2 {
+  const date = v1.date ?? new Date(0).toISOString();
+  const fragments: SessionFragmentV2[] = (v1.fragments ?? []).map((f) => ({
+    id: f.id,
+    text: f.text,
+    attempts: (f.attempts ?? []).map((a) => ({
+      text: a.text,
+      words: [], // v1 has no word-level data
+      score: a.score ?? 0,
+      startedAt: "",
+      durationMs: 0,
+    })),
+    passed: Boolean(f.passed),
+  }));
+  return {
+    id: v1.id,
+    status: "completed",
+    createdAt: date,
+    updatedAt: date,
+    config: {
+      topicPrompt: v1.question ?? "",
+      level: normalizeLevel(v1.level),
+      category: v1.category ?? "free",
+      accent: DEFAULT_ACCENT,
+      phonemes: [],
+      contextFiles: [],
+      settingsSnapshot: DEFAULT_SETTINGS_SNAPSHOT,
+    },
+    provider: v1.provider ?? "unknown",
+    questions: [
+      {
+        q: v1.question ?? "",
+        answer: v1.fullAnswer?.text ?? "",
+        fragments,
+        fullAttempt: null,
+        eval: null,
+      },
+    ],
+    title: fallbackTitle(v1.question ?? ""),
+  };
+}
+
+/** Parse a raw session file into v2, migrating v1 files on the fly. */
+function toSessionV2(raw: unknown): SessionV2 | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const obj = raw as Record<string, unknown>;
+  if (Array.isArray(obj.questions) && obj.config && typeof obj.config === "object") {
+    const v2 = obj as unknown as SessionV2;
+    if (typeof v2.title === "string" && v2.title.length > 0) return v2;
+    const cfg = v2.config as SessionConfig;
+    return { ...v2, title: fallbackTitle(cfg.topicPrompt ?? "") };
+  }
+  if (typeof obj.id === "string" && obj.id.length > 0) {
+    return migrateV1ToV2(obj as unknown as Session);
+  }
+  return undefined;
+}
+
+/**
+ * Group sessions by recency of `updatedAt` (local calendar days):
+ * Today / Yesterday / Previous 7 Days / Older. Each group is sorted newest first.
+ */
+export function groupSessionsByRecency(sessions: SessionV2[], now: Date = new Date()): RecencyGroup[] {
+  const startOfToday = startOfDay(now).getTime();
+  const startOfYesterday = startOfToday - 86_400_000;
+  const startOfLast7 = startOfToday - 7 * 86_400_000;
+  const groups: RecencyGroup[] = [
+    { key: "today", label: "Today", sessions: [] },
+    { key: "yesterday", label: "Yesterday", sessions: [] },
+    { key: "last7", label: "Previous 7 Days", sessions: [] },
+    { key: "older", label: "Older", sessions: [] },
+  ];
+  for (const s of sessions) {
+    const t = new Date(s.updatedAt).getTime();
+    if (t >= startOfToday) groups[0].sessions.push(s);
+    else if (t >= startOfYesterday) groups[1].sessions.push(s);
+    else if (t >= startOfLast7) groups[2].sessions.push(s);
+    else groups[3].sessions.push(s);
+  }
+  for (const g of groups) {
+    g.sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+  return groups;
+}
+
 export function createStorage(baseDir: string): Storage & {
   loadProfile(): Profile;
   saveProfile(profile: Profile): void;
-  listSessions(): Session[];
-  loadSession(id: string): Session | undefined;
-  saveSession(session: Session): void;
-  loadAllSessions(): Session[];
+  createSession(config: SessionConfig, opts?: CreateSessionOptions): string;
+  saveSession(session: SessionV2): void;
+  loadSession(id: string): SessionV2 | undefined;
+  listSessions(opts?: ListSessionsOptions): SessionV2[];
+  loadAllSessions(): SessionV2[];
 } {
   const dataDir = join(baseDir, "data");
   const profilePath = join(dataDir, "profile.json");
@@ -106,7 +345,17 @@ export function createStorage(baseDir: string): Storage & {
     loadProfile(): Profile {
       try {
         if (existsSync(profilePath)) {
-          return JSON.parse(readFileSync(profilePath, "utf8")) as Profile;
+          const parsed = JSON.parse(readFileSync(profilePath, "utf8")) as Partial<Profile>;
+          return {
+            level: normalizeLevel(parsed.level),
+            categories: parsed.categories ?? {},
+            weakErrors: parsed.weakErrors ?? {},
+            vocabGaps: parsed.vocabGaps ?? [],
+            recentTopics: parsed.recentTopics ?? [],
+            ...(parsed.focusPhonemes ? { focusPhonemes: parsed.focusPhonemes } : {}),
+            ...(parsed.lastSessionAt ? { lastSessionAt: parsed.lastSessionAt } : {}),
+            ...(parsed.nextStep ? { nextStep: parsed.nextStep } : {}),
+          };
         }
       } catch {
         // corrupt profile -> start fresh
@@ -116,33 +365,78 @@ export function createStorage(baseDir: string): Storage & {
     saveProfile(profile: Profile): void {
       writeJSONAtomic(profilePath, profile);
     },
-    listSessions(): Session[] {
-      if (!existsSync(sessionsDir)) return [];
-      return readdirSync(sessionsDir)
-        .filter((f) => f.endsWith(".json"))
-        .map((f) => {
-          try {
-            return JSON.parse(readFileSync(join(sessionsDir, f), "utf8")) as Session;
-          } catch {
-            return null;
-          }
-        })
-        .filter((s): s is Session => s !== null)
-        .sort((a, b) => a.date.localeCompare(b.date));
+    /**
+     * Create a new active session and persist it immediately.
+     * Only called once the user presses "Iniciar práctica" (CU3): without a
+     * config there is no session, so no file is ever written here otherwise.
+     */
+    createSession(config: SessionConfig, opts?: CreateSessionOptions): string {
+      const id = randomUUID();
+      const now = new Date().toISOString();
+      const session: SessionV2 = {
+        id,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+        config,
+        provider: opts?.provider ?? "unknown",
+        questions: [],
+        title: opts?.title?.trim() || fallbackTitle(config.topicPrompt),
+      };
+      writeJSONAtomic(join(sessionsDir, `${id}.json`), session);
+      return id;
     },
-    loadSession(id: string): Session | undefined {
-      const file = join(sessionsDir, `${id}.json`);
+    /**
+     * Persist the full session state (idempotent: replaces the whole file,
+     * never merges). Bumps `updatedAt` to now on every checkpoint save.
+     */
+    saveSession(session: SessionV2): void {
+      if (!session.id) throw new Error("saveSession: session.id is required.");
+      const file = sessionFile(this.sessionsDir, session.id);
+      // Feature 102: a v1 file is a compatibility view and must NEVER be
+      // rewritten; refuse to overwrite legacy files.
+      if (existsSync(file)) {
+        const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+        if (!Array.isArray(raw.questions)) {
+          throw new Error(`refusing to overwrite v1 session file: ${session.id}`);
+        }
+      }
+      const now = new Date().toISOString();
+      writeJSONAtomic(file, { ...session, updatedAt: now });
+    },
+    loadSession(id: string): SessionV2 | undefined {
+      let file: string;
+      try {
+        file = sessionFile(this.sessionsDir, id);
+      } catch {
+        return undefined;
+      }
       if (!existsSync(file)) return undefined;
       try {
-        return JSON.parse(readFileSync(file, "utf8")) as Session;
+        return toSessionV2(JSON.parse(readFileSync(file, "utf8")) as unknown);
       } catch {
         return undefined;
       }
     },
-    saveSession(session: Session): void {
-      writeJSONAtomic(join(sessionsDir, `${session.id}.json`), session);
+    listSessions(opts?: ListSessionsOptions): SessionV2[] {
+      if (!existsSync(sessionsDir)) return [];
+      let sessions = readdirSync(sessionsDir)
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => {
+          try {
+            return toSessionV2(JSON.parse(readFileSync(join(sessionsDir, f), "utf8")) as unknown);
+          } catch {
+            return undefined;
+          }
+        })
+        .filter((s): s is SessionV2 => s !== undefined);
+      if (opts?.status) sessions = sessions.filter((s) => s.status === opts.status);
+      if (opts?.since) sessions = sessions.filter((s) => s.updatedAt >= opts.since!);
+      sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      if (opts?.limit && opts.limit > 0) sessions = sessions.slice(0, opts.limit);
+      return sessions;
     },
-    loadAllSessions(): Session[] {
+    loadAllSessions(): SessionV2[] {
       return this.listSessions();
     },
   };
