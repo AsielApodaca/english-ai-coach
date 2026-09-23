@@ -4,194 +4,117 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>English AI Coach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;600&family=JetBrains+Mono:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div class="brand">English AI Coach</div>
-      <nav class="tabs">
-        <button class="tab-btn active" data-tab="practice">Practice</button>
-        <button class="tab-btn" data-tab="chat">Free chat</button>
-        <button class="tab-btn" data-tab="progress">Progress</button>
-        <button class="tab-btn" data-tab="settings">Settings</button>
-      </nav>
-      <div id="health-pill" class="health-pill" title="Server / LLM status">…</div>
-    </header>
-
-    <main>
-      <!-- PRACTICE -->
-      <section id="tab-practice" class="tab-panel active">
-        <div id="setup-view">
-          <h1>Practice a spoken answer</h1>
-          <p class="muted">The coach asks a question, reads a fragment, you repeat it, and the coach grades your attempt.</p>
-          <div class="form-grid">
-            <label>Category
-              <select id="category">
-                <option value="interviews">Job interviews</option>
-                <option value="star">STAR method</option>
-                <option value="daily">Daily standup</option>
-                <option value="free">Free topic</option>
-              </select>
-            </label>
-            <label>Level
-              <select id="level">
-                <option value="B1">B1</option>
-                <option value="B2" selected>B2</option>
-                <option value="C1">C1</option>
-              </select>
-            </label>
-            <label class="check">
-              <input type="checkbox" id="personalized" checked />
-              Personalize with my memory
-            </label>
-          </div>
-          <button id="start-practice" class="primary">Start practice</button>
-          <div id="practice-loading" class="loading hidden">Generating practice set…</div>
+    <!-- Full-height sidebar: brand · new session · history · footer (speech + user) -->
+    <aside id="sidebar" class="sidebar" aria-label="Navigation and session history">
+      <div class="sidebar-brand">
+        <div class="side-brand">
+          <span class="material-symbols-outlined brand-icon" aria-hidden="true">graphic_eq</span>
+          <span class="brand-name">English AI Coach</span>
         </div>
+        <button id="btn-sidebar-close" class="icon-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
+          <span class="material-symbols-outlined" aria-hidden="true">left_panel_close</span>
+        </button>
+      </div>
 
-        <div id="session-view" class="hidden">
-          <div class="session-head">
-            <span id="category-badge" class="badge"></span>
-            <span id="level-badge" class="badge alt"></span>
-            <button id="quit-session" class="ghost small">End session</button>
-          </div>
-          <div id="progress-bar-wrap"><div id="progress-bar"></div></div>
-          <div class="question-card">
-            <div class="q-label">Coach asks</div>
-            <div id="question-text"></div>
-          </div>
-          <div id="coach-note" class="note"></div>
+      <button id="btn-new-session" class="btn new-session" title="New session (⌘K)">
+        <span class="material-symbols-outlined" aria-hidden="true">add</span>
+        <span class="new-session-label">New Session</span>
+        <kbd>⌘K</kbd>
+      </button>
 
-          <div id="fragment-area">
-            <div id="stage-chip" class="chip"></div>
-            <div class="sub-row"><span class="sub-label">Coach</span><div id="fragment-text" class="fragment"></div></div>
-            <div class="controls">
-              <button id="btn-play" class="primary soft">Repeat after me</button>
-              <button id="btn-record" class="record">Record</button>
-              <button id="btn-stop" class="danger hidden">Stop</button>
-              <button id="btn-check" class="primary disabled" disabled>Check my attempt</button>
+      <div id="history-slots" class="history-slots"></div>
+
+      <div class="sidebar-footer">
+        <div id="speech-pill" class="status-pill" title="Speech engine status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-label">Speech Engine</span>
+          <span id="speech-pill-state" class="status-state">…</span>
+        </div>
+        <div class="sidebar-user">
+          <div class="user-avatar" aria-hidden="true">
+            <span class="material-symbols-outlined">person</span>
+          </div>
+          <div class="user-meta">
+            <div class="user-name">Guest</div>
+            <div class="user-role">local profile</div>
+          </div>
+          <button id="btn-settings" class="icon-btn" title="Settings" aria-label="Settings">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+    <div id="sidebar-backdrop" class="sidebar-backdrop"></div>
+
+    <!-- Content column: top bar (right of the sidebar) + central stage -->
+    <div class="app-main">
+      <header class="topbar">
+        <div class="topbar-left">
+          <button id="btn-sidebar-toggle" class="icon-btn" title="Show history sidebar" aria-label="Show history sidebar">
+            <span class="material-symbols-outlined" aria-hidden="true">dock_to_right</span>
+          </button>
+          <div class="breadcrumb">
+            <span class="material-symbols-outlined crumb-icon" aria-hidden="true">terminal</span>
+            <span class="crumb">Studio</span>
+            <span class="crumb-sep" aria-hidden="true">/</span>
+            <span id="crumb-current" class="crumb-current">Config</span>
+          </div>
+        </div>
+      </header>
+
+      <main id="stage" class="stage">
+        <div class="stage-inner">
+          <!-- Config slot (feature 103) -->
+          <section id="view-config" class="stage-view" data-view="config">
+            <div class="stage-placeholder">
+              <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">tune</span>
+              <h2 class="placeholder-title">Config</h2>
+              <p class="placeholder-text">Session configuration slot — feature 103 arrives here.</p>
             </div>
-            <div id="listening-dot" class="listening hidden">Listening…</div>
-            <div class="sub-row"><span class="sub-label">You</span><div id="transcript" class="transcript"></div></div>
-          </div>
-
-          <div id="feedback-area" class="hidden">
-            <div class="score-row">
-              <div id="score-ring"><span id="score-num">0</span></div>
-              <div id="verdict-text"></div>
+          </section>
+          <!-- Practice slot (feature 105) -->
+          <section id="view-practice" class="stage-view" data-view="practice" hidden>
+            <div class="stage-placeholder">
+              <span class="material-symbols-outlined placeholder-icon" aria-hidden="true">record_voice_over</span>
+              <h2 class="placeholder-title">Practice</h2>
+              <p class="placeholder-text">Karaoke practice slot — feature 105 arrives here.</p>
             </div>
-            <div id="issues" class="issues"></div>
-            <div id="tips" class="tips"></div>
-            <div class="controls">
-              <button id="btn-try-again" class="ghost">Try again</button>
-              <button id="btn-next" class="primary">Next fragment</button>
-            </div>
-          </div>
-
-          <div id="done-area" class="hidden">
-            <h2>Answer complete</h2>
-            <p id="session-summary" class="muted"></p>
-            <div class="controls">
-              <button id="btn-play-full" class="primary soft">Play full answer</button>
-              <button id="btn-record-full" class="record">Record full answer</button>
-              <button id="btn-stop-full" class="danger hidden">Stop</button>
-              <button id="btn-check-full" class="primary">Check full answer</button>
-            </div>
-            <div id="transcript-full" class="transcript"></div>
-            <div id="full-feedback" class="feedback-block hidden"></div>
-            <button id="btn-finish" class="ghost">Finish session</button>
-          </div>
+          </section>
         </div>
-      </section>
+      </main>
+    </div>
 
-      <!-- CHAT -->
-      <section id="tab-chat" class="tab-panel">
-        <h1>Free chat</h1>
-        <p class="muted">Talk with the coach about anything. Try: "Give me a tricky interview question and evaluate my answer."</p>
-        <div id="chat-log" class="chat-log"></div>
-        <div class="chat-input-row">
-          <input id="chat-input" type="text" placeholder="Type a message…" />
-          <button id="chat-send" class="primary">Send</button>
+    <!-- Settings overlay (feature 108) -->
+    <div id="settings-overlay" class="overlay" hidden>
+      <div class="overlay-panel" role="dialog" aria-modal="true" aria-label="Settings">
+        <div class="overlay-head">
+          <h2 class="overlay-title">Settings</h2>
+          <button id="btn-settings-close" class="icon-btn" title="Close" aria-label="Close settings">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+          </button>
         </div>
-      </section>
-
-      <!-- PROGRESS -->
-      <section id="tab-progress" class="tab-panel">
-        <h1>Progress & memory</h1>
-        <div class="progress-grid">
-          <div class="card">
-            <h3>Snapshot</h3>
-            <div id="progress-snapshot"></div>
+        <div class="overlay-body">
+          <div class="settings-placeholder">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+            <p>Settings arriving with feature 108.</p>
           </div>
-          <div class="card">
-            <h3>Weak areas</h3>
-            <div id="progress-weak"></div>
-          </div>
-          <div class="card wide">
-            <h3>Trend of recent scores</h3>
-            <div id="trend-chart"></div>
-          </div>
-          <div class="card wide">
-            <h3>Recommended next step</h3>
-            <div id="next-step-box"></div>
-            <button id="btn-refresh-next" class="ghost small">Regenerate with AI</button>
-          </div>
-          <div class="card wide">
-            <h3>Vocabulary gaps</h3>
-            <div id="progress-vocab"></div>
-          </div>
-          <div class="card wide">
-            <h3>Session history</h3>
-            <div id="session-history"></div>
-          </div>
+          <div id="engine-status" class="engine-status"></div>
         </div>
-      </section>
-
-      <!-- SETTINGS -->
-      <section id="tab-settings" class="tab-panel">
-        <h1>Settings</h1>
-        <div class="form-grid">
-          <label>LLM provider
-            <select id="set-provider">
-              <option value="zen">OpenCode Zen (big-pickle, free)</option>
-              <option value="gemini">Google Gemini (free tier)</option>
-              <option value="cloudflare">Cloudflare Workers AI</option>
-              <option value="ollama">Ollama (local)</option>
-            </select>
-          </label>
-          <label>Listen with (STT)
-            <select id="set-stt">
-              <option value="browser">Chrome Web Speech</option>
-              <option value="whisper">Whisper (local)</option>
-            </select>
-          </label>
-          <label>TTS voice
-            <select id="set-voice"></select>
-          </label>
-          <label>Speech rate
-            <select id="set-rate">
-              <option value="0.8">Slow</option>
-              <option value="0.95" selected>Normal</option>
-              <option value="1.1">Fast</option>
-            </select>
-          </label>
-          <label>Piper voice
-            <select id="set-piper-voice">
-              <option value="en_US-amy-medium">Amy (medium, default)</option>
-              <option value="en_US-amy-low">Amy (low, fast)</option>
-              <option value="en_US-ryan-medium">Ryan (medium)</option>
-            </select>
-          </label>
-        </div>
-        <label class="check">
-          <input type="checkbox" id="set-autoplay" checked />
-          Auto-play each fragment after a pass
-        </label>
-        <div id="whisper-status" class="note"></div>
-        <div id="tts-status" class="note"></div>
-        <div id="env-hints" class="note muted"></div>
-      </section>
-    </main>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

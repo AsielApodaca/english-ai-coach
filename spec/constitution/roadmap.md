@@ -7,13 +7,13 @@ Estado del producto English AI Coach (documento normativo de planificación). Fe
 1. **001 · Coach core** — flujo completo "Repeat after me": generación de práctica, evaluación híbrida, memoria/progreso, TTS/STT browser y whisper opcional, fallback multi-proveedor LLM, UI en inglés local. *(Su UI será reemplazada por el shell v2; su motor de práctica/evaluación se reutiliza.)*
 2. **002 · Whisper local por defecto** — whisper.cpp como motor STT predeterminado cuando está instalado (offline/privado; fallback automático a reconocimiento del navegador). *Se amplía en 106 con word-timestamps.*
 3. **007 · Voz humana (TTS neural local)** — voz neural natural vía Piper local (`piper` subprocess, stdin), fallback a edge-tts online y `speechSynthesis` como último recurso; pausas medidas entre fragmentos y velocidad por `length_scale`; estado de TTS visible en Settings.
+4. **101 · Frontend shell (cockpit + design system)** — rediseño total UI al layout de cockpit (sidebar full-height con brand/sesión/historial/footer, top bar a la derecha con ancho adaptativo, stage central, settings overlay). Implementa `spec/design/design-system.md`. Elimina la tab "Free chat" del MVP. *(Zonas del stage en placeholders; contenido llega con 103/105/109. La UI de audio —orb, waveform, tempo— no es de 101, es de 105/CU2.)*
 
 ## Siguiente 🔜 (rediseño v2 — CU1/CU2/CU3)
 
 La fase v2 se organiza en olas de implementación; cada ola es un PR independiente sobre la base previa:
 
 ### Ola 1 — Fundación (shell + datos)
-4. **101 · Frontend shell (cockpit + design system)** — rediseño total UI al layout de 3 zonas + dock (sidebar historial, stage central, top bar, settings overlay). Implementa `spec/design/design-system.md`. Elimina la tab "Free chat" del MVP.
 5. **102 · Session model v2** — schema de sesión continua reanudable (`status: active|completed`, `questions[]`, `config` snapshot, nivel A1–C2 completo); migración de `data/sessions/*`; persistencia idempotente y agrupación por recencia para historial.
 
 ### Ola 2 — Motor de coloreado

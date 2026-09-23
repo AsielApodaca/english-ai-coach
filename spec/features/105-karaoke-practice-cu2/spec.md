@@ -64,7 +64,7 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 
 ## Dependencias
 
-- 101 (shell/dock), 102 (sesión), 106 (colores y timestamps), 103 (arranque); backend de 001/007 ya implementado; 108 (umbral pass); 109 (salida/reanudación).
+- 102 (sesión), 106 (colores y timestamps), 103 (arranque); el **dock de audio (orb/waveform/tempo)** es parte de 105 sobre el shell de 101; backend de 001/007 ya implementado; 108 (umbral pass); 109 (salida/reanudación).
 
 ## Criterios de aceptación
 

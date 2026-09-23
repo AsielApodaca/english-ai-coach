@@ -23,7 +23,7 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 - [ ] **Dropdown nivel A1–C2** con etiquetas CEFR (A1 Starter … C2 Mastery); default: `profile.level` o `B2 (Working)`; muestra hint de accuracy histórico si existe.
 - [ ] **Dropzone** PDF/DOCX/TXT/MD (arrastrar o elegir) con chips removibles; integra con 104.
 - [ ] **Acento objetivo** (default "General American (US)") y **foco fonético** (chips desde `profile.focusPhonemes`, p. ej. `/θ/`, `/v/-/b/`, `/æ/`) — alimentan la `config` (102).
-- [ ] **Bloque Audio I/O:** selector de input device (Web Audio), monitor de nivel (dB) y botón "Prueba de sonido" que reproduce un tono y lo captura (usa dock de 101).
+- [ ] **Bloque Audio I/O:** selector de input device (Web Audio), monitor de nivel (dB) y botón "Prueba de sonido" que reproduce un tono y lo captura (usa el pipeline de audio de 105).
 - [ ] Botón "Iniciar práctica": **deshabilitado** hasta que `topicPrompt` tenga texto y `level` válido.
 - [ ] Al presionarlo: guarda borrador de config en estado local (se pierde si se cancela), muestra **modal "Iniciando Sala de Audio"** con pasos animados (DSP 48kHz → Whisper Aligner → Role Topic) y botones **Cancelar** / **Entrar al Estudio**.
   - Vía backend: la comprobación de disponibilidad (whisper instalado, TTS disponible) se resuelve en el STEP 2; si whisper no está, el modal anuncia el fallback (Web Speech) en el paso del aligner.
