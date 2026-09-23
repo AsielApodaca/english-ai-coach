@@ -1,6 +1,6 @@
 # 104 · Ingesta de archivos de contexto
 
-**Estado:** planificado 🔜 (ola 3)
+**Estado:** hecho ✅ (implementado en la rama `feature/session-config`, ola 3)
 
 ## Contexto
 
@@ -45,9 +45,9 @@ CU1 pide dar más contexto a la conversación vía archivos (un job spec, una no
 
 ## Criterios de aceptación
 
-- [ ] Tests (`tests/extract.test.ts` existente se amplía): TXT/MD directos; PDF y DOCX con fixtures minimos de ejemplo; límite de tamaño; sanitización de nulos.
-- [ ] Endpoint `POST /api/files/extract` funciona con presencia/ausencia del archivo.
-- [ ] `npm test` y `npm run check` pasan.
+- [x] Tests (`tests/extract.test.ts` existente se amplía): TXT/MD directos; PDF y DOCX con fixtures minimos de ejemplo; límite de tamaño; sanitización de nulos.
+- [x] Endpoint `POST /api/files/extract` funciona con presencia/ausencia del archivo.
+- [x] `npm test` y `npm run check` pasan.
 
 ## Fuera de alcance
 

@@ -1,6 +1,6 @@
 # 103 · Config de sesión (CU1)
 
-**Estado:** planificado 🔜 (ola 3)
+**Estado:** hecho ✅ (implementado en la rama `feature/session-config`, ola 3)
 
 ## Contexto
 
@@ -10,7 +10,7 @@
 
 ## Qué hace
 
-Implementa la pantalla de configuración (el home del producto — CU3 muestra CU1 al entrar). El usuario describe la conversación (instrucción de rol), elige nivel A1–C2 (default del perfil o B2), adjunta opcionalmente archivos (dropzone → 104), elige/verifica micrófono, y al cumplir el requisito (texto + nivel) se habilita "Iniciar práctica". El start dispara el **modal de lanzamiento** ("Iniciando Sala de Audio": DSP 48kHz → Whisper Aligner → Role Topic) y, al "Entrar al Estudio", crea la sesión v2 (`102`) y navega a la práctica (105).
+Implementa la pantalla de configuración (el home del producto — CU3 muestra CU1 al entrar). El usuario describe la conversación (instrucción de rol), elige nivel A1–C2 (default del perfil o B2), adjunta opcionalmente archivos (drag & drop global → 104), elige/verifica micrófono, y al cumplir el requisito (texto + nivel) se habilita "Iniciar práctica". El start dispara el **modal de lanzamiento** ("Iniciando Sala de Audio": DSP 48kHz → Whisper Aligner → Role Topic) y, al "Entrar al Estudio", crea la sesión v2 (`102`) y navega a la práctica (105).
 
 ## Por qué
 
@@ -21,7 +21,7 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 - [ ] **Textarea de instrucción** (límite 6000 chars, contador `N/6000`). ejemplo pre-cargado por defecto (copy del diseño): rol, contexto, expectativa del coach.
 - [ ] **Template chips** (4): Mock Tech Interview · System Design Defense · Client Demo Pitch · Behavioral Leadership. Al hacer clic, rellenan textarea + nivel predefinido.
 - [ ] **Dropdown nivel A1–C2** con etiquetas CEFR (A1 Starter … C2 Mastery); default: `profile.level` o `B2 (Working)`; muestra hint de accuracy histórico si existe.
-- [ ] **Dropzone** PDF/DOCX/TXT/MD (arrastrar o elegir) con chips removibles; integra con 104.
+- [ ] **Adjuntar archivos** PDF/DOCX/TXT/MD: botón de attach en el prompt box o **drag & drop en cualquier parte de la pantalla** (overlay que oscurece el fondo con instrucción de soltar); chips removibles con estado de extracción; integra con 104.
 - [ ] **Acento objetivo** (default "General American (US)") y **foco fonético** (chips desde `profile.focusPhonemes`, p. ej. `/θ/`, `/v/-/b/`, `/æ/`) — alimentan la `config` (102).
 - [ ] **Bloque Audio I/O:** selector de input device (Web Audio), monitor de nivel (dB) y botón "Prueba de sonido" que reproduce un tono y lo captura (usa el pipeline de audio de 105).
 - [ ] Botón "Iniciar práctica": **deshabilitado** hasta que `topicPrompt` tenga texto y `level` válido.
@@ -43,14 +43,14 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 
 ## Dependencias
 
-- 101 (shell), 102 (session), 104 (dropzone). 105 provee endpoint de pregunta.
+- 101 (shell), 102 (session), 104 (files extract). 105 provee endpoint de pregunta.
 
 ## Criterios de aceptación
 
-- [ ] Start habilitado solo con topic + level; verificado por test de UI/DOM y por backend (`session/start` rechaza sin config).
-- [ ] Modal de lanzamiento muestra estado de motores (whisper ready o fallback).
-- [ ] Crear una práctica desde la config crea sesión v2 y navega a `#/practice/<id>` sin reload.
-- [ ] `npm test` y `npm run check` pasan.
+- [x] Start habilitado solo con topic + level; verificado por test de UI/DOM y por backend (`session/start` rechaza sin config).
+- [x] Modal de lanzamiento muestra estado de motores (whisper ready o fallback).
+- [x] Crear una práctica desde la config crea sesión v2 y navega a `#/practice/<id>` sin reload.
+- [x] `npm test` y `npm run check` pasan.
 
 ## Fuera de alcance
 

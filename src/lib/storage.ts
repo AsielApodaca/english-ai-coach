@@ -97,6 +97,22 @@ export interface CategoryStats {
 export type SessionStatus = "active" | "completed";
 export type WordStatus = "green" | "amber" | "red";
 
+/** Supported context-file formats (feature 104). */
+export type FileKind = "pdf" | "docx" | "txt" | "md";
+
+/**
+ * Reference to an extracted context file stored in `config.contextFiles[]`
+ * (feature 104). The extracted text itself lives under
+ * `data/tmp/context/<bucket>/<textRef>` — never duplicated in the session JSON.
+ */
+export interface ContextFileRef {
+  name: string;
+  size: number;
+  kind: FileKind;
+  /** Relative file name of the extracted text under `data/tmp/context/<bucket>/`. */
+  textRef: string;
+}
+
 /** One word of a spoken attempt, colored for the karaoke line (feature 106). */
 export interface AttemptWord {
   word: string;
@@ -154,7 +170,7 @@ export interface SessionConfig {
   category: string;
   accent: string;
   phonemes: string[];
-  contextFiles: string[];
+  contextFiles: ContextFileRef[];
   settingsSnapshot: SettingsSnapshot;
 }
 
@@ -229,6 +245,16 @@ function startOfDay(d: Date): Date {
 /** Session ids are generated UUIDs; reject anything that could escape the sessions dir. */
 function isValidSessionId(id: string): boolean {
   return /^[a-zA-Z0-9-]+$/.test(id);
+}
+
+/** Context buckets are session ids or the "draft" bucket; never path-escape. */
+function isValidBucket(bucket: string): boolean {
+  return /^[a-zA-Z0-9-]+$/.test(bucket);
+}
+
+/** Extracted-text refs are generated file names; never path-escape. */
+function isValidTextRef(ref: string): boolean {
+  return /^[a-zA-Z0-9._-]+$/.test(ref);
 }
 
 function sessionFile(sessionsDir: string, id: string): string {
@@ -333,6 +359,8 @@ export function createStorage(baseDir: string): Storage & {
   loadSession(id: string): SessionV2 | undefined;
   listSessions(opts?: ListSessionsOptions): SessionV2[];
   loadAllSessions(): SessionV2[];
+  saveContextText(bucket: string, file: { name: string; size: number; kind: FileKind }, text: string): string;
+  loadContextText(bucket: string, textRef: string): string | undefined;
 } {
   const dataDir = join(baseDir, "data");
   const profilePath = join(dataDir, "profile.json");
@@ -441,6 +469,37 @@ export function createStorage(baseDir: string): Storage & {
     },
     loadAllSessions(): SessionV2[] {
       return this.listSessions();
+    },
+    /**
+     * Persist extracted context text under `data/tmp/context/<bucket>/` and
+     * return the generated `textRef` (feature 104). The bucket is a session id
+     * or the "draft" bucket used before a session exists (CU1 dropzone).
+     */
+    saveContextText(bucket: string, file: { name: string; size: number; kind: FileKind }, text: string): string {
+      if (!isValidBucket(bucket)) throw new Error(`refusing unsafe context bucket: ${JSON.stringify(bucket)}`);
+      const dir = join(this.tmpDir, "context", bucket);
+      mkdirp(dir);
+      const textRef = `${file.kind}-${randomUUID()}.txt`;
+      writeFileSync(join(dir, textRef), text, "utf8");
+      return textRef;
+    },
+    /**
+     * Read an extracted context text back. Falls back to the "draft" bucket so
+     * files uploaded before session creation (CU1 dropzone) resolve seamlessly
+     * once the session exists and `config.contextFiles[]` references them.
+     */
+    loadContextText(bucket: string, textRef: string): string | undefined {
+      if (!isValidBucket(bucket) || !isValidTextRef(textRef)) return undefined;
+      for (const candidate of [bucket, "draft"]) {
+        const file = join(this.tmpDir, "context", candidate, textRef);
+        if (!existsSync(file)) continue;
+        try {
+          return readFileSync(file, "utf8");
+        } catch {
+          return undefined;
+        }
+      }
+      return undefined;
     },
   };
 }
