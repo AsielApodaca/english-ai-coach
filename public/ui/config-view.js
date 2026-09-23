@@ -1,13 +1,19 @@
 /**
  * Session configuration view (feature 103 / CU1) — the product home.
  *
+ * Layout follows the Stitch design "Configurar Sesión con AI Coach -
+ * Minimalist": a centered hero headline, scenario pills, a Claude/ChatGPT-style
+ * prompt box (textarea + toolbar with CEFR level, attach, live mic dB, clear,
+ * char counter, start button) and a subtle meta strip (accent / phonetic focus
+ * / history). Files can be attached via the toolbar button OR by dragging
+ * anywhere on the window: a full-screen dimmed overlay announces the drop zone.
+ *
  * The user describes the coach role (topicPrompt), picks a CEFR level, may
- * attach context files (feature 104 dropzone), chooses an accent + phonetic
- * focus, verifies the microphone, and starts a practice. "Iniciar práctica"
- * stays disabled until topicPrompt is non-empty and the level is valid;
- * pressing it opens the "Iniciando Sala de Audio" launch modal and only
- * "Entrar al Estudio" creates the session via POST /api/session/start
- * (CU3: no session is created before that).
+ * attach context files (feature 104), verifies the microphone, and starts a
+ * practice. "Iniciar práctica" stays disabled until topicPrompt is non-empty
+ * and the level is valid; pressing it opens the "Iniciando Sala de Audio"
+ * launch modal and only "Entrar al Estudio" creates the session via
+ * POST /api/session/start (CU3: no session is created before that).
  *
  * The config draft lives in module state only (no disk autosave — feature 109
  * owns the data/tmp draft), so leaving the view and returning within the same
@@ -19,15 +25,15 @@ import { WaveRecorder } from "../speech/recorder-wave.js";
 
 const TOPIC_MAX = 6000;
 const DEFAULT_PROMPT =
-  "Simula ser un Engineering Manager senior de Google realizando una entrevista técnica. Mi rol es el candidato. Hazme preguntas técnicas desafiantes…";
+  "Simula ser un Engineering Manager senior de Google haciéndome una entrevista de comportamiento técnica. Profundiza en manejo de desacuerdos y trade-offs arquitectónicos.";
 
 const LEVELS = [
-  { value: "A1", label: "A1 Starter" },
-  { value: "A2", label: "A2 Elementary" },
-  { value: "B1", label: "B1 Intermediate" },
-  { value: "B2", label: "B2 Working" },
-  { value: "C1", label: "C1 Advanced" },
-  { value: "C2", label: "C2 Mastery" },
+  { value: "A1", label: "Nivel A1" },
+  { value: "A2", label: "Nivel A2" },
+  { value: "B1", label: "Nivel B1" },
+  { value: "B2", label: "Nivel B2 (Working)" },
+  { value: "C1", label: "Nivel C1 (Advanced)" },
+  { value: "C2", label: "Nivel C2 (Mastery)" },
 ];
 
 const ACCENTS = [
@@ -42,27 +48,39 @@ const ACCENTS = [
 const TEMPLATES = [
   {
     name: "Mock Tech Interview",
+    icon: "psychology",
+    tint: "secondary",
+    topic: "Behavioral: Disagreement with Staff Architect & Roadmap Trade-offs",
     level: "B2",
     prompt:
-      "Simula ser un Engineering Manager senior de Google realizando una entrevista técnica. Mi rol es el candidato. Hazme preguntas técnicas desafiantes sobre algoritmos, sistemas distribuidos y diseño de APIs, y evalúa mis respuestas como lo haría un entrevistador real.",
+      "Simula ser un Engineering Manager senior de Google evaluando mi liderazgo técnico, trade-offs de arquitectura y gestión de conflictos en equipos distribuidos bajo presión de plazos.",
   },
   {
     name: "System Design Defense",
+    icon: "hub",
+    tint: "primary",
+    topic: "Distributed Consensus & Split-Brain Mitigation Strategy",
     level: "C1",
     prompt:
-      "Actúa como un Staff Engineer defendiendo mi diseño de sistema. Preséntame un escenario de diseño a gran escala y hazme preguntas de seguimiento sobre escalabilidad, consistencia y trade-offs. Corrige mis decisiones cuando sea necesario.",
+      "Actúa como Principal Systems Architect. Desafía mi defensa de diseño para un motor de persistencia distribuido tolerante a particiones (Raft/Paxos) con réplicas multirregión y consistencia eventual.",
   },
   {
     name: "Client Demo Pitch",
+    icon: "swipe_vertical",
+    tint: "tertiary",
+    topic: "Enterprise Demo: Cost Reduction & Latency SLA Assurances",
     level: "B2",
     prompt:
-      "Simula ser un cliente potencial en una demo de producto. Mi rol es el Account Executive. Hazme preguntas sobre el producto, objeciones realistas y pídeme que demuestre el valor de la solución en inglés técnico.",
+      "Eres el CTO exigente de un cliente Enterprise escéptico. Te presento una migración completa de monolito legacy a Kubernetes serverless con observabilidad OpenTelemetry.",
   },
   {
     name: "Behavioral Leadership",
+    icon: "supervisor_account",
+    tint: "secondary",
+    topic: "Handling Cross-Functional Pushback & Sprint Velocity",
     level: "B2",
     prompt:
-      "Simula ser un interviewer de behavioral (leadership) en una empresa tech. Hazme preguntas estilo STAR sobre liderazgo, conflictos y toma de decisiones, y dame feedback sobre la estructura de mis respuestas.",
+      "Evalúa mis habilidades de influencia, mentoría a ingenieros juniors y comunicación asertiva ante requerimientos contradictorios de Product Management.",
   },
 ];
 
@@ -71,6 +89,7 @@ const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"];
 /** In-memory draft so the form survives route changes within the page load. */
 let draft = {
   topicPrompt: DEFAULT_PROMPT,
+  topic: "Google EM Mock Interview",
   level: "B2",
   accent: ACCENTS[0],
   phonemes: [],
@@ -101,57 +120,42 @@ export function initConfigView(root, { navigate }) {
   applyDraft();
   loadProfile();
   initAudio();
+  initDropOverlay();
 }
 
 function buildView() {
   return h("div", { class: "config-view" }, [
-    h("header", { class: "config-header" }, [
-      h("h1", { class: "config-title" }, "Iniciar nueva práctica"),
-      h("p", { class: "config-subtitle" }, "Describe el rol del AI Coach y configura tu sesión de práctica."),
+    // --- Centered hero ---
+    h("div", { class: "config-hero" }, [
+      h("h1", { class: "config-title" }, "Preparar sesión con AI Coach"),
+      h(
+        "p",
+        { class: "config-subtitle" },
+        "Entrena fluidez y fonética en tiempo real con audio natural bidireccional, transcripción fonética IPA y corrección acústica asistida.",
+      ),
     ]),
 
-    // --- Role instruction ---
-    h("section", { class: "form-section" }, [
-      h("div", { class: "section-head" }, [
-        h("h2", { class: "section-title" }, "Instrucción de Rol para el AI Coach"),
-        h("span", { class: "char-counter", id: "topic-counter" }, `0/${TOPIC_MAX}`),
-      ]),
-      h("textarea", {
-        id: "topic-prompt",
-        class: "topic-textarea",
-        maxlength: String(TOPIC_MAX),
-        rows: 6,
-        placeholder: "Describe el rol, el contexto y qué esperas del coach…",
-      }),
-      h("div", { class: "template-chips" }, [
-        h("span", { class: "chips-label" }, "Plantillas:"),
-        ...TEMPLATES.map((t) =>
-          h("button", { type: "button", class: "chip", onclick: () => applyTemplate(t) }, t.name),
-        ),
-      ]),
-    ]),
-
-    // --- Level ---
-    h("section", { class: "form-section" }, [
-      h("div", { class: "section-head" }, [h("h2", { class: "section-title" }, "Nivel de inglés")]),
-      h("div", { class: "level-row" }, [
+    // --- Scenario pills ---
+    h("div", { class: "template-pills", id: "prompt-chips" }, [
+      ...TEMPLATES.map((t) =>
         h(
-          "select",
-          { id: "level-select", class: "level-select" },
-          LEVELS.map((l) => h("option", { value: l.value }, l.label)),
+          "button",
+          {
+            type: "button",
+            class: "pill",
+            dataset: { tint: t.tint },
+            onclick: () => applyTemplate(t),
+          },
+          [
+            h("span", { class: "material-symbols-outlined pill-icon", "aria-hidden": "true" }, t.icon),
+            h("span", { class: "pill-label" }, t.name),
+          ],
         ),
-        h("span", { id: "level-hint", class: "level-hint", hidden: true }),
-      ]),
+      ),
     ]),
 
-    // --- Dropzone (feature 104) ---
-    h("section", { class: "form-section" }, [
-      h("div", { class: "section-head" }, [h("h2", { class: "section-title" }, "Archivos de contexto")]),
-      h("div", { id: "dropzone", class: "dropzone", tabindex: "0" }, [
-        h("span", { class: "material-symbols-outlined dropzone-icon", "aria-hidden": "true" }, "cloud_upload"),
-        h("p", { class: "dropzone-text" }, "Arrastra tu PDF, DOCX, TXT o MD aquí, o haz clic para elegir."),
-        h("p", { class: "dropzone-sub" }, "El texto extraído se usa como contexto. El archivo nunca se sube."),
-      ]),
+    // --- Prompt box (Claude/ChatGPT style) ---
+    h("div", { class: "prompt-box", id: "prompt-box" }, [
       h("input", {
         id: "file-input",
         type: "file",
@@ -160,32 +164,64 @@ function buildView() {
         hidden: true,
       }),
       h("div", { id: "file-chips", class: "file-chips" }),
-    ]),
-
-    // --- Accent + phonetic focus ---
-    h("section", { class: "form-section" }, [
-      h("div", { class: "section-head" }, [h("h2", { class: "section-title" }, "Pronunciación objetivo")]),
-      h("div", { class: "accent-row" }, [
-        h("label", { class: "field-label", for: "accent-select" }, "Acento objetivo"),
-        h(
-          "select",
-          { id: "accent-select", class: "level-select" },
-          ACCENTS.map((a) => h("option", { value: a }, a)),
-        ),
+      h("textarea", {
+        id: "prompt-input",
+        class: "prompt-textarea",
+        maxlength: String(TOPIC_MAX),
+        rows: 3,
+        placeholder: "Describe el rol o tema para el Coach (o arrastra archivos de contexto)...",
+      }),
+      h("div", { class: "prompt-toolbar" }, [
+        h("div", { class: "toolbar-left" }, [
+          // CEFR level dropdown
+          h("div", { class: "cefr-wrap" }, [
+            h(
+              "select",
+              { id: "level-select", class: "cefr-select" },
+              LEVELS.map((l) => h("option", { value: l.value }, l.label)),
+            ),
+            h("span", { class: "material-symbols-outlined cefr-caret", "aria-hidden": "true" }, "expand_more"),
+          ]),
+          // Attach button
+          h(
+            "button",
+            { id: "attach-btn", type: "button", class: "toolbar-icon-btn", title: "Adjuntar documento de contexto" },
+            [h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "attach_file")],
+          ),
+          // Mic status indicator (opens audio popover)
+          h(
+            "button",
+            { id: "mic-indicator", type: "button", class: "mic-indicator", title: "Micrófono y prueba de sonido" },
+            [
+              h("span", { class: "material-symbols-outlined mic-icon", "aria-hidden": "true" }, "mic"),
+              h("span", { id: "mic-db", class: "mic-db" }, "— dB"),
+            ],
+          ),
+          // Clear button
+          h(
+            "button",
+            { id: "clear-prompt-btn", type: "button", class: "toolbar-text-btn" },
+            "Limpiar",
+          ),
+        ]),
+        h("div", { class: "toolbar-right" }, [
+          h("span", { id: "topic-counter", class: "char-counter" }, `0 / ${TOPIC_MAX}`),
+          h("button", { id: "start-btn", type: "button", class: "btn start-btn", disabled: true }, [
+            h("span", { class: "material-symbols-outlined start-btn-icon", "aria-hidden": "true" }, "graphic_eq"),
+            h("span", { class: "start-btn-label" }, "Iniciar práctica"),
+            h("kbd", {}, "↵"),
+          ]),
+        ]),
       ]),
-      h("div", { class: "phoneme-row" }, [
-        h("span", { class: "chips-label" }, "Foco fonético"),
-        h("div", { id: "phoneme-chips", class: "phoneme-chips" }),
-      ]),
-    ]),
-
-    // --- Audio I/O ---
-    h("section", { class: "form-section" }, [
-      h("div", { class: "section-head" }, [h("h2", { class: "section-title" }, "Audio I/O")]),
-      h("div", { class: "audio-block" }, [
-        h("div", { class: "audio-row" }, [
+      // --- Audio I/O popover (device select + sound test + level meter) ---
+      h("div", { id: "audio-popover", class: "audio-popover", hidden: true }, [
+        h("div", { class: "audio-popover-head" }, [
           h("label", { class: "field-label", for: "mic-select" }, "Micrófono"),
-          h("select", { id: "mic-select", class: "level-select" }, [h("option", { value: "" }, "Default")]),
+          h(
+            "select",
+            { id: "mic-select", class: "level-select" },
+            [h("option", { value: "" }, "Default")],
+          ),
         ]),
         h("div", { class: "meter-row" }, [
           h("div", { class: "meter-wrap" }, [h("div", { id: "meter-bar", class: "meter-bar" })]),
@@ -201,11 +237,25 @@ function buildView() {
       ]),
     ]),
 
-    // --- Start ---
-    h("div", { class: "config-actions" }, [
-      h("button", { id: "start-btn", type: "button", class: "btn start-btn", disabled: true }, [
-        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "arrow_forward"),
-        "Iniciar práctica",
+    // --- Meta strip ---
+    h("div", { class: "config-meta" }, [
+      h("div", { class: "meta-col" }, [
+        h("div", { class: "meta-label" }, "Acento Objetivo"),
+        h("div", { class: "meta-value" }, ACCENTS[0]),
+        h("div", { class: "meta-sub" }, "ARPA / IPA CMUDict"),
+      ]),
+      h("div", { class: "meta-col" }, [
+        h("div", { class: "meta-label" }, "Foco Fonético"),
+        h("div", { id: "phoneme-chips", class: "phoneme-chips" }),
+        h("div", { class: "meta-sub" }, "Confusiones hispanas"),
+      ]),
+      h("div", { class: "meta-col" }, [
+        h("div", { class: "meta-head" }, [
+          h("span", { class: "meta-label" }, "Historial"),
+          h("span", { id: "history-score", class: "history-score" }),
+        ]),
+        h("div", { class: "history-bar" }, [h("div", { id: "history-fill", class: "history-fill" })]),
+        h("div", { id: "history-last", class: "meta-sub" }, ""),
       ]),
     ]),
   ]);
@@ -213,21 +263,27 @@ function buildView() {
 
 function collectElements(root) {
   return {
-    topic: root.querySelector("#topic-prompt"),
+    prompt: root.querySelector("#prompt-input"),
     counter: root.querySelector("#topic-counter"),
     levelSelect: root.querySelector("#level-select"),
-    levelHint: root.querySelector("#level-hint"),
-    accentSelect: root.querySelector("#accent-select"),
     phonemeChips: root.querySelector("#phoneme-chips"),
-    dropzone: root.querySelector("#dropzone"),
     fileInput: root.querySelector("#file-input"),
+    attachBtn: root.querySelector("#attach-btn"),
     fileChips: root.querySelector("#file-chips"),
+    micIndicator: root.querySelector("#mic-indicator"),
+    micDb: root.querySelector("#mic-db"),
+    audioPopover: root.querySelector("#audio-popover"),
     micSelect: root.querySelector("#mic-select"),
     meterBar: root.querySelector("#meter-bar"),
     meterDb: root.querySelector("#meter-db"),
     soundTestBtn: root.querySelector("#sound-test-btn"),
     soundTestResult: root.querySelector("#sound-test-result"),
+    clearBtn: root.querySelector("#clear-prompt-btn"),
     startBtn: root.querySelector("#start-btn"),
+    historyScore: root.querySelector("#history-score"),
+    historyFill: root.querySelector("#history-fill"),
+    historyLast: root.querySelector("#history-last"),
+    promptBox: root.querySelector("#prompt-box"),
   };
 }
 
@@ -237,10 +293,9 @@ function collectElements(root) {
 
 /** Restore the in-memory draft into the form (runs once at init). */
 function applyDraft() {
-  els.topic.value = draft.topicPrompt;
-  els.counter.textContent = `${draft.topicPrompt.length}/${TOPIC_MAX}`;
+  els.prompt.value = draft.topicPrompt;
+  els.counter.textContent = `${draft.topicPrompt.length} / ${TOPIC_MAX}`;
   els.levelSelect.value = draft.level;
-  els.accentSelect.value = draft.accent;
   updateStart();
 }
 
@@ -250,12 +305,13 @@ function updateStart() {
   els.startBtn.disabled = !valid;
 }
 
-/** Fill the textarea + level from a template chip. */
+/** Fill the textarea + level + persona topic from a template pill. */
 function applyTemplate(t) {
-  els.topic.value = t.prompt;
-  els.counter.textContent = `${t.prompt.length}/${TOPIC_MAX}`;
+  els.prompt.value = t.prompt;
+  els.counter.textContent = `${t.prompt.length} / ${TOPIC_MAX}`;
   els.levelSelect.value = t.level;
   draft.topicPrompt = t.prompt;
+  draft.topic = t.topic;
   draft.level = t.level;
   updateStart();
 }
@@ -265,19 +321,15 @@ function applyTemplate(t) {
 // ---------------------------------------------------------------------------
 
 function bindEvents({ navigate }) {
-  els.topic.addEventListener("input", () => {
-    draft.topicPrompt = els.topic.value;
-    els.counter.textContent = `${els.topic.value.length}/${TOPIC_MAX}`;
+  els.prompt.addEventListener("input", () => {
+    draft.topicPrompt = els.prompt.value;
+    els.counter.textContent = `${els.prompt.value.length} / ${TOPIC_MAX}`;
     updateStart();
   });
 
   els.levelSelect.addEventListener("change", () => {
     draft.level = els.levelSelect.value;
     updateStart();
-  });
-
-  els.accentSelect.addEventListener("change", () => {
-    draft.accent = els.accentSelect.value;
   });
 
   els.phonemeChips.addEventListener("click", (e) => {
@@ -287,26 +339,27 @@ function bindEvents({ navigate }) {
     draft.phonemes = [...els.phonemeChips.querySelectorAll(".phoneme-chip.active")].map((c) => c.dataset.phoneme);
   });
 
-  els.dropzone.addEventListener("click", () => els.fileInput.click());
-  els.dropzone.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      els.fileInput.click();
-    }
-  });
-  els.dropzone.addEventListener("dragover", (e) => {
-    e.preventDefault();
-    els.dropzone.classList.add("drag-over");
-  });
-  els.dropzone.addEventListener("dragleave", () => els.dropzone.classList.remove("drag-over"));
-  els.dropzone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    els.dropzone.classList.remove("drag-over");
-    handleFiles([...e.dataTransfer.files]);
-  });
+  els.attachBtn.addEventListener("click", () => els.fileInput.click());
   els.fileInput.addEventListener("change", () => {
     handleFiles([...els.fileInput.files]);
     els.fileInput.value = "";
+  });
+
+  els.clearBtn.addEventListener("click", () => {
+    els.prompt.value = "";
+    els.counter.textContent = `0 / ${TOPIC_MAX}`;
+    draft.topicPrompt = "";
+    updateStart();
+    els.prompt.focus();
+  });
+
+  els.micIndicator.addEventListener("click", () => {
+    els.audioPopover.hidden = !els.audioPopover.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!els.audioPopover.hidden && !els.audioPopover.contains(e.target) && !els.micIndicator.contains(e.target)) {
+      els.audioPopover.hidden = true;
+    }
   });
 
   els.startBtn.addEventListener("click", () => openLaunchModal({ navigate }));
@@ -314,10 +367,10 @@ function bindEvents({ navigate }) {
 }
 
 // ---------------------------------------------------------------------------
-// Profile-driven defaults (level, accuracy hint, phonetic focus)
+// Profile-driven defaults (level, history, phonetic focus)
 // ---------------------------------------------------------------------------
 
-/** Fetch /api/profile and apply level default, accuracy hint and phonemes. */
+/** Fetch /api/profile and apply level default, history strip and phonemes. */
 async function loadProfile() {
   try {
     const res = await fetch("/api/profile");
@@ -330,9 +383,13 @@ async function loadProfile() {
     els.levelSelect.value = level;
     draft.level = level;
 
+    // History meta column: avg score bar + last topic.
     if (typeof stats.avg === "number" && stats.avg > 0) {
-      els.levelHint.hidden = false;
-      els.levelHint.textContent = `≈ ${stats.avg}% match/accuracy histórico`;
+      const avg = Math.round(stats.avg);
+      els.historyScore.textContent = `${avg.toFixed(1)}%`;
+      els.historyFill.style.width = `${Math.min(100, avg)}%`;
+      const lastTopic = Array.isArray(stats.recentTopics) && stats.recentTopics[0];
+      els.historyLast.textContent = lastTopic ? `Último: ${lastTopic}` : "";
     }
 
     const phonemes = Array.isArray(profile.focusPhonemes)
@@ -349,20 +406,71 @@ async function loadProfile() {
 function renderPhonemeChips(phonemes) {
   els.phonemeChips.innerHTML = "";
   if (phonemes.length === 0) {
-    els.phonemeChips.appendChild(
-      h("span", { class: "phoneme-empty" }, "Sin foco fonético configurado en el perfil."),
-    );
+    els.phonemeChips.appendChild(h("span", { class: "phoneme-empty" }, "—"));
     return;
   }
   for (const p of phonemes) {
-    const chip = h("button", { type: "button", class: "chip phoneme-chip", dataset: { phoneme: p } }, p);
+    const chip = h("button", { type: "button", class: "phoneme-chip", dataset: { phoneme: p } }, p);
     if (draft.phonemes.includes(p)) chip.classList.add("active");
     els.phonemeChips.appendChild(chip);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Dropzone (feature 104 consumption)
+// Drag & drop: full-screen dimmed overlay
+// ---------------------------------------------------------------------------
+
+let dragOverlayEl = null;
+
+/**
+ * Install the global drag-and-drop overlay. Dragging a file anywhere on the
+ * window dims the whole screen (fixed, backdrop-blur) and announces the drop
+ * zone: "suelta el archivo en cualquier parte". Dropping hands the files to the
+ * same extraction pipeline as the attach button (feature 104).
+ */
+function initDropOverlay() {
+  dragOverlayEl = h("div", { class: "drop-overlay", id: "drop-overlay", hidden: true }, [
+    h("div", { class: "drop-overlay-card" }, [
+      h("div", { class: "drop-overlay-icon" }, [
+        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "cloud_upload"),
+      ]),
+      h("div", { class: "drop-overlay-text" }, [
+        h("p", { class: "drop-overlay-title" }, "Drop any file here and add it to the conversation"),
+        h("p", { class: "drop-overlay-sub" }, "PDF, DOCX, TXT, MD soportados"),
+      ]),
+    ]),
+  ]);
+  document.body.appendChild(dragOverlayEl);
+
+  let dragCounter = 0;
+  window.addEventListener("dragenter", (e) => {
+    e.preventDefault();
+    dragCounter++;
+    if (dragCounter > 0) dragOverlayEl.hidden = false;
+  });
+  window.addEventListener("dragleave", (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+      dragOverlayEl.hidden = true;
+      dragCounter = 0;
+    }
+  });
+  window.addEventListener("dragover", (e) => {
+    e.preventDefault();
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    dragOverlayEl.hidden = true;
+    if (e.dataTransfer && e.dataTransfer.files.length) {
+      handleFiles([...e.dataTransfer.files]);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// File attachment (feature 104 consumption)
 // ---------------------------------------------------------------------------
 
 /** Read a File as a base64 data URL and strip the `data:<mime>;base64,` prefix. */
@@ -412,7 +520,15 @@ async function handleFiles(files) {
 /** Append a file chip (name + size + status + remove button). */
 function addFileChip(file) {
   const chip = h("div", { class: "file-chip" }, [
-    h("span", { class: "material-symbols-outlined file-chip-icon", "aria-hidden": "true" }, "description"),
+    h(
+      "span",
+      {
+        class: "material-symbols-outlined file-chip-icon",
+        dataset: { ok: String(file.ok ?? "") },
+        "aria-hidden": "true",
+      },
+      file.ok === false ? "error" : "attach_file",
+    ),
     h("span", { class: "file-chip-name" }, escapeHtml(file.name)),
     h("span", { class: "file-chip-size" }, formatBytes(file.size)),
     h("span", { class: "file-chip-status", dataset: { ok: String(file.ok ?? "") } }, file.status ?? ""),
@@ -427,12 +543,14 @@ function addFileChip(file) {
           removedFiles.add(file.name);
           draft.contextFiles = draft.contextFiles.filter((f) => f.name !== file.name);
           chip.remove();
+          if (els.fileChips.childElementCount === 0) els.fileChips.hidden = true;
         },
       },
       "×",
     ),
   ]);
   els.fileChips.appendChild(chip);
+  els.fileChips.hidden = false;
   return chip;
 }
 
@@ -440,6 +558,8 @@ function setFileChipStatus(chip, { status, ok }) {
   const statusEl = chip.querySelector(".file-chip-status");
   statusEl.textContent = status;
   statusEl.dataset.ok = String(ok);
+  const icon = chip.querySelector(".file-chip-icon");
+  if (icon) icon.dataset.ok = String(ok);
 }
 
 function formatBytes(bytes) {
@@ -449,7 +569,7 @@ function formatBytes(bytes) {
 }
 
 // ---------------------------------------------------------------------------
-// Audio I/O: device selector, level meter, sound test
+// Audio I/O: device selector, live dB meter, sound test
 // ---------------------------------------------------------------------------
 
 let meterStream = null;
@@ -525,7 +645,10 @@ function stopMeter() {
 function renderMeter(db) {
   const clamped = Math.max(-60, Math.min(0, db));
   els.meterBar.style.width = `${((clamped + 60) / 60) * 100}%`;
-  els.meterDb.textContent = db === -Infinity ? "— dB" : `${db.toFixed(1)} dB`;
+  const dbText = db === -Infinity ? "—" : `${db.toFixed(1)}`;
+  els.meterDb.textContent = `${dbText} dB`;
+  els.micDb.textContent = `${dbText} dB`;
+  els.micDb.classList.toggle("muted", db === -Infinity);
 }
 
 /** Play a 440 Hz tone and capture it through the mic (recorder-wave pipeline). */
@@ -606,47 +729,49 @@ async function checkWhisper() {
 }
 
 /**
- * Open the launch modal with animated steps (DSP 48kHz → Whisper Aligner →
- * Role Topic). Step 2 resolves whisper availability and announces the Web
- * Speech fallback when needed. "Entrar al Estudio" calls POST /api/session/start
- * and navigates to #/practice/<id>; "Cancelar" keeps the draft in local state
- * and creates no session.
+ * Open the launch modal (Stitch "Iniciando Sala de Audio" design): persona tile
+ * with the selected scenario, the CEFR level, and three status rows
+ * (DSP Audio → Whisper Aligner → Role Topic) that resolve in order. Step 2
+ * checks whisper availability and announces the Web Speech fallback when
+ * needed. "Entrar al Estudio" calls POST /api/session/start and navigates to
+ * #/practice/<id>; "Cancelar" keeps the draft in local state and creates no
+ * session.
  */
 function openLaunchModal({ navigate }) {
   const overlay = h("div", { class: "overlay launch-modal", id: "launch-modal" }, [
     h("div", { class: "overlay-panel launch-panel", role: "dialog", "aria-modal": "true", "aria-label": "Iniciando Sala de Audio" }, [
-      h("div", { class: "overlay-head" }, [h("h2", { class: "overlay-title" }, "Iniciando Sala de Audio")]),
-      h("div", { class: "launch-body" }, [
-        h("ol", { class: "launch-steps" }, [
-          h("li", { class: "launch-step", dataset: { step: "dsp" } }, [
-            h("span", { class: "material-symbols-outlined launch-step-icon", "aria-hidden": "true" }, "graphic_eq"),
-            h("div", { class: "launch-step-text" }, [
-              h("div", { class: "launch-step-name" }, "DSP 48kHz"),
-              h("div", { class: "launch-step-detail" }, "Preparando pipeline de audio"),
-            ]),
-          ]),
-          h("li", { class: "launch-step", dataset: { step: "aligner" } }, [
-            h("span", { class: "material-symbols-outlined launch-step-icon", "aria-hidden": "true" }, "record_voice_over"),
-            h("div", { class: "launch-step-text" }, [
-              h("div", { class: "launch-step-name" }, "Whisper Aligner"),
-              h("div", { class: "launch-step-detail" }, "Verificando motor de reconocimiento"),
-            ]),
-          ]),
-          h("li", { class: "launch-step", dataset: { step: "topic" } }, [
-            h("span", { class: "material-symbols-outlined launch-step-icon", "aria-hidden": "true" }, "tune"),
-            h("div", { class: "launch-step-text" }, [
-              h("div", { class: "launch-step-name" }, "Role Topic"),
-              h("div", { class: "launch-step-detail" }, "Preparando el rol y el tópico"),
-            ]),
+      h("div", { class: "launch-head" }, [
+        h("div", { class: "launch-head-icon" }, [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "graphic_eq"),
+        ]),
+        h("div", { class: "launch-head-text" }, [
+          h("h2", { class: "launch-title" }, "Iniciando Sala de Audio"),
+          h("p", { class: "launch-subtitle" }, [
+            "Conectando con Coach de voz en nivel ",
+            h("strong", { class: "launch-level" }, draft.level),
           ]),
         ]),
-        h("div", { id: "launch-error", class: "launch-error", hidden: true }),
       ]),
+      h("div", { class: "launch-status" }, [
+        h("div", { class: "launch-row", dataset: { step: "dsp" } }, [
+          h("span", { class: "launch-row-label" }, "DSP Audio:"),
+          h("span", { class: "launch-row-value" }, "48kHz WebAudio"),
+        ]),
+        h("div", { class: "launch-row", dataset: { step: "aligner" } }, [
+          h("span", { class: "launch-row-label" }, "Whisper Aligner:"),
+          h("span", { class: "launch-row-value" }, "Verificando…"),
+        ]),
+        h("div", { class: "launch-row", dataset: { step: "topic" } }, [
+          h("span", { class: "launch-row-label" }, "Role Topic:"),
+          h("span", { class: "launch-row-value launch-topic" }, draft.topic || draft.topicPrompt.slice(0, 40)),
+        ]),
+      ]),
+      h("div", { id: "launch-error", class: "launch-error", hidden: true }),
       h("div", { class: "launch-actions" }, [
         h("button", { id: "launch-cancel", type: "button", class: "btn ghost" }, "Cancelar"),
-        h("button", { id: "launch-enter", type: "button", class: "btn start-btn", disabled: true }, [
-          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "arrow_forward"),
-          "Entrar al Estudio",
+        h("button", { id: "launch-enter", type: "button", class: "btn enter-btn", disabled: true }, [
+          h("span", { class: "enter-label" }, "Entrar al Estudio"),
+          h("span", { class: "material-symbols-outlined enter-icon", "aria-hidden": "true" }, "arrow_forward"),
         ]),
       ]),
     ]),
@@ -654,7 +779,7 @@ function openLaunchModal({ navigate }) {
   document.body.appendChild(overlay);
   document.body.classList.add("overlay-open");
 
-  const steps = overlay.querySelectorAll(".launch-step");
+  const rows = overlay.querySelectorAll(".launch-row");
   const enterBtn = overlay.querySelector("#launch-enter");
   const cancelBtn = overlay.querySelector("#launch-cancel");
   const errorEl = overlay.querySelector("#launch-error");
@@ -676,27 +801,26 @@ function openLaunchModal({ navigate }) {
   });
   document.addEventListener("keydown", onKey);
 
-  // --- animated steps ---
-  const activate = (i) => steps[i].classList.add("active");
-  const complete = (i) => {
-    steps[i].classList.add("done");
-    steps[i].classList.remove("active");
+  // --- resolve rows in sequence ---
+  const setValue = (name, value, ready) => {
+    const valueEl = rows[name].querySelector(".launch-row-value");
+    valueEl.textContent = value;
+    rows[name].classList.add("done");
+    if (ready) valueEl.classList.add("ready");
   };
 
-  activate(0);
+  rows[0].classList.add("active");
   setTimeout(() => {
     if (cancelled) return;
-    complete(0);
-    activate(1);
+    setValue(0, "48kHz WebAudio Ready", true);
+    rows[1].classList.add("active");
     checkWhisper().then((fallback) => {
       if (cancelled) return;
-      const detail = steps[1].querySelector(".launch-step-detail");
-      detail.textContent = fallback ? "Whisper no instalado · fallback Web Speech" : "Whisper listo";
-      complete(1);
-      activate(2);
+      setValue(1, fallback ? "Fallback Web Speech" : "Synchronized", !fallback);
+      rows[2].classList.add("active");
       setTimeout(() => {
         if (cancelled) return;
-        complete(2);
+        setValue(2, draft.topic || draft.topicPrompt.slice(0, 40), true);
         enterBtn.disabled = false;
       }, 600);
     });
@@ -705,7 +829,7 @@ function openLaunchModal({ navigate }) {
   // --- enter the studio ---
   enterBtn.addEventListener("click", async () => {
     enterBtn.disabled = true;
-    enterBtn.textContent = "Creando sesión…";
+    enterBtn.querySelector(".enter-label").textContent = "Creando sesión…";
     errorEl.hidden = true;
     try {
       const res = await fetch("/api/session/start", {
@@ -729,11 +853,8 @@ function openLaunchModal({ navigate }) {
       errorEl.hidden = false;
       errorEl.textContent = err.message;
       enterBtn.disabled = false;
-      enterBtn.innerHTML = "";
-      enterBtn.append(
-        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "arrow_forward"),
-        "Entrar al Estudio",
-      );
+      const label = enterBtn.querySelector(".enter-label");
+      label.textContent = "Entrar al Estudio";
     }
   });
 }
