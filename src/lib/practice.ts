@@ -1,11 +1,11 @@
 import type { CompleteOptions, Provider } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
-import type { FeedbackIssue } from "./storage.ts";
+import type { FeedbackIssue, Level } from "./storage.ts";
 
 export type Candidate = Pick<Provider, "id" | "available" | "complete">;
 
 export type Category = "interviews" | "star" | "daily" | "free";
-export type Level = "B1" | "B2" | "C1";
+export type { Level };
 
 export interface PracticeFragment {
   id: string;
@@ -39,7 +39,7 @@ export const CATEGORY_STAGES: Record<Category, string> = {
 
 const SYSTEM_GENERATE = `You are an expert English speaking coach for software engineers, using the call-and-repeat (shadowing) method.
 You create interview/practice answers split into short spoken fragments. Each fragment must be a natural, short chunk (5 to 12 words). The complete answer must be 60 to 140 words total.
-The user is a Spanish speaker; level tells you the target difficulty (B1 = simple vocabulary and short sentences, C1 = richer and more technical).
+The user is a Spanish speaker; level tells you the target difficulty (A1 = very simple vocabulary and short sentences, C2 = near-native, rich and technical).
 Use the learner memory block to personalize the answer: reuse words the user struggles with, reference recent topics if useful, and keep difficulty around the user's level.
 Respond ONLY with strict JSON matching this schema (no markdown, no commentary):
 {"question": string, "context": string, "fragments": [{"id": string, "stage": string, "text": string}]}
@@ -72,6 +72,61 @@ export async function generatePracticeSet(
       question: res.data.question,
       context: res.data.context,
       fragments: fragments.map((f, i) => ({ id: f.id || `f${i + 1}`, stage: f.stage, text: f.text })),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// First question generation (feature 103 / CU1)
+// ---------------------------------------------------------------------------
+
+const SYSTEM_FIRST_QUESTION = `You are an expert English speaking coach for software engineers, using the call-and-repeat (shadowing) method.
+The user defines the ROLE you must adopt for this practice session (see ROLE INSTRUCTION below). Adopt that role fully and run the session as that character.
+You create the FIRST question of the session plus a model answer split into short spoken fragments. Each fragment must be a natural, short chunk (5 to 12 words). The complete answer must be 60 to 140 words total.
+The user is a Spanish speaker; level tells you the target difficulty (A1 = very simple vocabulary and short sentences, C2 = near-native, rich and technical).
+Use the learner memory block to personalize the answer: reuse words the user struggles with, reference recent topics if useful, and keep difficulty around the user's level.
+Respond ONLY with strict JSON matching this schema (no markdown, no commentary):
+{"question": string, "fragments": [{"id": string, "stage": string, "text": string}]}
+- question: the question the coach asks aloud, in the adopted role.
+- fragments: consecutive chunks that assemble into the full spoken model answer, ordered. Use exactly these allowed stages: Opening, Main point, Detail, Example, Closing.
+- id: sequential like "f1", "f2"...`;
+
+/** The first question of a session: the coach's question + the model answer. */
+export interface FirstQuestion {
+  q: string;
+  answer: string;
+  fragments: PracticeFragment[];
+}
+
+/**
+ * Generate the first question of a session from the user's role instruction
+ * (feature 103). The role instruction becomes the system persona; the topic
+ * prompt, level, learner memory and optional DOCUMENT CONTEXT block drive the
+ * generation. The model answer is assembled from the spoken fragments.
+ */
+export async function generateFirstQuestion(
+  candidates: Candidate[],
+  params: { topicPrompt: string; level: Level; learnerMemory: string; documentContext?: string },
+): Promise<{ question: FirstQuestion; provider: string }> {
+  const system = `${SYSTEM_FIRST_QUESTION}\n\nROLE INSTRUCTION:\n${params.topicPrompt}`;
+  const memoryLine = params.learnerMemory ? `\n\nLEARNER MEMORY:\n${params.learnerMemory}` : "";
+  const docLine = params.documentContext ? `\n\n${params.documentContext}` : "";
+  const user = `Generate the first question of the session. Level: ${params.level}.${memoryLine}${docLine}`;
+  const options: CompleteOptions = { temperature: 0.7, maxTokens: 4096 };
+  const res = await chatJSON<{ question?: unknown; fragments?: Array<{ id?: string; stage?: string; text?: string }> }>(
+    candidates,
+    { system, user, options },
+  );
+  const fragments = (res.data.fragments ?? [])
+    .map((f, i) => ({ id: f.id || `f${i + 1}`, stage: f.stage ?? "", text: f.text ?? "" }))
+    .filter((f) => f.text.trim().length > 0);
+  const q = typeof res.data.question === "string" ? res.data.question.trim() : "";
+  return {
+    provider: res.provider,
+    question: {
+      q,
+      answer: fragments.map((f) => f.text).join(" "),
+      fragments,
     },
   };
 }

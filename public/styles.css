@@ -611,3 +611,465 @@ body.overlay-open {
     display: none;
   }
 }
+
+/* ============================================================
+   Session config view (feature 103 / CU1)
+   ============================================================ */
+.config-view {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.config-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.config-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.config-subtitle {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  background: var(--surface-variant);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.char-counter {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.topic-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  padding: 12px 14px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.topic-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15);
+}
+
+.template-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chips-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.chip {
+  padding: 5px 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.chip:hover {
+  background: var(--panel-3);
+  border-color: var(--outline);
+}
+
+.chip.active {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.level-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.level-select {
+  padding: 8px 12px;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+
+.level-select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.level-hint {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+}
+
+/* ---------- Dropzone (feature 104) ---------- */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 20px;
+  border: 1px dashed var(--outline);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--muted);
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.dropzone:hover,
+.dropzone.drag-over {
+  border-color: var(--accent);
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.dropzone-icon {
+  font-size: 32px;
+  color: var(--subtle);
+}
+
+.dropzone-text {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.dropzone-sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.file-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.file-chip-icon {
+  font-size: 18px;
+  color: var(--subtle);
+}
+
+.file-chip-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-chip-size {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.file-chip-status {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.file-chip-status[data-ok="true"] {
+  color: var(--accent);
+}
+
+.file-chip-status[data-ok="false"] {
+  color: var(--red);
+}
+
+.file-chip-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+.file-chip-remove:hover {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+/* ---------- Accent + phonetic focus ---------- */
+.accent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.field-label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.phoneme-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.phoneme-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.phoneme-empty {
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+/* ---------- Audio I/O ---------- */
+.audio-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.audio-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.meter-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.meter-wrap {
+  flex: 1;
+  height: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  overflow: hidden;
+}
+
+.meter-bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-cyan));
+  border-radius: 9999px;
+  transition: width 0.08s linear;
+}
+
+.meter-db {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+  min-width: 64px;
+  text-align: right;
+}
+
+.audio-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.sound-test-result {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---------- Start action ---------- */
+.config-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn.start-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #04120c;
+  font-weight: 600;
+  padding: 10px 20px;
+}
+
+.btn.start-btn:hover {
+  background: #34d399;
+  border-color: #34d399;
+}
+
+.btn.start-btn:disabled {
+  background: var(--panel-2);
+  border-color: var(--border);
+  color: var(--subtle);
+  cursor: not-allowed;
+}
+
+/* ---------- Launch modal ("Iniciando Sala de Audio") ---------- */
+.launch-panel {
+  width: min(460px, calc(100vw - 48px));
+}
+
+.launch-body {
+  padding: 20px;
+}
+
+.launch-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.launch-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  opacity: 0.45;
+  transition: opacity 0.2s, border-color 0.2s;
+}
+
+.launch-step.active {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.launch-step.done {
+  opacity: 1;
+  border-color: var(--border);
+}
+
+.launch-step-icon {
+  font-size: 22px;
+  color: var(--subtle);
+}
+
+.launch-step.active .launch-step-icon {
+  color: var(--accent);
+  animation: launch-pulse 1.2s ease-in-out infinite;
+}
+
+.launch-step.done .launch-step-icon {
+  color: var(--accent);
+}
+
+@keyframes launch-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.launch-step-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.launch-step-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.launch-step-detail {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.launch-error {
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 10px;
+  color: var(--red);
+  font-size: 13px;
+}
+
+.launch-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}

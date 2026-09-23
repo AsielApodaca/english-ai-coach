@@ -12,6 +12,8 @@ import { evaluateFragment, generatePracticeSet, tokenize } from "./lib/practice.
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, transcribeWords, downloadModel } from "./lib/whisper.ts";
 import { alignWords } from "./lib/align.ts";
+import { handleExtractRequest } from "./lib/extract.ts";
+import { handleSessionStartRequest } from "./lib/session-start.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import {
@@ -19,6 +21,7 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_SETTINGS_SNAPSHOT,
   fallbackTitle,
+  isLevel,
   type AttemptWord,
   type FeedbackIssue,
   type Profile,
@@ -42,7 +45,7 @@ function candidates(providerRequested?: string): Candidate[] {
 }
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(join(rootDir, "public")));
 
 /** True when the whole stack should stay local (feature 006). */
@@ -50,9 +53,6 @@ const OFFLINE_MODE = env.OFFLINE_MODE === "1" || env.OFFLINE_MODE === "true";
 
 function isCategory(v: unknown): v is Category {
   return typeof v === "string" && v in CATEGORY_STAGES;
-}
-function isLevel(v: unknown): v is Level {
-  return v === "B1" || v === "B2" || v === "C1";
 }
 
 app.get("/api/health", async (_req, res) => {
@@ -227,6 +227,41 @@ app.post("/api/next-step", async (_req, res) => {
   } catch (err) {
     res.status(502).json({ error: (err as Error).message });
   }
+});
+
+/**
+ * POST /api/files/extract — extract text from a context file (feature 104).
+ *
+ * Multipart decision: Express 5 ships no multipart parser and adding one would
+ * violate the zero-dependency rule (only pdf-parse + mammoth are allowed), so
+ * this endpoint accepts a JSON body with the file content base64-encoded:
+ *   { name: string, data: string (base64), sessionId?: string }
+ * The frontend reads the dropped file with FileReader.readAsDataURL() and sends
+ * the base64 payload. The server decodes, validates extension + size, extracts
+ * text (TXT/MD direct, PDF via pdf-parse, DOCX via mammoth), sanitizes it and
+ * persists the text under data/tmp/context/<sessionId|draft>/. The original
+ * file is never sent anywhere external. Errors are returned as { error }.
+ */
+app.post("/api/files/extract", async (req, res) => {
+  const { status, json } = await handleExtractRequest(storage, req.body);
+  res.status(status).json(json);
+});
+
+/**
+ * POST /api/session/start — create a session and generate its first question
+ * (feature 103 / CU1).
+ *
+ * Body: { topicPrompt, level, contextFiles?: ContextFileRef[], accent?,
+ *         focusPhonemes? } — the config snapshot. Rejects with 400 when
+ * topicPrompt is empty or level is invalid. Loads learner memory (mandatory),
+ * passes the role instruction as system persona, injects the DOCUMENT CONTEXT
+ * block when context files are attached, creates the v2 session (feature 102)
+ * and persists the first question. Returns { sessionId, firstQuestion }.
+ * No session is created until this endpoint is hit (CU3).
+ */
+app.post("/api/session/start", async (req, res) => {
+  const { status, json } = await handleSessionStartRequest(storage, candidates(), req.body);
+  res.status(status).json(json);
 });
 
 app.get("/api/history", (_req, res) => {

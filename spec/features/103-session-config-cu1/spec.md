@@ -1,6 +1,6 @@
 # 103 · Config de sesión (CU1)
 
-**Estado:** planificado 🔜 (ola 3)
+**Estado:** hecho ✅ (implementado en la rama `feature/session-config`, ola 3)
 
 ## Contexto
 
@@ -47,10 +47,10 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 
 ## Criterios de aceptación
 
-- [ ] Start habilitado solo con topic + level; verificado por test de UI/DOM y por backend (`session/start` rechaza sin config).
-- [ ] Modal de lanzamiento muestra estado de motores (whisper ready o fallback).
-- [ ] Crear una práctica desde la config crea sesión v2 y navega a `#/practice/<id>` sin reload.
-- [ ] `npm test` y `npm run check` pasan.
+- [x] Start habilitado solo con topic + level; verificado por test de UI/DOM y por backend (`session/start` rechaza sin config).
+- [x] Modal de lanzamiento muestra estado de motores (whisper ready o fallback).
+- [x] Crear una práctica desde la config crea sesión v2 y navega a `#/practice/<id>` sin reload.
+- [x] `npm test` y `npm run check` pasan.
 
 ## Fuera de alcance
 
