@@ -625,7 +625,7 @@ body.overlay-open {
   max-width: 760px;
   margin: 0 auto;
   padding: 14px 8px 40px;
-  min-height: calc(100vh - var(--topbar-h) - 48px);
+  min-height: calc(100vh - var(--topbar-h) - 80px);
 }
 
 /* Vertically-centered group (hero + pills + prompt box). */
