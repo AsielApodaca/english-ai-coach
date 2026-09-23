@@ -8,13 +8,11 @@ Estado del producto English AI Coach (documento normativo de planificación). Fe
 2. **002 · Whisper local por defecto** — whisper.cpp como motor STT predeterminado cuando está instalado (offline/privado; fallback automático a reconocimiento del navegador). *Se amplía en 106 con word-timestamps.*
 3. **007 · Voz humana (TTS neural local)** — voz neural natural vía Piper local (`piper` subprocess, stdin), fallback a edge-tts online y `speechSynthesis` como último recurso; pausas medidas entre fragmentos y velocidad por `length_scale`; estado de TTS visible en Settings.
 4. **101 · Frontend shell (cockpit + design system)** — rediseño total UI al layout de cockpit (sidebar full-height con brand/sesión/historial/footer, top bar a la derecha con ancho adaptativo, stage central, settings overlay). Implementa `spec/design/design-system.md`. Elimina la tab "Free chat" del MVP. *(Zonas del stage en placeholders; contenido llega con 103/105/109. La UI de audio —orb, waveform, tempo— no es de 101, es de 105/CU2.)*
+5. **102 · Session model v2** — schema de sesión continua reanudable (`status: active|completed`, `questions[]`, `config` snapshot, nivel A1–C2 completo); migración de `data/sessions/*` (solo lectura, nunca reescribe v1); persistencia idempotente con escritura atómica y agrupación por recencia (Today/Yesterday/7 días) para historial; `title` derivado por LLM con fallback; `server.ts` adaptado al API v2 con wire-format v1 preservado.
 
 ## Siguiente 🔜 (rediseño v2 — CU1/CU2/CU3)
 
 La fase v2 se organiza en olas de implementación; cada ola es un PR independiente sobre la base previa:
-
-### Ola 1 — Fundación (shell + datos)
-5. **102 · Session model v2** — schema de sesión continua reanudable (`status: active|completed`, `questions[]`, `config` snapshot, nivel A1–C2 completo); migración de `data/sessions/*`; persistencia idempotente y agrupación por recencia para historial.
 
 ### Ola 2 — Motor de coloreado
 6. **106 · Word timestamps (coloreado palabra a palabra)** — whisper `-ml 1`/JSON por palabra al soltar el micrófono; alineación y mapeo verde/ámbar/rojo (CU2, pasos 10/17); animación sincronizada post-grabación; fallback a Web Speech; extensión futura a tiempo real (documentada). *Primera columna de la práctica karaoke.*

@@ -13,7 +13,14 @@ import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "
 import { checkWhisper, transcribeWav, downloadModel } from "./lib/whisper.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
-import { createStorage, type Profile, type Session, type SessionAttempt } from "./lib/storage.ts";
+import {
+  createStorage,
+  DEFAULT_ACCENT,
+  DEFAULT_SETTINGS_SNAPSHOT,
+  fallbackTitle,
+  type Profile,
+  type SessionV2,
+} from "./lib/storage.ts";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = process.env as NodeJS.ProcessEnv;
@@ -122,48 +129,74 @@ function persistAttempt(params: {
   if (!sessionId || !fragmentId) return;
   const session = storage.loadSession(sessionId);
   if (!session) return;
-  const frag = session.fragments.find((f) => f.id === fragmentId);
+  const frag = session.questions.flatMap((q) => q.fragments).find((f) => f.id === fragmentId);
   if (!frag) return;
-  const attempt: SessionAttempt = {
+  frag.attempts.push({
     text: userText,
+    words: [],
     score: evaluation.score,
-    missing: evaluation.missing,
-    extra: evaluation.extra,
-    issues: evaluation.issues,
-    verdict: evaluation.verdict,
-  };
-  frag.attempts.push(attempt);
+    startedAt: new Date().toISOString(),
+    durationMs: 0,
+  });
   if (evaluation.next) frag.passed = true;
   // refresh profile from aggregated data
   const profile = storage.loadProfile();
   const sessions = storage.loadAllSessions();
   updateProfile(profile, sessions);
-  profile.recentTopics = [session.question, ...(profile.recentTopics ?? []).filter((t) => t !== session.question)].slice(0, 12);
+  const topic = session.questions[0]?.q ?? session.config.topicPrompt;
+  profile.recentTopics = [topic, ...(profile.recentTopics ?? []).filter((t) => t !== topic)].slice(0, 12);
   storage.saveProfile(profile);
-  storage.saveSession(session);
+  try {
+    storage.saveSession(session);
+  } catch {
+    // v1 session file: compatibility view — never rewrite it (feature 102)
+  }
 }
 
 app.post("/api/session/save", async (req, res) => {
   const { id, category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer } =
     req.body ?? {};
-  const session: Session = {
+  const now = new Date().toISOString();
+  const session: SessionV2 = {
     id: typeof id === "string" && id ? id : randomUUID(),
-    date: new Date().toISOString(),
-    category,
-    level,
-    provider,
-    question: String(question),
-    context: String(context),
-    fragments: Array.isArray(fragments)
-      ? fragments.map((f: { id?: string; stage?: string; text?: string; attempts?: SessionAttempt[]; passed?: boolean }) => ({
-          id: f.id ?? randomUUID(),
-          stage: f.stage ?? "",
-          text: f.text ?? "",
-          attempts: Array.isArray(f.attempts) ? f.attempts : [],
-          passed: Boolean(f.passed),
-        }))
-      : [],
-    ...(fullAnswer ? { fullAnswer } : {}),
+    status: "completed",
+    createdAt: now,
+    updatedAt: now,
+    config: {
+      topicPrompt: String(question || context),
+      level: isLevel(level) ? level : "B2",
+      category: typeof category === "string" ? category : "free",
+      accent: DEFAULT_ACCENT,
+      phonemes: [],
+      contextFiles: [],
+      settingsSnapshot: DEFAULT_SETTINGS_SNAPSHOT,
+    },
+    provider: typeof provider === "string" ? provider : "unknown",
+    title: fallbackTitle(String(question || context)),
+    questions: [
+      {
+        q: String(question),
+        answer: String(fullAnswer?.text ?? (typeof fullAnswer === "string" ? fullAnswer : "")),
+        fragments: Array.isArray(fragments)
+          ? fragments.map((f: { id?: string; text?: string; attempts?: { text: string; score: number }[]; passed?: boolean }) => ({
+              id: f.id ?? randomUUID(),
+              text: f.text ?? "",
+              attempts: Array.isArray(f.attempts)
+                ? f.attempts.map((a) => ({
+                    text: a.text ?? "",
+                    words: [],
+                    score: a.score ?? 0,
+                    startedAt: now,
+                    durationMs: 0,
+                  }))
+                : [],
+              passed: Boolean(f.passed),
+            }))
+          : [],
+        fullAttempt: null,
+        eval: null,
+      },
+    ],
   };
   storage.saveSession(session);
   try {
@@ -171,8 +204,6 @@ app.post("/api/session/save", async (req, res) => {
     const profile = storage.loadProfile();
     profile.nextStep = nextStep;
     storage.saveProfile(profile);
-    session.nextStep = nextStep;
-    storage.saveSession(session);
     res.json({ id: session.id, nextStep });
   } catch (err) {
     res.json({ id: session.id, nextStep: null, warning: (err as Error).message });
@@ -193,15 +224,18 @@ app.post("/api/next-step", async (_req, res) => {
 
 app.get("/api/history", (_req, res) => {
   const sessions = storage.loadAllSessions();
+  const profile = storage.loadProfile();
   res.json({
     sessions: sessions.map((s) => ({
       id: s.id,
-      date: s.date,
-      category: s.category,
-      level: s.level,
-      question: s.question,
+      date: s.updatedAt,
+      category: s.config.category,
+      level: s.config.level,
+      question: s.questions[0]?.q ?? s.title,
+      title: s.title,
+      status: s.status,
       avgScore: avgSessionScore(s),
-      nextStep: s.nextStep,
+      nextStep: profile.nextStep,
     })),
   });
 });
@@ -219,7 +253,7 @@ app.get("/api/profile", async (_req, res) => {
       weakErrorsTop: stats.weakErrorsTop,
       vocabGaps: stats.vocabGaps,
       recentTopics: stats.recentTopics,
-      trend: sessions.flatMap((s) => s.fragments.flatMap((f) => f.attempts.map((a) => a.score))).slice(-30),
+      trend: sessions.flatMap((s) => s.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score)))).slice(-30),
     },
   });
 });
@@ -424,8 +458,8 @@ app.post("/api/chat", async (req, res) => {
   }
 });
 
-function avgSessionScore(s: Session): number | null {
-  const scores = s.fragments.flatMap((f) => f.attempts.map((a) => a.score));
+function avgSessionScore(s: SessionV2): number | null {
+  const scores = s.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score)));
   return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
 }
 
