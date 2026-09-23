@@ -125,119 +125,114 @@ export function initConfigView(root, { navigate }) {
 
 function buildView() {
   return h("div", { class: "config-view" }, [
-    // --- Centered hero ---
-    h("div", { class: "config-hero" }, [
-      h("h1", { class: "config-title" }, "Preparar sesión con AI Coach"),
-      h(
-        "p",
-        { class: "config-subtitle" },
-        "Entrena fluidez y fonética en tiempo real con audio natural bidireccional, transcripción fonética IPA y corrección acústica asistida.",
-      ),
-    ]),
-
-    // --- Scenario pills ---
-    h("div", { class: "template-pills", id: "prompt-chips" }, [
-      ...TEMPLATES.map((t) =>
+    // Vertically-centered group; the meta strip stays pinned at the bottom.
+    h("div", { class: "config-main" }, [
+      // --- Centered hero ---
+      h("div", { class: "config-hero" }, [
+        h("h1", { class: "config-title" }, "Preparar sesión con AI Coach"),
         h(
-          "button",
-          {
-            type: "button",
-            class: "pill",
-            dataset: { tint: t.tint },
-            onclick: () => applyTemplate(t),
-          },
-          [
-            h("span", { class: "material-symbols-outlined pill-icon", "aria-hidden": "true" }, t.icon),
-            h("span", { class: "pill-label" }, t.name),
-          ],
+          "p",
+          { class: "config-subtitle" },
+          "Entrena fluidez y fonética en tiempo real con audio natural bidireccional, transcripción fonética IPA y corrección acústica asistida.",
         ),
-      ),
-    ]),
+      ]),
 
-    // --- Prompt box (Claude/ChatGPT style) ---
-    h("div", { class: "prompt-box", id: "prompt-box" }, [
-      h("input", {
-        id: "file-input",
-        type: "file",
-        accept: ACCEPTED_EXTENSIONS.join(","),
-        multiple: true,
-        hidden: true,
-      }),
-      h("div", { id: "file-chips", class: "file-chips" }),
-      h("textarea", {
-        id: "prompt-input",
-        class: "prompt-textarea",
-        maxlength: String(TOPIC_MAX),
-        rows: 3,
-        placeholder: "Describe el rol o tema para el Coach (o arrastra archivos de contexto)...",
-      }),
-      h("div", { class: "prompt-toolbar" }, [
-        h("div", { class: "toolbar-left" }, [
-          // CEFR level dropdown
-          h("div", { class: "cefr-wrap" }, [
-            h(
-              "select",
-              { id: "level-select", class: "cefr-select" },
-              LEVELS.map((l) => h("option", { value: l.value }, l.label)),
-            ),
-            h("span", { class: "material-symbols-outlined cefr-caret", "aria-hidden": "true" }, "expand_more"),
-          ]),
-          // Attach button
+      // --- Scenario pills ---
+      h("div", { class: "template-pills", id: "prompt-chips" }, [
+        ...TEMPLATES.map((t) =>
           h(
             "button",
-            { id: "attach-btn", type: "button", class: "toolbar-icon-btn", title: "Adjuntar documento de contexto" },
-            [h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "attach_file")],
-          ),
-          // Mic status indicator (opens audio popover)
-          h(
-            "button",
-            { id: "mic-indicator", type: "button", class: "mic-indicator", title: "Micrófono y prueba de sonido" },
+            {
+              type: "button",
+              class: "pill",
+              dataset: { tint: t.tint },
+              onclick: () => applyTemplate(t),
+            },
             [
-              h("span", { class: "material-symbols-outlined mic-icon", "aria-hidden": "true" }, "mic"),
-              h("span", { id: "mic-db", class: "mic-db" }, "— dB"),
+              h("span", { class: "material-symbols-outlined pill-icon", "aria-hidden": "true" }, t.icon),
+              h("span", { class: "pill-label" }, t.name),
             ],
           ),
-          // Clear button
-          h(
-            "button",
-            { id: "clear-prompt-btn", type: "button", class: "toolbar-text-btn" },
-            "Limpiar",
-          ),
-        ]),
-        h("div", { class: "toolbar-right" }, [
-          h("span", { id: "topic-counter", class: "char-counter" }, `0 / ${TOPIC_MAX}`),
-          h("button", { id: "start-btn", type: "button", class: "btn start-btn", disabled: true }, [
-            h("span", { class: "material-symbols-outlined start-btn-icon", "aria-hidden": "true" }, "graphic_eq"),
-            h("span", { class: "start-btn-label" }, "Iniciar práctica"),
-            h("kbd", {}, "↵"),
-          ]),
-        ]),
+        ),
       ]),
-      // --- Audio I/O popover (device select + sound test + level meter) ---
-      h("div", { id: "audio-popover", class: "audio-popover", hidden: true }, [
-        h("div", { class: "audio-popover-head" }, [
-          h("label", { class: "field-label", for: "mic-select" }, "Micrófono"),
-          h(
-            "select",
-            { id: "mic-select", class: "level-select" },
-            [h("option", { value: "" }, "Default")],
-          ),
-        ]),
-        h("div", { class: "meter-row" }, [
-          h("div", { class: "meter-wrap" }, [h("div", { id: "meter-bar", class: "meter-bar" })]),
-          h("span", { id: "meter-db", class: "meter-db" }, "— dB"),
-        ]),
-        h("div", { class: "audio-actions" }, [
-          h("button", { id: "sound-test-btn", type: "button", class: "btn ghost" }, [
-            h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "volume_up"),
-            "Prueba de sonido",
+
+      // --- Prompt box (Claude/ChatGPT style) ---
+      h("div", { class: "prompt-box", id: "prompt-box" }, [
+        h("input", {
+          id: "file-input",
+          type: "file",
+          accept: ACCEPTED_EXTENSIONS.join(","),
+          multiple: true,
+          hidden: true,
+        }),
+        h("div", { id: "file-chips", class: "file-chips" }),
+        h("textarea", {
+          id: "prompt-input",
+          class: "prompt-textarea",
+          maxlength: String(TOPIC_MAX),
+          rows: 3,
+          placeholder: "Describe el rol o tema para el Coach (o arrastra archivos de contexto)...",
+        }),
+        h("div", { class: "prompt-toolbar" }, [
+          h("div", { class: "toolbar-left" }, [
+            // CEFR level dropdown
+            h("div", { class: "cefr-wrap" }, [
+              h(
+                "select",
+                { id: "level-select", class: "cefr-select" },
+                LEVELS.map((l) => h("option", { value: l.value }, l.label)),
+              ),
+              h("span", { class: "material-symbols-outlined cefr-caret", "aria-hidden": "true" }, "expand_more"),
+            ]),
+            // Attach button
+            h(
+              "button",
+              { id: "attach-btn", type: "button", class: "toolbar-icon-btn", title: "Adjuntar documento de contexto" },
+              [h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "attach_file")],
+            ),
+            // Mic status indicator (opens audio popover)
+            h(
+              "button",
+              { id: "mic-indicator", type: "button", class: "mic-indicator", title: "Micrófono y prueba de sonido" },
+              [
+                h("span", { class: "material-symbols-outlined mic-icon", "aria-hidden": "true" }, "mic"),
+                h("span", { id: "mic-db", class: "mic-db" }, "— dB"),
+              ],
+            ),
+            // Clear button
+            h("button", { id: "clear-prompt-btn", type: "button", class: "toolbar-text-btn" }, "Limpiar"),
           ]),
-          h("span", { id: "sound-test-result", class: "sound-test-result" }),
+          h("div", { class: "toolbar-right" }, [
+            h("span", { id: "topic-counter", class: "char-counter" }, `0 / ${TOPIC_MAX}`),
+            h("button", { id: "start-btn", type: "button", class: "btn start-btn", disabled: true }, [
+              h("span", { class: "material-symbols-outlined start-btn-icon", "aria-hidden": "true" }, "graphic_eq"),
+              h("span", { class: "start-btn-label" }, "Iniciar práctica"),
+              h("kbd", {}, "↵"),
+            ]),
+          ]),
+        ]),
+        // --- Audio I/O popover (device select + sound test + level meter) ---
+        h("div", { id: "audio-popover", class: "audio-popover", hidden: true }, [
+          h("div", { class: "audio-popover-head" }, [
+            h("label", { class: "field-label", for: "mic-select" }, "Micrófono"),
+            h("select", { id: "mic-select", class: "level-select" }, [h("option", { value: "" }, "Default")]),
+          ]),
+          h("div", { class: "meter-row" }, [
+            h("div", { class: "meter-wrap" }, [h("div", { id: "meter-bar", class: "meter-bar" })]),
+            h("span", { id: "meter-db", class: "meter-db" }, "— dB"),
+          ]),
+          h("div", { class: "audio-actions" }, [
+            h("button", { id: "sound-test-btn", type: "button", class: "btn ghost" }, [
+              h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "volume_up"),
+              "Prueba de sonido",
+            ]),
+            h("span", { id: "sound-test-result", class: "sound-test-result" }),
+          ]),
         ]),
       ]),
     ]),
 
-    // --- Meta strip ---
+    // --- Meta strip (pinned to the bottom of the layout) ---
     h("div", { class: "config-meta" }, [
       h("div", { class: "meta-col" }, [
         h("div", { class: "meta-label" }, "Acento Objetivo"),

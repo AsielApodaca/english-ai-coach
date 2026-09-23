@@ -622,9 +622,31 @@ body.overlay-open {
   align-items: center;
   gap: 26px;
   width: 100%;
-  max-width: 640px;
+  max-width: 760px;
   margin: 0 auto;
   padding: 14px 8px 40px;
+  min-height: calc(100vh - var(--topbar-h) - 48px);
+}
+
+/* Vertically-centered group (hero + pills + prompt box). */
+.config-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 26px;
+  width: 100%;
+}
+
+/* Meta strip is pinned to the bottom of the layout. */
+.config-meta {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 
 /* ---------- Hero ---------- */
@@ -1071,16 +1093,7 @@ body.overlay-open {
   white-space: nowrap;
 }
 
-/* ---------- Meta strip ---------- */
-.config-meta {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
+/* ---------- Meta strip contents ---------- */
 .meta-col {
   display: flex;
   flex-direction: column;
@@ -1399,6 +1412,11 @@ body.overlay-open {
 @media (max-width: 640px) {
   .config-view {
     padding: 10px 0 30px;
+    gap: 20px;
+    min-height: 0;
+  }
+
+  .config-main {
     gap: 20px;
   }
 
