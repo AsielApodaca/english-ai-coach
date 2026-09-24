@@ -2,14 +2,17 @@
  * Hash router for the SPA shell.
  *
  * Routes:
- *   #/                  → { view: "config" }
- *   #/practice/<id>     → { view: "practice", sessionId: <id> }
- *   #/settings          → settings overlay (opened on top of the current view)
- *   anything else       → redirect to #/
+ *   <empty>              → { view: "config" }   (canonical home, no fragment)
+ *   #/practice/<id>      → { view: "practice", sessionId: <id> }
+ *   #/settings           → settings overlay (opened on top of the current view)
+ *   anything else        → normalize to the canonical home URL (no fragment)
  *
- * The router rehydrates the stage by toggling the config/practice views and
- * mirroring the route into the shell store. Settings is an overlay, so the
- * underlying view keeps its state while it is open.
+ * The config (home) route is intentionally fragment-less: navigating to it
+ * clears the URL (e.g. `http://localhost:3000`), so the legacy `#/` fragment
+ * is collapsed away whenever it shows up. The router rehydrates the stage by
+ * toggling the config/practice views and mirroring the route into the shell
+ * store. Settings is an overlay, so the underlying view keeps its state while
+ * it is open.
  */
 
 /**
@@ -41,16 +44,18 @@ export function parseHash(hash) {
 export function initRouter(store, elements) {
   const { stage, configView, practiceView, settingsOverlay } = elements;
   const crumbCurrent = document.getElementById("crumb-current");
-  const CRUMB_LABEL = { config: "Config", practice: "Practice" };
+  const CRUMB_LABEL = { config: "Create Session", practice: "Practice" };
   let returnHash = null;
 
   /** Render the current hash into the stage and store. */
   function render() {
     const route = parseHash(location.hash);
 
-    if (route.redirect && location.hash !== "#/") {
-      location.replace("#/");
-      return;
+    // Normalize unknown hashes and the legacy "#/" home fragment to the
+    // canonical home URL (localhost:3000, no fragment).
+    if (route.redirect || (route.view === "config" && location.hash)) {
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+      return render();
     }
 
     if (route.view === "settings") {
@@ -70,6 +75,15 @@ export function initRouter(store, elements) {
 
   /** Navigate to a hash path, re-rendering immediately if already there. */
   function navigate(path) {
+    if (path === "#/") {
+      // Home = the clean URL. Push a new entry when leaving another view so
+      // the back button still returns to it; otherwise just re-render.
+      if (location.hash && location.hash !== "#/") {
+        history.pushState(null, "", window.location.pathname + window.location.search);
+      }
+      render();
+      return;
+    }
     if (location.hash === path) {
       render();
     } else {
@@ -79,7 +93,7 @@ export function initRouter(store, elements) {
 
   /** Open the settings overlay, remembering where to return on close. */
   function openSettings() {
-    returnHash = location.hash || "#/";
+    returnHash = location.hash || "";
     navigate("#/settings");
   }
 
