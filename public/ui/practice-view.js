@@ -80,6 +80,9 @@ let adjustmentTimer = null;
 let store = null;
 let navigate = null;
 
+/** The `#view-practice` stage slot (set in initPracticeView). */
+let root = null;
+
 /** DOM references. */
 let els = null;
 let dock = null;
@@ -105,9 +108,10 @@ let lastWavBlob = null;
  * @param {HTMLElement} root - the `#view-practice` element
  * @param {{ store: import("./store.js").ShellState, navigate: (path: string) => void }} ctx
  */
-export function initPracticeView(root, { store: shellStore, navigate: nav }) {
+export function initPracticeView(rootElement, { store: shellStore, navigate: nav }) {
   store = shellStore;
   navigate = nav;
+  root = rootElement;
   let currentSessionId = null;
 
   store.subscribe((state) => {
@@ -570,10 +574,11 @@ async function captureAttempt(target, kind, token) {
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
   if (stt === "whisper") {
-    const { blob, timedOut, error } = await waitForUserRecording(token);
+    const { blob, timedOut, short, error } = await waitForUserRecording(token);
     if (token !== flowToken) return null;
     if (error) throw new Error(error);
     if (timedOut) return timedOutOutcome(target, kind);
+    if (short) return shortAttemptOutcome(target, kind);
     lastWavBlob = blob;
     try {
       return await submitAudio(blob, target, kind);
@@ -595,14 +600,15 @@ async function captureAttempt(target, kind, token) {
 function waitForUserRecording(token) {
   return new Promise((resolve) => {
     let recorder = null;
-    let recorderReady = null;
     let pressed = false;
+    let stopped = false;
     let settled = false;
 
     const settle = (value) => {
       if (settled) return;
       settled = true;
       clearTimeout(guard);
+      if (!stopped) recorder?.cancel();
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
       resolve(value);
@@ -616,24 +622,65 @@ function waitForUserRecording(token) {
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
 
+    // Prewarm the mic + WebAudio graph NOW so capture is instant when the
+    // user presses (getUserMedia takes ~200-500ms; without this a quick
+    // press-and-release can end before a single sample is captured).
+    // The device matches the one saved in Config/Settings (`engcoach.mic`);
+    // a bare `{ audio: true }` would silently use the OS default input.
+    recorder = new WaveRecorder({ deviceId: getLocal("mic", "") || undefined });
+    recorder.prewarm().catch(() => {
+      // Ignored: start() retries and surfaces a friendly error if needed.
+    });
+
     captureHandlers = {
-      onRecordStart: () => {
-        if (settled) return;
+      onRecordStart: async () => {
+        if (settled || pressed) return;
         pressed = true;
-        recorder = new WaveRecorder();
-        recorderReady = recorder.start().catch(() => {
+        dock?.setMicLabel("Grabando…");
+        // Signal watch: if the input channel stays silent for a second, the
+        // saved device is probably muted/unplugged — surface that instead of a
+        // mystifying "didn't hear you".
+        let silentTimer = setTimeout(() => {
+          if (!settled) dock?.setMicLabel("Sin señal del micrófono — revisa Config > Dispositivo");
+        }, 1000);
+        recorder.onLevel = (db) => {
+          dock?.setVU(db);
+          if (Number.isFinite(db) && db > -55) {
+            clearTimeout(silentTimer);
+            silentTimer = null;
+            dock?.setMicLabel("Grabando…");
+          }
+        };
+        try {
+          await recorder.start();
+        } catch {
+          if (silentTimer) clearTimeout(silentTimer);
           settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
-        });
+        }
       },
       onRecordEnd: async () => {
-        if (settled) return;
-        try {
-          await recorderReady;
-        } catch {
+        if (settled || !pressed) return;
+        // The stop reads the recorded samples; make sure start() finished so a
+        // quick release still captures.
+        if (!recorder.recording) {
+          try {
+            await recorder.start().catch(() => {});
+          } catch {
+            return;
+          }
+        }
+        const blob = recorder.stop();
+        stopped = true;
+        console.info(
+          `[rec] dur=${recorder.lastDurationMs}ms samples=${recorder.lastSampleCount} ctx=${recorder.ctx ? "built" : "none"} rate=${recorder.sampleRate ?? "?"}`,
+        );
+        dock?.setMicLabel("Micrófono");
+        // A near-silent, sub-100ms clip means the button was tapped instead of
+        // held — failing the real recording would feel like "no audio".
+        if ((recorder.lastDurationMs ?? 0) < 100) {
+          settle({ blob: null, timedOut: false, short: true });
           return;
         }
-        if (!recorder || settled) return;
-        const blob = recorder.stop();
         settle({ blob, timedOut: false });
       },
     };
@@ -735,6 +782,7 @@ function outcomeFromJson(json, target, kind) {
     passed: json.score >= passThreshold,
     words: Array.isArray(json.words) ? json.words : [],
     target,
+    heard: typeof json.text === "string" ? json.text : "",
     coachLine: json.coachLine ?? "",
   };
 }
@@ -750,6 +798,19 @@ function timedOutOutcome(target, kind) {
     target,
     timedOut: true,
     coachLine: "I didn't hear you. Let's try that again.",
+  };
+}
+
+/** Outcome when the orb was tapped instead of held (clip < 100ms). */
+function shortAttemptOutcome(target, kind) {
+  return {
+    kind,
+    score: 0,
+    verdict: "retry",
+    passed: false,
+    words: [],
+    target,
+    coachLine: "Hold the orb pressed while you speak, then let go.",
   };
 }
 
@@ -865,7 +926,12 @@ function renderFeedback(outcome, lineIndex) {
   const chipText = passed
     ? `Buen flujo · ${outcome.score}%`
     : `Foco en ${focus || "pronunciación"} · ${outcome.score}%`;
-  els.feedbackChip.textContent = chipText;
+  const parts = [h("span", { class: "feedback-chip-main" }, chipText)];
+  if (!passed && outcome.heard) {
+    parts.push(h("span", { class: "feedback-chip-heard" }, ` Escuché: “${escapeHtml(outcome.heard)}”`));
+  }
+  els.feedbackChip.textContent = "";
+  els.feedbackChip.append(...parts);
   els.feedbackChip.hidden = false;
   els.feedbackChip.classList.toggle("ok", passed);
   els.feedbackChip.classList.toggle("bad", !passed);

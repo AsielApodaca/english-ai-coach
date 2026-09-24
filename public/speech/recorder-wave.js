@@ -1,29 +1,90 @@
 /** Records microphone audio and exports it as a WAV blob (for local whisper). */
 export class WaveRecorder {
-  constructor() {
+  constructor({ deviceId } = {}) {
+    this.deviceId = deviceId || "";
     this.ctx = null;
     this.stream = null;
     this.recording = false;
     this.samples = [];
+    this.onLevel = null;
+    /** In-flight prewarm() promise, so concurrent callers wait on the same one. */
+    this._prewarming = null;
+    this.lastDurationMs = 0;
+    this.lastSampleCount = 0;
   }
 
+  /**
+   * Acquire the mic stream ahead of time.
+   *
+   * getUserMedia takes ~200-500ms; fetching it before the user presses the orb
+   * means push-to-talk capture starts instantly. The WebAudio graph is NOT
+   * built here on purpose: an AudioContext created outside a user gesture is
+   * created "suspended" by Chrome's autoplay policy, and resuming it later is
+   * finicky. Instead the graph is built in start(), inside the press gesture,
+   * where a fresh context is guaranteed to start "running" — same pattern used
+   * by the (working) config sound test.
+   *
+   * The device honours the saved `engcoach.mic` choice: a plain
+   * `{ audio: true }` request falls back to the OS default input, which is
+   * NOT necessarily the mic the user picked in Settings.
+   *
+   * Idempotent: safe to call multiple times. Fulfils with the same promise
+   * when already running.
+   */
+  async prewarm() {
+    if (this.stream) return true;
+    if (this._prewarming) return this._prewarming;
+    this._prewarming = (async () => {
+      const constraints = this.deviceId
+        ? { audio: { deviceId: { exact: this.deviceId } } }
+        : { audio: true };
+      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      return true;
+    })().finally(() => {
+      this._prewarming = null;
+    });
+    return this._prewarming;
+  }
+
+  /**
+   * Build the capture graph NOW and start recording. Must run inside a user
+   * gesture (the orb press): a context created here starts "running", which
+   * guarantees onaudioprocess fires and real samples reach the mic.
+   */
   async start() {
     if (this.recording) return true;
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    this.ctx = new AudioContext();
-    this.sampleRate = this.ctx.sampleRate;
-    const source = this.ctx.createMediaStreamSource(this.stream);
-    const processor = this.ctx.createScriptProcessor(4096, 1, 1);
+    await this.prewarm();
+    if (this.ctx) {
+      this.ctx.close().catch(() => {});
+      this.ctx = null;
+    }
+    this.buildGraph();
+    this.recording = true;
+    return true;
+  }
+
+  /** Create a fresh AudioContext + capture graph from the prewarmed stream. */
+  buildGraph() {
+    const ctx = new AudioContext();
+    this.sampleRate = ctx.sampleRate;
+    const source = ctx.createMediaStreamSource(this.stream);
+    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    // Zero-gain tail into the destination: keeps the processor active (so
+    // onaudioprocess fires) without routing the mic back through the speakers.
+    const silentOut = ctx.createGain();
+    silentOut.gain.value = 0;
     processor.onaudioprocess = (e) => {
+      const ch = e.inputBuffer.getChannelData(0);
       if (this.recording) {
-        const ch = e.inputBuffer.getChannelData(0);
         this.samples.push(new Float32Array(ch));
+        if (this.onLevel) this.onLevel(rmsDb(ch));
       }
     };
     source.connect(processor);
-    processor.connect(this.ctx.destination);
-    this.recording = true;
-    return true;
+    processor.connect(silentOut);
+    silentOut.connect(ctx.destination);
+    this.ctx = ctx;
+    return ctx;
   }
 
   /** Stop and produce a WAV Blob of everything recorded. */
@@ -35,7 +96,10 @@ export class WaveRecorder {
       combined.set(a, off);
       off += a.length;
     }
+    this.lastSampleCount = combined.length;
     this.samples = [];
+    /** Recorded clip length in milliseconds (0 when nothing was captured). */
+    this.lastDurationMs = this.sampleRate ? Math.round((combined.length / this.sampleRate) * 1000) : 0;
     this.teardown();
     return encodeWAV(combined, this.sampleRate);
   }
@@ -56,6 +120,14 @@ export class WaveRecorder {
       this.ctx = null;
     }
   }
+}
+
+/** RMS level of an audio channel in dB (0 dBFS peak, -Infinity on silence). */
+function rmsDb(ch) {
+  let sum = 0;
+  for (let i = 0; i < ch.length; i++) sum += ch[i] * ch[i];
+  const rms = Math.sqrt(sum / ch.length);
+  return rms === 0 ? -Infinity : 20 * Math.log10(rms);
 }
 
 export function encodeWAV(samples, sampleRate) {
