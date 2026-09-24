@@ -49,7 +49,6 @@ store.set({ sidebarOpen: desktop.matches });
 desktop.addEventListener("change", (e) => store.set({ sidebarOpen: e.matches }));
 
 // ---------- modules ----------
-initSidebar(store, document.getElementById("sidebar"));
 const settingsOverlay = initSettingsOverlay(document.getElementById("settings-overlay"));
 const router = initRouter(store, {
   stage: document.getElementById("stage"),
@@ -57,6 +56,7 @@ const router = initRouter(store, {
   practiceView: document.getElementById("view-practice"),
   settingsOverlay,
 });
+initSidebar(store, document.getElementById("sidebar"), { navigate: router.navigate });
 initConfigView(document.getElementById("view-config"), { navigate: router.navigate });
 initPracticeView(document.getElementById("view-practice"), { store, navigate: router.navigate });
 

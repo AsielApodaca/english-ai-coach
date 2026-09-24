@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, renameSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
@@ -219,10 +219,34 @@ export interface ListSessionsOptions {
   limit?: number;
 }
 
-export interface RecencyGroup {
+export interface RecencyGroup<T = SessionV2> {
   key: "today" | "yesterday" | "last7" | "older";
   label: string;
-  sessions: SessionV2[];
+  sessions: T[];
+}
+
+/**
+ * Lightweight history entry (feature 109): everything the sidebar needs to
+ * render one session row. Deliberately excludes the full `topicPrompt` and the
+ * question bodies — the listing must stay cheap (NFR: light read of
+ * `data/sessions`, no content until opened).
+ */
+export interface SessionProgress {
+  answered: number;
+  total: number;
+  pct: number;
+}
+
+export interface SessionSummary {
+  id: string;
+  title: string;
+  level: Level;
+  provider: string;
+  status: SessionStatus;
+  updatedAt: string;
+  /** Average pronunciation score across fragment attempts; absent when none. */
+  score?: number;
+  progress: SessionProgress;
 }
 
 export const DEFAULT_ACCENT = "General American (US)";
@@ -345,12 +369,14 @@ function toSessionV2(raw: unknown): SessionV2 | undefined {
 /**
  * Group sessions by recency of `updatedAt` (local calendar days):
  * Today / Yesterday / Previous 7 Days / Older. Each group is sorted newest first.
+ * Generic over the item shape so both full sessions and light summaries (109)
+ * can be bucketed with the same logic.
  */
-export function groupSessionsByRecency(sessions: SessionV2[], now: Date = new Date()): RecencyGroup[] {
+export function groupSessionsByRecency<T extends { updatedAt: string }>(sessions: T[], now: Date = new Date()): RecencyGroup<T>[] {
   const startOfToday = startOfDay(now).getTime();
   const startOfYesterday = startOfToday - 86_400_000;
   const startOfLast7 = startOfToday - 7 * 86_400_000;
-  const groups: RecencyGroup[] = [
+  const groups: RecencyGroup<T>[] = [
     { key: "today", label: "Today", sessions: [] },
     { key: "yesterday", label: "Yesterday", sessions: [] },
     { key: "last7", label: "Previous 7 Days", sessions: [] },
@@ -369,6 +395,47 @@ export function groupSessionsByRecency(sessions: SessionV2[], now: Date = new Da
   return groups;
 }
 
+/**
+ * Average pronunciation score of a session across all fragment attempts
+ * (same formula as the practice done-panel and `/api/history`). Returns null
+ * when the session has no attempts yet.
+ */
+export function sessionScore(session: SessionV2): number | null {
+  const scores = session.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score)));
+  return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
+}
+
+/**
+ * Progress of a session: questions answered (eval set) vs total questions.
+ * A fresh session (0 questions) reports 0/0 with pct 0.
+ */
+export function sessionProgress(session: SessionV2): SessionProgress {
+  const total = session.questions.length;
+  const answered = session.questions.filter((q) => q.eval !== null).length;
+  return { answered, total, pct: total > 0 ? Math.round((answered / total) * 100) : 0 };
+}
+
+/**
+ * Extract the light history summary from a raw session file (feature 109).
+ * Migrates v1 files on the fly like `toSessionV2`; returns undefined for
+ * unreadable/corrupt files so the listing can skip them defensively.
+ */
+export function toSessionSummary(raw: unknown): SessionSummary | undefined {
+  const session = toSessionV2(raw);
+  if (!session) return undefined;
+  const score = sessionScore(session);
+  return {
+    id: session.id,
+    title: session.title,
+    level: session.config.level,
+    provider: session.provider,
+    status: session.status,
+    updatedAt: session.updatedAt,
+    ...(score !== null ? { score } : {}),
+    progress: sessionProgress(session),
+  };
+}
+
 export function createStorage(baseDir: string): Storage & {
   loadProfile(): Profile;
   saveProfile(profile: Profile): void;
@@ -377,6 +444,9 @@ export function createStorage(baseDir: string): Storage & {
   loadSession(id: string): SessionV2 | undefined;
   listSessions(opts?: ListSessionsOptions): SessionV2[];
   loadAllSessions(): SessionV2[];
+  listSessionSummaries(opts?: ListSessionsOptions): SessionSummary[];
+  deleteSession(id: string): boolean;
+  copyContextText(fromBucket: string, toBucket: string, textRef: string): boolean;
   saveContextText(bucket: string, file: { name: string; size: number; kind: FileKind }, text: string): string;
   loadContextText(bucket: string, textRef: string): string | undefined;
 } {
@@ -488,6 +558,67 @@ export function createStorage(baseDir: string): Storage & {
     },
     loadAllSessions(): SessionV2[] {
       return this.listSessions();
+    },
+    /**
+     * Light history listing (feature 109): reads every session file but keeps
+     * only the summary fields — never the topicPrompt or question bodies.
+     * Same filtering/sorting contract as `listSessions`.
+     */
+    listSessionSummaries(opts?: ListSessionsOptions): SessionSummary[] {
+      if (!existsSync(sessionsDir)) return [];
+      let summaries = readdirSync(sessionsDir)
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => {
+          try {
+            return toSessionSummary(JSON.parse(readFileSync(join(sessionsDir, f), "utf8")) as unknown);
+          } catch {
+            return undefined;
+          }
+        })
+        .filter((s): s is SessionSummary => s !== undefined);
+      if (opts?.status) summaries = summaries.filter((s) => s.status === opts.status);
+      if (opts?.since) summaries = summaries.filter((s) => s.updatedAt >= opts.since!);
+      summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      if (opts?.limit && opts.limit > 0) summaries = summaries.slice(0, opts.limit);
+      return summaries;
+    },
+    /**
+     * Delete a session file and its extracted-context bucket (feature 109).
+     * Returns false when the session does not exist or the id is unsafe.
+     */
+    deleteSession(id: string): boolean {
+      let file: string;
+      try {
+        file = sessionFile(this.sessionsDir, id);
+      } catch {
+        return false;
+      }
+      if (!existsSync(file)) return false;
+      rmSync(file, { force: true });
+      // Best-effort cleanup of the session's context texts (data/tmp/context/<id>).
+      if (isValidBucket(id)) {
+        rmSync(join(this.tmpDir, "context", id), { recursive: true, force: true });
+      }
+      return true;
+    },
+    /**
+     * Copy an extracted context text from one bucket to another (feature 109
+     * "Practicar de nuevo"): the new session must be self-contained, so its
+     * context files are duplicated into its own bucket. Falls back to the
+     * "draft" bucket like `loadContextText` (files uploaded before session
+     * creation live there). Returns false when the text cannot be resolved.
+     */
+    copyContextText(fromBucket: string, toBucket: string, textRef: string): boolean {
+      if (!isValidBucket(fromBucket) || !isValidBucket(toBucket) || !isValidTextRef(textRef)) return false;
+      for (const candidate of [fromBucket, "draft"]) {
+        const source = join(this.tmpDir, "context", candidate, textRef);
+        if (!existsSync(source)) continue;
+        const dir = join(this.tmpDir, "context", toBucket);
+        mkdirp(dir);
+        writeFileSync(join(dir, textRef), readFileSync(source, "utf8"), "utf8");
+        return true;
+      }
+      return false;
     },
     /**
      * Persist extracted context text under `data/tmp/context/<bucket>/` and

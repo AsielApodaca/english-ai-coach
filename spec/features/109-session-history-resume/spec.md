@@ -1,6 +1,6 @@
 # 109 · Historial y reanudación de sesiones (CU3)
 
-**Estado:** planificado 🔜 (ola 6)
+**Estado:** hecho ✅ (ola 6)
 
 ## Contexto
 
@@ -18,14 +18,14 @@ CU3 pide "historial de sesiones con progreso separado" y reanudación de aprendi
 
 ## Requerimientos funcionales
 
-- [ ] **Listado agrupado:** `GET /api/sessions?group=recency` → `{ groups: [{ label: "Today"|"Yesterday"|"Previous 7 Days", items: SessionSummary[] }] }`; `SessionSummary = { id, title, level, provider, status, updatedAt, score?, progress: { answered, total, pct } }`.
-- [ ] **Reducir carga:** el listado no incluye el `topicPrompt` completo, solo `title` derivado (102).
-- [ ] **Sidebar UI (101/109):** cada item con anillo de progreso (score de pronunciación → color carmesí→esmeralda), badge de nivel, y badge **"ACTIVA (Q{n})"** para la sesión en curso; botón *New Session* en cabecera del sidebar; estado vacío para primer uso ("No sessions yet").
-- [ ] **Reanudar activa:** click → `#/practice/<id>` → la máquina de estados de 105 retoma en el último checkpoint (`status=active`, pregunta/fragmento salvados). La práctica no reinicia la pregunta actual.
-- [ ] **Abrir completada (review):** modo lector: muestra pregunta/respuesta, intentos con colores (words[] de 106 guardados), feedback y eval; sin grabación; botón "Practicar de nuevo" → nueva sesión con misma config (reusa `config` para 103 prefill).
-- [ ] **Cierre/abandono:** "Finalizar Sesión" → completed; navegar/volver a config (breadcrumb) → deja `active` y guarda. Al entrar de nuevo, el sidebar la muestra y permite reanudar.
-- [ ] **Eliminar / exportar:** acción por sesión (delete `data/sessions/<id>.json`) y export de una sesión (JSON) — este último de bajo perfil en el dado de perfil (108).
-- [ ] CU3: el historial **no** lista sesiones sin iniciar; si el usuario nunca crea una, el sidebar está vacío.
+- [x] **Listado agrupado:** `GET /api/sessions?group=recency` → `{ groups: [{ label: "Today"|"Yesterday"|"Previous 7 Days", items: SessionSummary[] }] }`; `SessionSummary = { id, title, level, provider, status, updatedAt, score?, progress: { answered, total, pct } }`.
+- [x] **Reducir carga:** el listado no incluye el `topicPrompt` completo, solo `title` derivado (102).
+- [x] **Sidebar UI (101/109):** cada item con anillo de progreso (score de pronunciación → color carmesí→esmeralda), badge de nivel, y badge **"ACTIVA (Q{n})"** para la sesión en curso; botón *New Session* en cabecera del sidebar; estado vacío para primer uso ("No sessions yet").
+- [x] **Reanudar activa:** click → `#/practice/<id>` → la máquina de estados de 105 retoma en el último checkpoint (`status=active`, pregunta/fragmento salvados). La práctica no reinicia la pregunta actual.
+- [x] **Abrir completada (review):** modo lector: muestra pregunta/respuesta, intentos con colores (words[] de 106 guardados), feedback y eval; sin grabación; botón "Practicar de nuevo" → nueva sesión con misma config (reusa `config` para 103 prefill).
+- [x] **Cierre/abandono:** "Finalizar Sesión" → completed; navegar/volver a config (breadcrumb) → deja `active` y guarda. Al entrar de nuevo, el sidebar la muestra y permite reanudar.
+- [x] **Eliminar / exportar:** acción por sesión (delete `data/sessions/<id>.json`) y export de una sesión (JSON) — este último de bajo perfil en el dado de perfil (108).
+- [x] CU3: el historial **no** lista sesiones sin iniciar; si el usuario nunca crea una, el sidebar está vacío.
 
 ## Requerimientos no funcionales
 
@@ -45,11 +45,11 @@ CU3 pide "historial de sesiones con progreso separado" y reanudación de aprendi
 
 ## Criterios de aceptación
 
-- [ ] Tras terminar una sesión completa se ve en "Today" con score; tras 1 día en "Yesterday" o "Previous 7" según `updatedAt`.
-- [ ] Interrumpir una sesión en Q3-Fragmento2 y reentrar la reanuda en ese punto sin reset.
-- [ ] Abrir una completada muestra colores/feedback (review); "Practicar de nuevo" prefill de config.
-- [ ] Test storage groupByRecency y listSessions (no carga cuerpos).
-- [ ] `npm test` y `npm run check` verdes.
+- [x] Tras terminar una sesión completa se ve en "Today" con score; tras 1 día en "Yesterday" o "Previous 7" según `updatedAt`.
+- [x] Interrumpir una sesión en Q3-Fragmento2 y reentrar la reanuda en ese punto sin reset.
+- [x] Abrir una completada muestra colores/feedback (review); "Practicar de nuevo" prefill de config.
+- [x] Test storage groupByRecency y listSessions (no carga cuerpos).
+- [x] `npm test` y `npm run check` verdes.
 
 ## Fuera de alcance
 

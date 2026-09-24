@@ -96,6 +96,8 @@ let draft = {
   phonemes: [],
   contextFiles: [],
   micDeviceId: "",
+  /** Source session bucket for context files (feature 109 "Practicar de nuevo"). */
+  contextBucket: undefined,
 };
 
 /** DOM element references collected after the view is built. */
@@ -122,6 +124,22 @@ export function initConfigView(root, { navigate }) {
   loadProfile();
   initAudio();
   initDropOverlay();
+
+  // Feature 109 "Practicar de nuevo": a completed session's review dispatches
+  // this event with its config; restore it into the draft (prefill).
+  window.addEventListener("engcoach:prefill-session", (e) => {
+    const { config, sessionId } = e.detail ?? {};
+    if (!config || typeof config !== "object") return;
+    draft.topicPrompt = typeof config.topicPrompt === "string" ? config.topicPrompt : "";
+    draft.level = LEVELS.some((l) => l.value === config.level) ? config.level : "B2";
+    draft.accent = ACCENTS.includes(config.accent) ? config.accent : ACCENTS[0];
+    draft.phonemes = Array.isArray(config.phonemes) ? config.phonemes.filter((p) => typeof p === "string") : [];
+    draft.contextFiles = Array.isArray(config.contextFiles) ? config.contextFiles : [];
+    draft.contextBucket = typeof sessionId === "string" && sessionId ? sessionId : undefined;
+    applyDraft();
+    renderFileChips();
+    renderPhonemeChips(draft.phonemes);
+  });
 }
 
 function buildView() {
@@ -513,6 +531,15 @@ async function handleFiles(files) {
   }
 }
 
+/** Re-render the file chips from the draft (feature 109 prefill). */
+function renderFileChips() {
+  els.fileChips.innerHTML = "";
+  for (const f of draft.contextFiles) {
+    addFileChip({ name: f.name, size: f.size, status: "Listo", ok: true });
+  }
+  els.fileChips.hidden = draft.contextFiles.length === 0;
+}
+
 /** Append a file chip (name + size + status + remove button). */
 function addFileChip(file) {
   const chip = h("div", { class: "file-chip" }, [
@@ -838,6 +865,7 @@ function openLaunchModal({ navigate }) {
           accent: draft.accent,
           focusPhonemes: draft.phonemes,
           settings: allLocalSettings(),
+          contextBucket: draft.contextBucket,
         }),
       });
       const json = await res.json();

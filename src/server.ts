@@ -31,6 +31,7 @@ import {
   DEFAULT_ACCENT,
   DEFAULT_SETTINGS_SNAPSHOT,
   fallbackTitle,
+  groupSessionsByRecency,
   isLevel,
   type AttemptWord,
   type FeedbackIssue,
@@ -385,6 +386,47 @@ app.post("/api/session/checkpoint", (req, res) => {
 app.post("/api/session/next-question", async (req, res) => {
   const { status, json } = await handleNextQuestionRequest(storage, candidates(), req.body);
   res.status(status).json(json);
+});
+
+/**
+ * GET /api/sessions — session history listing (feature 109).
+ *
+ * `?group=recency` returns the sidebar payload:
+ *   { groups: [{ label: "Today"|"Yesterday"|"Previous 7 Days"|"Older", items: SessionSummary[] }] }
+ * grouped by `updatedAt` (local calendar days) with empty groups omitted.
+ * Without the query param it returns the flat summary list. Summaries are
+ * light: title/level/provider/status/updatedAt/score/progress — never the
+ * topicPrompt or question bodies (NFR: cheap listing).
+ */
+app.get("/api/sessions", (req, res) => {
+  const summaries = storage.listSessionSummaries();
+  if (req.query.group === "recency") {
+    const groups = groupSessionsByRecency(summaries)
+      .map((g) => ({ label: g.label, items: g.sessions }))
+      .filter((g) => g.items.length > 0);
+    return res.json({ groups });
+  }
+  res.json({ sessions: summaries });
+});
+
+/**
+ * DELETE /api/sessions/:id — delete a session file (feature 109).
+ * Also removes the session's extracted-context bucket. 404 when missing.
+ */
+app.delete("/api/sessions/:id", (req, res) => {
+  const deleted = storage.deleteSession(req.params.id);
+  if (!deleted) return res.status(404).json({ error: "Session not found." });
+  res.json({ ok: true });
+});
+
+/**
+ * GET /api/sessions/:id/export — full JSON of a single session (feature 109,
+ * low-profile export next to the profile export of 108). 404 when missing.
+ */
+app.get("/api/sessions/:id/export", (req, res) => {
+  const session = storage.loadSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found." });
+  res.json(session);
 });
 
 app.get("/api/history", (_req, res) => {
