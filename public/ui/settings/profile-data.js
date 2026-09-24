@@ -88,6 +88,14 @@ export function renderProfileData(root, ctx) {
             "Exportar",
           ]),
         }),
+        settingRow({
+          label: "Borrar historial",
+          hint: "Elimina todas las sesiones. El perfil y la configuración no se tocan.",
+          control: h("button", { type: "button", class: "btn ghost danger", onclick: clearHistory }, [
+            h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "delete_sweep"),
+            "Borrar todo",
+          ]),
+        }),
       ]),
     ]),
   );
@@ -133,6 +141,21 @@ async function exportJson() {
     URL.revokeObjectURL(url);
   } catch {
     // silent: the export button is best-effort
+  }
+}
+
+/**
+ * Delete the entire session history via DELETE /api/sessions and notify the
+ * sidebar (engcoach:history-changed) so its group list refreshes.
+ */
+async function clearHistory() {
+  if (!window.confirm("¿Borrar todo el historial de sesiones? Esta acción no se puede deshacer.")) return;
+  try {
+    const res = await fetch("/api/sessions", { method: "DELETE" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    window.dispatchEvent(new CustomEvent("engcoach:history-changed"));
+  } catch {
+    // best-effort delete
   }
 }
 

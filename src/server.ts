@@ -420,6 +420,20 @@ app.delete("/api/sessions/:id", (req, res) => {
 });
 
 /**
+ * DELETE /api/sessions — wipe the whole session history (settings "Borrar
+ * historial"). Deletes every session file plus its extracted-context bucket.
+ * The learner profile is left untouched. Returns { ok, deleted }.
+ */
+app.delete("/api/sessions", (req, res) => {
+  const ids = storage.listSessionSummaries().map((s) => s.id);
+  let deleted = 0;
+  for (const id of ids) {
+    if (storage.deleteSession(id)) deleted++;
+  }
+  res.json({ ok: true, deleted });
+});
+
+/**
  * GET /api/sessions/:id/export — full JSON of a single session (feature 109,
  * low-profile export next to the profile export of 108). 404 when missing.
  */

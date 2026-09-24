@@ -213,7 +213,8 @@ export function initSidebar(store, root, { navigate }) {
   };
   apply(store.state);
 
-  // Refresh the history whenever the route changes (resume / finish / delete).
+  // Refresh the history whenever the route changes (resume / finish / delete)
+  // or when settings wipe it (engcoach:history-changed from "Borrar historial").
   let lastRoute = store.state.route;
   const unsubs = [
     store.subscribe((state) => {
@@ -224,6 +225,9 @@ export function initSidebar(store, root, { navigate }) {
       }
     }),
   ];
+  const onHistoryChanged = () => refresh();
+  window.addEventListener("engcoach:history-changed", onHistoryChanged);
+  unsubs.push(() => window.removeEventListener("engcoach:history-changed", onHistoryChanged));
 
   refresh();
   return () => unsubs.forEach((fn) => fn());
