@@ -30,19 +30,21 @@ const ORB_SIZE = 64;
  *   onRetry: () => void,
  *   onFinish: () => void,
  * }} handlers
+ * @param {{ rate?: number }} [opts] - initial tempo (default 1)
  * @returns {{
  *   setMode: (mode: "idle"|"ai"|"recording") => void,
  *   setOrbEnabled: (enabled: boolean) => void,
  *   setMicLabel: (label: string) => void,
  *   setVU: (db: number) => void,
  *   getRate: () => number,
+ *   setRate: (rate: number) => void,
  *   setRetryEnabled: (enabled: boolean) => void,
  *   startVisualizer: () => void,
  *   stopVisualizer: () => void,
  *   destroy: () => void,
  * }}
  */
-export function createAudioDock(root, handlers) {
+export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) {
   const canvas = h("canvas", { class: "dock-waveform", width: "640", height: "48", "aria-hidden": "true" });
   const ctx = canvas.getContext("2d");
 
@@ -113,8 +115,11 @@ export function createAudioDock(root, handlers) {
   function selectTempo(value) {
     rate = value;
     for (const btn of tempoBtns) btn.classList.toggle("active", Number(btn.dataset.rate) === value);
+    // Persist as a device pref (feature 108) so the settings tab stays in sync.
+    localStorage.setItem("engcoach.tempo", String(value));
+    window.dispatchEvent(new CustomEvent("engcoach:settings-changed"));
   }
-  selectTempo(1);
+  selectTempo(initialRate);
 
   orbBtn.addEventListener("pointerdown", (e) => {
     if (!orbEnabled || recording) return;
@@ -200,6 +205,9 @@ export function createAudioDock(root, handlers) {
     },
     getRate() {
       return rate;
+    },
+    setRate(value) {
+      selectTempo(value);
     },
     setRetryEnabled(enabled) {
       retryBtn.disabled = !enabled;

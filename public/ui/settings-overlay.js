@@ -1,13 +1,27 @@
 /**
- * Settings overlay.
+ * Settings overlay (feature 108) — 4 sub-tabs.
  *
- * Feature 108 owns the real settings UI; in 101 this shows a placeholder plus
- * the live engine status (Speech Engine / Whisper / LLM providers) fetched
- * from `/api/health`. The overlay opens and closes without touching the stage,
- * so an active practice keeps its state.
+ * Layout: left nav (General & Audio / Entrenamiento / Modelo IA / Perfil &
+ * Datos) + right content pane. Each tab is a partial ES module in
+ * `public/ui/settings/` that renders into the content pane with the shared
+ * context { profile, health, storage, saveProfileSettings }.
+ *
+ * The overlay opens and closes without touching the stage, so an active
+ * practice keeps its state (spec 108).
  */
 
-import { h, escapeHtml } from "./dom.js";
+import { h } from "./dom.js";
+import { renderGeneralAudio } from "./settings/general-audio.js";
+import { renderTraining } from "./settings/training.js";
+import { renderModelAi } from "./settings/model-ai.js";
+import { renderProfileData } from "./settings/profile-data.js";
+
+const TABS = [
+  { key: "general", label: "General & Audio", icon: "tune", render: renderGeneralAudio },
+  { key: "training", label: "Entrenamiento", icon: "fitness_center", render: renderTraining },
+  { key: "model", label: "Modelo & IA", icon: "memory", render: renderModelAi },
+  { key: "profile", label: "Perfil & Datos", icon: "person", render: renderProfileData },
+];
 
 /**
  * Initialize the settings overlay.
@@ -21,16 +35,20 @@ import { h, escapeHtml } from "./dom.js";
  */
 export function initSettingsOverlay(root) {
   const closeBtn = root.querySelector("#btn-settings-close");
-  const engineStatusEl = root.querySelector("#engine-status");
+  const navEl = root.querySelector("#settings-nav");
+  const contentEl = root.querySelector("#settings-content");
+  const statusEl = root.querySelector("#settings-status");
   let onClose = null;
   let loaded = false;
+  let activeTab = "general";
+  let ctx = null;
 
   function open() {
     root.hidden = false;
     document.body.classList.add("overlay-open");
     if (!loaded) {
       loaded = true;
-      loadEngineStatus();
+      loadContext();
     }
   }
 
@@ -39,60 +57,78 @@ export function initSettingsOverlay(root) {
     document.body.classList.remove("overlay-open");
   }
 
-  /** Fetch `/api/health` once and render the engine status rows. */
-  async function loadEngineStatus() {
-    engineStatusEl.innerHTML = "";
-    let health = null;
-    try {
-      const res = await fetch("/api/health");
-      if (res.ok) health = await res.json();
-    } catch {
-      health = null;
-    }
-    engineStatusEl.appendChild(renderEngineStatus(health));
+  /** Fetch profile + health + storage once, then render the active tab. */
+  async function loadContext() {
+    statusEl.textContent = "Cargando…";
+    const [profileRes, healthRes, storageRes] = await Promise.all([
+      fetch("/api/profile").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/health").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch("/api/storage").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+    ctx = {
+      profile: profileRes?.profile ?? {},
+      health: healthRes,
+      storage: storageRes ?? {},
+      saveProfileSettings: async (patch) => {
+        try {
+          const res = await fetch("/api/profile/settings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(patch),
+          });
+          if (res.ok) {
+            const json = await res.json();
+            ctx.profile = json.profile ?? ctx.profile;
+            statusEl.textContent = "Guardado ✓";
+          } else {
+            statusEl.textContent = "Error al guardar";
+          }
+        } catch {
+          statusEl.textContent = "Error al guardar";
+        }
+        setTimeout(() => {
+          statusEl.textContent = "";
+        }, 2000);
+      },
+    };
+    statusEl.textContent = "";
+    renderNav();
+    renderTab(activeTab);
   }
 
-  /** Build the engine status list from a health payload (or offline state). */
-  function renderEngineStatus(health) {
-    const list = h("div", { class: "engine-status-list" });
-
-    if (!health) {
-      list.appendChild(
-        h("div", { class: "engine-row" }, [
-          h("span", { class: "engine-name" }, "Server"),
-          h("span", { class: "engine-state bad" }, "offline"),
-        ]),
+  /** Build the left nav (one button per tab). */
+  function renderNav() {
+    navEl.innerHTML = "";
+    for (const tab of TABS) {
+      const btn = h(
+        "button",
+        {
+          type: "button",
+          class: "settings-tab",
+          dataset: { tab: tab.key },
+          ...(tab.key === activeTab ? { "aria-selected": "true" } : {}),
+        },
+        [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, tab.icon),
+          h("span", { class: "settings-tab-label" }, tab.label),
+        ],
       );
-      return list;
+      if (tab.key === activeTab) btn.classList.add("active");
+      btn.addEventListener("click", () => {
+        activeTab = tab.key;
+        renderNav();
+        renderTab(activeTab);
+      });
+      navEl.appendChild(btn);
     }
+  }
 
-    const ttsEngine = health.tts?.engine ?? null;
-    list.appendChild(
-      h("div", { class: "engine-row" }, [
-        h("span", { class: "engine-name" }, "Speech Engine"),
-        h("span", { class: `engine-state ${ttsEngine ? "ok" : "warn"}` }, escapeHtml(ttsEngine ?? "browser fallback")),
-      ]),
-    );
-
-    const whisper = health.whisper;
-    const whisperState = whisper?.available ? (whisper.modelReady ? "ready" : "model pending") : "not installed";
-    list.appendChild(
-      h("div", { class: "engine-row" }, [
-        h("span", { class: "engine-name" }, "Whisper (STT)"),
-        h("span", { class: `engine-state ${whisper?.available ? "ok" : "warn"}` }, whisperState),
-      ]),
-    );
-
-    const providers = Object.entries(health.providers ?? {});
-    const online = providers.filter(([, ok]) => ok).length;
-    list.appendChild(
-      h("div", { class: "engine-row" }, [
-        h("span", { class: "engine-name" }, "LLM providers"),
-        h("span", { class: "engine-state ok" }, `${online}/${providers.length} online`),
-      ]),
-    );
-
-    return list;
+  /** Render the active tab partial into the content pane. */
+  function renderTab(key) {
+    const tab = TABS.find((t) => t.key === key);
+    contentEl.innerHTML = "";
+    if (!tab) return;
+    tab.render(contentEl, ctx);
   }
 
   closeBtn.addEventListener("click", () => onClose?.());

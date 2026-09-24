@@ -72,6 +72,23 @@ export interface NextStep {
   generatedAt: string;
 }
 
+/**
+ * Profile-persisted settings (feature 108): training + persona settings that
+ * survive across sessions. Device prefs (mic, volume, showIpa, autoAdvance,
+ * liveHighlight, stt, tempo, whisperModel, voice) live in localStorage instead.
+ */
+export interface ProfileSettings {
+  rigor?: string;
+  fillers?: string;
+  adaptive?: { enabled?: boolean; up?: number; down?: number };
+  prepTime?: number;
+  provider?: string;
+  personaName?: string;
+  targetLevel?: string;
+  bio?: string;
+  prompt?: string;
+}
+
 export interface Profile {
   level: Level;
   categories: Record<string, CategoryStats>;
@@ -81,6 +98,7 @@ export interface Profile {
   focusPhonemes?: string[];
   lastSessionAt?: string;
   nextStep?: NextStep;
+  settings?: ProfileSettings;
 }
 
 export interface CategoryStats {
@@ -386,6 +404,7 @@ export function createStorage(baseDir: string): Storage & {
             ...(parsed.focusPhonemes ? { focusPhonemes: parsed.focusPhonemes } : {}),
             ...(parsed.lastSessionAt ? { lastSessionAt: parsed.lastSessionAt } : {}),
             ...(parsed.nextStep ? { nextStep: parsed.nextStep } : {}),
+            ...(parsed.settings ? { settings: parsed.settings } : {}),
           };
         }
       } catch {

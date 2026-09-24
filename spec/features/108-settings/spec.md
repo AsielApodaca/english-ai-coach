@@ -1,6 +1,6 @@
 # 108 · Settings en sub-tabs
 
-**Estado:** planificado 🔜 (ola 5)
+**Estado:** implementado ✅ (ola 5)
 
 ## Contexto
 
@@ -52,12 +52,12 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 
 ## Requerimientos funcionales
 
-- [ ] Panel Settings como **overlay** (101) con sub-tabs a la izquierda; close no pierde la práctica activa.
-- [ ] Cada sub-tab edita su porción de estado; **precedencia:** `settingsSnapshot` de la sesión (102) > preferencias de localStorage > defaults de `profile.json > defaults` de código.
-- [ ] Los toggles de IPA/autoAdvance/liveHighlight afectan en vivo a la práctica karaoke (105/106) sin recargar.
-- [ ] Rigor/fillers/adaptive/prepTempo alimentan `config.settingsSnapshot` al **crear** sesión (103), no en runtime.
-- [ ] "Export JSON" descarga `data/profile.json` (y opcionalmente sesiones elegidas) como archivo.
-- [ ] Mapa de motor ("Speech Engine · READY" / "not installed") refleja whisper/piper/edge según instalados (data de `/api/health`, `/api/whisper/status`, `/api/tts/status`).
+- [x] Panel Settings como **overlay** (101) con sub-tabs a la izquierda; close no pierde la práctica activa.
+- [x] Cada sub-tab edita su porción de estado; **precedencia:** `settingsSnapshot` de la sesión (102) > preferencias de localStorage > defaults de `profile.json > defaults` de código.
+- [x] Los toggles de IPA/autoAdvance/liveHighlight afectan en vivo a la práctica karaoke (105/106) sin recargar.
+- [x] Rigor/fillers/adaptive/prepTempo alimentan `config.settingsSnapshot` al **crear** sesión (103), no en runtime.
+- [x] "Export JSON" descarga `data/profile.json` (y opcionalmente sesiones elegidas) como archivo.
+- [x] Mapa de motor ("Speech Engine · READY" / "not installed") refleja whisper/piper/edge según instalados (data de `/api/health`).
 
 ## Requerimientos no funcionales
 
@@ -76,10 +76,10 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 
 ## Criterios de aceptación
 
-- [ ] Cambiar rigor/muletillas/adaptive → nueva sesión creada con `settingsSnapshot` correcto (test unitario merge).
-- [ ] Toggle IPA encendido/apagado se refleja en el karaoke en vivo.
-- [ ] Export JSON descarga `profile.json`.
-- [ ] `npm test` y `npm run check` verdes.
+- [x] Cambiar rigor/muletillas/adaptive → nueva sesión creada con `settingsSnapshot` correcto (test unitario merge).
+- [x] Toggle IPA encendido/apagado se refleja en el karaoke en vivo.
+- [x] Export JSON descarga `profile.json`.
+- [x] `npm test` y `npm run check` verdes.
 
 ## Fuera de alcance
 

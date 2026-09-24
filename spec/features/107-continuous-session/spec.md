@@ -1,6 +1,6 @@
 # 107 · Sesión continua Q1→Q∞ con dificultad adaptativa
 
-**Estado:** planificado 🔜 (ola 5)
+**Estado:** implementado ✅ (ola 5)
 
 ## Contexto
 
@@ -18,17 +18,17 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 
 ## Requerimientos funcionales
 
-- [ ] **Loop de preguntas:** al terminar la fase DONE de 105, la UI ofrece "Siguiente Pregunta (IA)"; si `autoAdvance` (108) está activo, pasa automáticamente tras el feedback.
-- [ ] `POST /api/session/next-question { sessionId, contextSummary }` → genera Q_n+1 (variando subtopic dentro del topic; sin repetir preguntas) y reinicia el loop CU2 en `#/practice/<id>`. El `questions[]` de la sesión (102) persiste cada pregunta completada.
-- [ ] **Adaptativa** (`config.settingsSnapshot.adaptive` de 108):
-  - precedente: mantener `rollingStats` (últimos 3 scores completos de respuestas).
-  - si `avg(últimas 3) >= threshold.subir` (default 90): subir un escalón de nivel/rigor (B1→B2…) o velocidad (según configuración).
-  - si `avg < threshold.bajar` (default 65): bajar un escalón.
+- [x] **Loop de preguntas:** al terminar la fase DONE de 105, la UI ofrece "Siguiente Pregunta (IA)"; si `autoAdvance` (108) está activo, pasa automáticamente tras el feedback.
+- [x] `POST /api/session/next-question { sessionId }` → genera Q_n+1 (variando subtopic dentro del topic; sin repetir preguntas) y reinicia el loop CU2 en `#/practice/<id>`. El `questions[]` de la sesión (102) persiste cada pregunta completada.
+- [x] **Adaptativa** (`config.settingsSnapshot.adaptive` de 108):
+  - precedente: mantener `rollingScores` (últimos 3 scores de full-answer con eval).
+  - si `avg(últimas 3) >= threshold.up` (default 90): subir nivel y/o rigor (B1→B2…, clamps independientes).
+  - si `avg < threshold.down` (default 65): bajar.
   - el cambio informa al usuario: pill "Dificultad sube a B2 · rigor Estricto".
-- [ ] **Tiempo de preparación:** 0/3/5 s (toggle en 108) — antes de que el coach lea la respuesta modelo, play de 3 beeps (o 1 en 0s); el usuario prepara. El texto del modelo no se oculta (solo pausa).
-- [ ] **Finalizar Sesión:** en cualquier momento → `saveSession(completed)` + pantalla de cierre (mismo de 105) con resumen: preguntas practicadas, scores, focus de mejora.
-- [ ] **Badge de pregunta actual:** "ACTIVA (Q{n})" en el sidebar (109 lo lee).
-- [ ] Guardado del contexto acumulado efectivo: el contexto de la conversación (topic + últimos N exchanges) se pasa al LLM en cada `next-question` (con memoria del aprendiz, convención tech-stack).
+- [x] **Tiempo de preparación:** 0/3/5 s (toggle en 108) — antes de que el coach lea la respuesta modelo, play de 3 beeps (o 1 en 0s); el usuario prepara. El texto del modelo no se oculta (solo pausa).
+- [x] **Finalizar Sesión:** en cualquier momento → `saveSession(completed)` + pantalla de cierre con resumen: preguntas practicadas, scores, focus de mejora.
+- [x] **Badge de pregunta actual:** "ACTIVA (Q{n})" en el sidebar (109 lo lee).
+- [x] Guardado del contexto acumulado efectivo: `buildContextSummary` (topic + últimos N exchanges) se pasa al LLM en cada `next-question` (con memoria del aprendiz, convención tech-stack).
 
 ## Requerimientos no funcionales
 
@@ -46,11 +46,11 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 
 ## Criterios de aceptación
 
-- [ ] Con `autoAdvance` off, "Siguiente Pregunta" genera Q2…Q3 sin repetir; con on, avanza solo.
-- [ ] La adaptativa sube/baja según el rolling real (unit tests de `computeAdaptive`).
-- [ ] Finalizar en Q_n guarda `completed` con N preguntas y aparece con score agregado en historial (109).
-- [ ] Reanudar una sesión activa tras caída de red retoma en la última pregunta sin duplicar.
-- [ ] `npm test` y `npm run check` verdes.
+- [x] Con `autoAdvance` off, "Siguiente Pregunta" genera Q2…Q3 sin repetir; con on, avanza solo.
+- [x] La adaptativa sube/baja según el rolling real (unit tests de `computeAdaptive`).
+- [x] Finalizar en Q_n guarda `completed` con N preguntas y aparece con score agregado en historial (109).
+- [x] Reanudar una sesión activa tras caída de red retoma en la última pregunta sin duplicar (idempotente: `eval===null` → devuelve la última pregunta).
+- [x] `npm test` y `npm run check` verdes.
 
 ## Fuera de alcance
 

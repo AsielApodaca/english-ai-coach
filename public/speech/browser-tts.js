@@ -64,21 +64,21 @@ export class BrowserTTS {
    * request with measured silence between them.
    *
    * @param {string|string[]} text
-   * @param {{rate?: number, pitch?: number, voiceURI?: string, piperVoice?: string, pauseAfterMs?: number}} [opts]
+   * @param {{rate?: number, pitch?: number, voiceURI?: string, piperVoice?: string, pauseAfterMs?: number, volume?: number}} [opts]
    * @returns {Promise<boolean>} true on success, false on error/fallback failure.
    */
-  async speak(text, { rate = 0.95, pitch = 1, voiceURI = null, piperVoice = null, pauseAfterMs = 0 } = {}) {
+  async speak(text, { rate = 0.95, pitch = 1, voiceURI = null, piperVoice = null, pauseAfterMs = 0, volume = 1 } = {}) {
     const texts = Array.isArray(text) ? text : [text];
 
     // --- Layer 1: server TTS (Piper local → edge-tts online) ---
     if (this._serverEngine) {
-      const ok = await this._speakServer(texts, { rate, piperVoice, pauseAfterMs });
+      const ok = await this._speakServer(texts, { rate, piperVoice, pauseAfterMs, volume });
       if (ok) return true;
       // Server TTS failed — fall through to browser.
     }
 
     // --- Layer 2: speechSynthesis (browser fallback) ---
-    return this._speakBrowser(texts.join(" "), { rate, pitch, voiceURI });
+    return this._speakBrowser(texts.join(" "), { rate, pitch, voiceURI, volume });
   }
 
   // -----------------------------------------------------------------------
@@ -91,7 +91,7 @@ export class BrowserTTS {
    * @param {string[]} texts
    * @returns {Promise<boolean>}
    */
-  async _speakServer(texts, { rate = 0.95, piperVoice = null, pauseAfterMs = 0 } = {}) {
+  async _speakServer(texts, { rate = 0.95, piperVoice = null, pauseAfterMs = 0, volume = 1 } = {}) {
     try {
       const params = new URLSearchParams();
       for (const t of texts) params.append("segments", t);
@@ -114,6 +114,7 @@ export class BrowserTTS {
         // Speed is applied server-side (Piper length_scale / edge --rate),
         // so playback stays natural at 1.0 (no pitch distortion).
         audio.playbackRate = 1;
+        audio.volume = Math.max(0, Math.min(1, volume));
         this._pending = { resolve, url };
 
         audio.onended = () => {
@@ -149,13 +150,14 @@ export class BrowserTTS {
    * Use the browser's Web Speech API.
    * @returns {Promise<boolean>}
    */
-  async _speakBrowser(text, { rate = 0.95, pitch = 1, voiceURI = null } = {}) {
+  async _speakBrowser(text, { rate = 0.95, pitch = 1, voiceURI = null, volume = 1 } = {}) {
     if (!this.supported()) return false;
     if (!this.voices.length) this.refresh();
 
     const utt = new SpeechSynthesisUtterance(text);
     utt.rate = rate;
     utt.pitch = pitch;
+    utt.volume = Math.max(0, Math.min(1, volume));
     utt.lang = "en-US";
     if (voiceURI) {
       const v = this.voices.find((x) => x.voiceURI === voiceURI);

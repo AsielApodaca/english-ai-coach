@@ -1,5 +1,5 @@
 import express from "express";
-import { mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, existsSync, statSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -22,6 +22,8 @@ import {
 } from "./lib/cu2.ts";
 import { handleExtractRequest } from "./lib/extract.ts";
 import { handleSessionStartRequest } from "./lib/session-start.ts";
+import { handleNextQuestionRequest } from "./lib/continuous.ts";
+import { applyProfileSettings, parseProfileSettings, readAutoAdvance, readPrepTime } from "./lib/settings.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import {
@@ -149,7 +151,9 @@ function persistAttempt(params: {
   if (!sessionId) return;
   const session = storage.loadSession(sessionId);
   if (!session) return;
-  const question = session.questions[0];
+  // Continuous sessions (feature 107) grow `questions[]`; attempts always
+  // target the LAST question, never questions[0].
+  const question = session.questions.at(-1);
   if (!question) return;
   const passedFlag = passed ?? evaluation.next;
   if (full) {
@@ -310,19 +314,22 @@ app.post("/api/session/start", async (req, res) => {
  * Returns the stored v2 session plus the spoken lines the view needs to run
  * the CU2 flow without importing server-side modules: the intro speech, the
  * fragment-dynamics explanation, the full-answer instruction and the pass
- * threshold from the session's settings snapshot (feature 108). 404 when the
- * session does not exist.
+ * threshold from the session's settings snapshot (feature 108). The question
+ * served is the LAST one — continuous sessions (feature 107) grow questions[].
+ * 404 when the session does not exist.
  */
 app.get("/api/session/:id", (req, res) => {
   const session = storage.loadSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found." });
-  const question = session.questions[0];
+  const question = session.questions.at(-1);
   res.json({
     session,
     intro: buildIntroText({ topicPrompt: session.config.topicPrompt, level: session.config.level }),
     explainLine: buildExplainLine(),
     fullLine: buildFullLine(),
     passThreshold: readPassThreshold(session.config.settingsSnapshot),
+    prepTime: readPrepTime(session.config.settingsSnapshot),
+    autoAdvance: readAutoAdvance(session.config.settingsSnapshot),
     question: question
       ? { q: question.q, answer: question.answer, fragments: question.fragments }
       : null,
@@ -334,7 +341,8 @@ app.get("/api/session/:id", (req, res) => {
  *
  * Body: { id, status?, fullAttempt?, eval? }. Idempotent saveSession: marks
  * the session completed (or leaves it active), stores the full-answer attempt
- * and its consolidated evaluation on questions[0]. Returns { id }.
+ * and its consolidated evaluation on the LAST question (continuous sessions
+ * grow questions[], feature 107). Returns { id }.
  */
 app.post("/api/session/checkpoint", (req, res) => {
   const { id, status, fullAttempt, eval: evalValue } = req.body ?? {};
@@ -342,7 +350,7 @@ app.post("/api/session/checkpoint", (req, res) => {
   const session = storage.loadSession(id);
   if (!session) return res.status(404).json({ error: "Session not found." });
   if (status === "completed" || status === "active") session.status = status;
-  const question = session.questions[0];
+  const question = session.questions.at(-1);
   if (question) {
     if (fullAttempt && typeof fullAttempt === "object") {
       question.fullAttempt = {
@@ -360,6 +368,23 @@ app.post("/api/session/checkpoint", (req, res) => {
   session.updatedAt = new Date().toISOString();
   storage.saveSession(session);
   res.json({ id: session.id });
+});
+
+/**
+ * POST /api/session/next-question — generate Q_n+1 of a continuous session
+ * (feature 107).
+ *
+ * Body: { sessionId }. The handler computes the adaptive step from the rolling
+ * scores (last 3 full-answer evals), generates the next question varying the
+ * subtopic (never repeating), applies the adjustment to the session config and
+ * persists the new question. Idempotent: when the last question has no eval
+ * yet (retry after a network drop) it returns that question without
+ * duplicating it. On LLM failure the session stays `active` (502) — the client
+ * can retry from the last saved question.
+ */
+app.post("/api/session/next-question", async (req, res) => {
+  const { status, json } = await handleNextQuestionRequest(storage, candidates(), req.body);
+  res.status(status).json(json);
 });
 
 app.get("/api/history", (_req, res) => {
@@ -395,6 +420,65 @@ app.get("/api/profile", async (_req, res) => {
       recentTopics: stats.recentTopics,
       trend: sessions.flatMap((s) => s.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score)))).slice(-30),
     },
+  });
+});
+
+/**
+ * POST /api/profile/settings — persist the profile-persisted settings
+ * (feature 108): rigor, fillers, adaptive, prepTime, provider, personaName,
+ * targetLevel, bio, prompt, focusPhonemes. Device prefs stay in localStorage
+ * and never reach this endpoint. Idempotent: missing fields keep their
+ * previous profile values. Returns the updated profile.
+ */
+app.post("/api/profile/settings", (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const parsed = parseProfileSettings(body);
+  const profile = storage.loadProfile();
+  const updated = applyProfileSettings(profile, parsed);
+  storage.saveProfile(updated);
+  res.json({ profile: updated });
+});
+
+/**
+ * GET /api/storage — local storage usage report (feature 108 settings panel):
+ * profile size, session count and total bytes under `data/`.
+ */
+app.get("/api/storage", (_req, res) => {
+  let sessionsCount = 0;
+  let sessionsBytes = 0;
+  try {
+    for (const f of readdirSync(storage.sessionsDir)) {
+      if (!f.endsWith(".json")) continue;
+      sessionsCount++;
+      sessionsBytes += statSync(join(storage.sessionsDir, f)).size;
+    }
+  } catch {
+    // sessions dir may not exist yet — report zeros
+  }
+  let profileBytes = 0;
+  try {
+    profileBytes = statSync(storage.profilePath).size;
+  } catch {
+    // no profile yet
+  }
+  res.json({
+    dataDir: storage.dataDir,
+    profileBytes,
+    sessionsCount,
+    sessionsBytes,
+    totalBytes: profileBytes + sessionsBytes,
+  });
+});
+
+/**
+ * GET /api/export — full local data export (feature 108): profile + all
+ * sessions as JSON, stamped with the export time.
+ */
+app.get("/api/export", (_req, res) => {
+  res.json({
+    exportedAt: new Date().toISOString(),
+    profile: storage.loadProfile(),
+    sessions: storage.loadAllSessions(),
   });
 });
 

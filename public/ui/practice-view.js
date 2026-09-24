@@ -26,6 +26,8 @@ import { WaveRecorder } from "../speech/recorder-wave.js";
 import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
+import { ipaFor } from "./ipa.js";
+import { getLocal } from "./settings/local.js";
 
 /** Guard timeout: no speech detected while waiting → failed attempt + retry. */
 const GUARD_TIMEOUT_MS = 20_000;
@@ -54,11 +56,25 @@ let introText = "";
 let explainLine = "";
 let fullLine = "";
 
+/** Continuous-session settings from the session snapshot (feature 107/108). */
+let prepTime = 0;
+let autoAdvance = false;
+
+/** Live device prefs (feature 108) — applied without reloading. */
+let showIpa = true;
+let liveHighlight = true;
+
 /** Whisper availability from /api/health (for STT engine selection). */
 let health = null;
 
 /** Flow cancellation token: incremented on leave; every await checks it. */
 let flowToken = 0;
+
+/** Auto-advance timer (feature 107): fires when autoAdvance is on. */
+let autoAdvanceTimer = null;
+
+/** Adaptive-difficulty pill auto-hide timer (feature 107). */
+let adjustmentTimer = null;
 
 /** Shell store + router (module-level so render helpers can reach them). */
 let store = null;
@@ -107,6 +123,28 @@ export function initPracticeView(root, { store: shellStore, navigate: nav }) {
       startFlow(state.sessionId);
     }
   });
+
+  // Live device prefs (feature 108): IPA + live highlight apply immediately.
+  window.addEventListener("engcoach:settings-changed", () => {
+    if (store.state.route?.view !== "practice") return;
+    applyLiveSettings();
+    if (els?.book && question) {
+      // Re-render the book preserving the current line + last colors.
+      const isFull = phase === "fullAnswer";
+      els.book.innerHTML = "";
+      if (isFull) {
+        const line = buildLine(0, question.answer);
+        line.classList.add("current", "full");
+        els.book.appendChild(line);
+      } else {
+        for (let i = 0; i < fragmentCount; i++) {
+          els.book.appendChild(buildLine(i, question.fragments[i].text));
+        }
+        setCurrentLine(fragmentIndex);
+      }
+      if (lastAttempt) colorWords(lastAttempt);
+    }
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +154,7 @@ export function initPracticeView(root, { store: shellStore, navigate: nav }) {
 /** Cancel the running flow: stop audio, recording, timers and the dock. */
 function cancelFlow() {
   flowToken++;
+  clearTimeout(autoAdvanceTimer);
   tts?.stop();
   if (dock) {
     dock.stopVisualizer();
@@ -124,6 +163,7 @@ function cancelFlow() {
   }
   captureHandlers = null;
   lastWavBlob = null;
+  store?.set({ activeQuestion: null });
 }
 
 /** Load the session payload and run the CU2 flow. */
@@ -144,31 +184,27 @@ async function startFlow(sessionId) {
   lastWavBlob = null;
 
   tts = new BrowserTTS();
-  dock = createAudioDock(root, {
-    onRecordStart: () => captureHandlers?.onRecordStart(),
-    onRecordEnd: () => captureHandlers?.onRecordEnd(),
-    onRetry: () => tts.stop(),
-    onFinish: () => finishSession(),
-  });
+  dock = createAudioDock(
+    root,
+    {
+      onRecordStart: () => captureHandlers?.onRecordStart(),
+      onRecordEnd: () => captureHandlers?.onRecordEnd(),
+      onRetry: () => tts.stop(),
+      onFinish: () => finishSession(),
+    },
+    { rate: Number(getLocal("tempo", 1)) },
+  );
   dock.startVisualizer();
 
   try {
-    const [healthRes, sessionRes] = await Promise.all([
-      fetch("/api/health").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-      fetch(`/api/session/${encodeURIComponent(sessionId)}`),
-    ]);
+    const healthRes = await fetch("/api/health").then((r) => (r.ok ? r.json() : null)).catch(() => null);
     if (token !== flowToken) return;
-    if (!sessionRes.ok) throw new Error(sessionRes.status === 404 ? "Sesión no encontrada." : `HTTP ${sessionRes.status}`);
-    const data = await sessionRes.json();
     health = healthRes;
     tts.setHealth(healthRes);
-    session = data.session;
-    question = data.question;
-    introText = data.intro;
-    explainLine = data.explainLine;
-    fullLine = data.fullLine;
-    passThreshold = data.passThreshold ?? 70;
-    fragmentCount = question?.fragments?.length ?? 0;
+    await loadSessionPayload(sessionId, token);
+    if (token !== flowToken) return;
+    applyLiveSettings();
+    store.set({ activeQuestion: session.questions.length });
 
     renderHeader();
     await runFlow(token);
@@ -178,21 +214,56 @@ async function startFlow(sessionId) {
   }
 }
 
+/**
+ * Fetch GET /api/session/:id and refresh the module state from the snapshot
+ * (question = last one, plus the continuous-session settings — feature 107).
+ */
+async function loadSessionPayload(sessionId, token) {
+  const res = await fetch(`/api/session/${encodeURIComponent(sessionId)}`);
+  if (token !== flowToken) return;
+  if (!res.ok) throw new Error(res.status === 404 ? "Sesión no encontrada." : `HTTP ${res.status}`);
+  const data = await res.json();
+  session = data.session;
+  question = data.question;
+  introText = data.intro;
+  explainLine = data.explainLine;
+  fullLine = data.fullLine;
+  passThreshold = data.passThreshold ?? 70;
+  prepTime = data.prepTime ?? 0;
+  autoAdvance = data.autoAdvance ?? false;
+  fragmentCount = question?.fragments?.length ?? 0;
+}
+
 // ---------------------------------------------------------------------------
 // The CU2 flow (imperative port of the cu2.ts reducer)
 // ---------------------------------------------------------------------------
 
 async function runFlow(token) {
-  // INTRO — coach explains the dynamics.
+  // INTRO — coach explains the dynamics (first question only).
   setPhase("intro");
   await speak(introText, token);
   if (token !== flowToken) return;
 
+  await runQuestionLoop(token);
+}
+
+/**
+ * One question pass: question → prep → model → explaining → fragments →
+ * full → done. Reused by `nextQuestion()` for the continuous session
+ * (feature 107), skipping the intro.
+ */
+async function runQuestionLoop(token) {
   // QUESTION — shown and read aloud.
   setPhase("question");
   renderQuestion();
   await speak(question.q, token);
   if (token !== flowToken) return;
+
+  // PREP TIME — beeps before the coach reads the model (spec 107).
+  if (prepTime > 0) {
+    await prepTimePause(prepTime, token);
+    if (token !== flowToken) return;
+  }
 
   // MODEL — the strong answer as karaoke lyrics, read with word progress.
   setPhase("model");
@@ -259,10 +330,52 @@ async function runFlow(token) {
   await speak(fullOutcome.coachLine, token);
   if (token !== flowToken) return;
 
-  // DONE — close the session.
+  // DONE — continuous session: keep it active and offer the next question.
   setPhase("done");
-  renderDone();
-  await checkpoint({ status: "completed" });
+  renderDone({ finished: false });
+  await checkpoint({ status: "active" });
+  if (autoAdvance) {
+    autoAdvanceTimer = setTimeout(() => {
+      if (token === flowToken && phase === "done") nextQuestion();
+    }, 1200);
+  }
+}
+
+/**
+ * Next question (feature 107): POST /api/session/next-question, then reload
+ * the session snapshot (fresh explainLine/fullLine/prepTime/autoAdvance + the
+ * new last question) and restart the question loop from the QUESTION phase.
+ */
+async function nextQuestion() {
+  if (phase !== "done") return;
+  const token = flowToken;
+  setPhase("question");
+  try {
+    const res = await fetch("/api/session/next-question", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId: session.id }),
+    });
+    if (token !== flowToken) return;
+    if (res.status === 409) {
+      // Session no longer active → finish and return to config.
+      finishSession();
+      return;
+    }
+    const json = await res.json();
+    if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+
+    await loadSessionPayload(session.id, token);
+    if (token !== flowToken) return;
+    if (json.adjustment) showAdjustment(json.adjustment);
+    store.set({ activeQuestion: session.questions.length });
+    await runQuestionLoop(token);
+  } catch (err) {
+    if (token !== flowToken) return;
+    showAdjustment(`No se pudo generar la siguiente pregunta: ${err.message}`);
+    setPhase("done");
+    renderDone({ finished: false });
+  }
 }
 
 /** Set the current phase and reflect it on the dock (retry pill only). */
@@ -272,13 +385,69 @@ function setPhase(p) {
 }
 
 // ---------------------------------------------------------------------------
+// Prep-time beeps (feature 107)
+// ---------------------------------------------------------------------------
+
+/** Play a short 880 Hz beep (WebAudio oscillator). */
+function playBeep() {
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.15);
+    osc.onended = () => ctx.close().catch(() => {});
+  } catch {
+    // audio unavailable — the pause still happens
+  }
+}
+
+/**
+ * Prep-time pause: 3 beeps evenly spaced across `seconds` before the coach
+ * reads the model (spec 107). The model text stays visible on screen.
+ */
+async function prepTimePause(seconds, token) {
+  if (seconds <= 0) {
+    playBeep();
+    await sleep(300);
+    return;
+  }
+  const step = seconds / 3;
+  for (let i = 0; i < 3; i++) {
+    if (token !== flowToken) return;
+    playBeep();
+    await sleep(step * 1000);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Show the adaptive-difficulty pill (spec 107) and auto-hide it. */
+function showAdjustment(message) {
+  if (!els?.adjustment) return;
+  els.adjustment.textContent = message;
+  els.adjustment.hidden = false;
+  clearTimeout(adjustmentTimer);
+  adjustmentTimer = setTimeout(() => {
+    els.adjustment.hidden = true;
+  }, 6000);
+}
+
+// ---------------------------------------------------------------------------
 // Speech
 // ---------------------------------------------------------------------------
 
 /** Speak a line through the best TTS engine; returns false when stopped. */
 async function speak(text, token) {
   dock?.setMode("ai");
-  const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1 });
+  const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
   if (token !== flowToken) return false;
   dock?.setMode("idle");
   return ok;
@@ -322,7 +491,7 @@ async function speakModelWithProgress(text, token) {
     });
   } catch {
     // Server TTS unavailable → plain browser speech, no progress.
-    await tts.speak(text, { rate });
+    await tts.speak(text, { rate, volume: volumeSetting() });
   } finally {
     if (audio) URL.revokeObjectURL(audio.src);
   }
@@ -357,7 +526,8 @@ function animateWordProgress(durationMs, token) {
  * mid-flight, fall back to BrowserSTT + text mode.
  */
 async function captureAttempt(target, kind, token) {
-  const stt = pickStt(health, localStorage.getItem("stt-choice"));
+  const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
+  const stt = pickStt(health, sttChoice);
   if (stt === "whisper") {
     const { blob, timedOut, error } = await waitForUserRecording(token);
     if (token !== flowToken) return null;
@@ -558,12 +728,13 @@ function renderHeader() {
       h("div", { class: "practice-title" }, escapeHtml(session.title || "Practice")),
       pill,
     ]),
+    adjustment: h("div", { class: "adjustment-chip", hidden: true }),
     feedbackChip: h("div", { class: "feedback-chip", hidden: true }),
     book: h("div", { class: "karaoke-book" }),
     sub: h("div", { class: "practice-sub" }),
     done: h("div", { class: "practice-done", hidden: true }),
   };
-  root.append(els.head, els.feedbackChip, els.book, els.sub, els.done);
+  root.append(els.head, els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
 
   // Reflect the live speech engine state (store keeps it in sync via /api/health).
   const stateEl = pill.querySelector(".status-state");
@@ -580,6 +751,8 @@ function renderHeader() {
 
 /** QUESTION phase: show the question as the coach transcript. */
 function renderQuestion() {
+  els.done.hidden = true;
+  els.sub.hidden = false;
   els.sub.innerHTML = "";
   els.sub.appendChild(
     h("div", { class: "coach-transcript" }, [
@@ -591,6 +764,7 @@ function renderQuestion() {
 
 /** MODEL phase: build the karaoke book (one line per fragment). */
 function renderKaraokeBook() {
+  els.book.hidden = false;
   els.book.innerHTML = "";
   for (let i = 0; i < fragmentCount; i++) {
     els.book.appendChild(buildLine(i, question.fragments[i].text));
@@ -598,12 +772,17 @@ function renderKaraokeBook() {
   setCurrentLine(0);
 }
 
-/** Build one karaoke line of word spans. */
+/** Build one karaoke line of word spans (+ optional IPA annotation). */
 function buildLine(index, text) {
   const words = text.trim().split(/\s+/).filter(Boolean);
   const line = h("div", { class: "karaoke-line", dataset: { index: String(index) } });
   for (const w of words) {
-    line.appendChild(h("span", { class: "kw", dataset: { word: w } }, escapeHtml(w)));
+    const ipa = ipaFor(w);
+    const wrap = h("span", { class: "kw-wrap" }, [
+      h("span", { class: "kw", dataset: { word: w } }, escapeHtml(w)),
+      ...(ipa ? [h("span", { class: "kw-ipa" }, ipa)] : []),
+    ]);
+    line.appendChild(wrap);
   }
   return line;
 }
@@ -629,6 +808,7 @@ function colorWords(outcome) {
   const words = outcome.words ?? [];
   spans.forEach((s, i) => {
     s.classList.remove("kw-green", "kw-amber", "kw-red", "kw-spoken");
+    if (!liveHighlight) return;
     const w = words[i];
     if (w?.status === "green") s.classList.add("kw-green");
     else if (w?.status === "amber") s.classList.add("kw-amber");
@@ -659,30 +839,62 @@ function renderFull() {
   els.feedbackChip.hidden = true;
 }
 
-/** DONE phase: summary panel + "Hacer otra práctica". */
-function renderDone() {
+/**
+ * DONE phase: summary panel + actions.
+ *
+ * `finished: true` → classic end (Hacer otra práctica). `finished: false` →
+ * continuous session (feature 107): Siguiente Pregunta (IA) / Finalizar
+ * Sesión / Hacer otra práctica.
+ */
+function renderDone({ finished }) {
   els.book.hidden = true;
   els.sub.hidden = true;
   els.feedbackChip.hidden = true;
   els.done.hidden = false;
-  const avg = fragmentScores.length
-    ? Math.round(fragmentScores.reduce((a, b) => a + b, 0) / fragmentScores.length)
-    : 0;
+  const summary = sessionSummary();
+  const actions = finished
+    ? [
+        h("button", { type: "button", class: "btn start-btn", onclick: () => navigate("#/") }, [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "graphic_eq"),
+          "Hacer otra práctica",
+        ]),
+      ]
+    : [
+        h("button", { type: "button", class: "btn start-btn", onclick: () => nextQuestion() }, [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "arrow_forward"),
+          "Siguiente Pregunta (IA)",
+        ]),
+        h("button", { type: "button", class: "btn ghost", onclick: () => finishSession() }, [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "flag"),
+          "Finalizar Sesión",
+        ]),
+        h("button", { type: "button", class: "btn ghost", onclick: () => navigate("#/") }, [
+          h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "graphic_eq"),
+          "Hacer otra práctica",
+        ]),
+      ];
   els.done.appendChild(
     h("div", { class: "practice-done-card" }, [
       h("div", { class: "practice-done-icon" }, [
-        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "verified"),
+        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, finished ? "verified" : "check_circle"),
       ]),
-      h("h2", { class: "practice-done-title" }, "¡Práctica completada!"),
+      h("h2", { class: "practice-done-title" }, finished ? "¡Práctica completada!" : "¡Pregunta completada!"),
       h("p", { class: "practice-done-sub" }, [
-        `Fragmentos superados: ${passedFragments.length}/${fragmentCount} · Promedio ${avg}%`,
+        `Preguntas practicadas: ${summary.count} · Promedio ${summary.avg}%`,
       ]),
-      h("button", { type: "button", class: "btn start-btn", onclick: () => navigate("#/") }, [
-        h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "graphic_eq"),
-        "Hacer otra práctica",
-      ]),
+      h("div", { class: "practice-done-actions" }, actions),
     ]),
   );
+}
+
+/** Aggregate summary of the session (question count + avg score). */
+function sessionSummary() {
+  const count = session?.questions?.length ?? 0;
+  const scores = (session?.questions ?? []).flatMap((q) =>
+    q.fragments.flatMap((f) => f.attempts.map((a) => a.score)),
+  );
+  const avg = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  return { count, avg };
 }
 
 /** Error state (session load / fatal flow failure). */
@@ -757,8 +969,26 @@ async function checkpoint(payload) {
   }
 }
 
-/** Finish the session: mark completed and return to config. */
+/** Finish the session: mark completed, clear the badge and return to config. */
 async function finishSession() {
   await checkpoint({ status: "completed" });
+  store.set({ activeQuestion: null });
   navigate("#/");
+}
+
+// ---------------------------------------------------------------------------
+// Live device prefs (feature 108)
+// ---------------------------------------------------------------------------
+
+/** Read the live device prefs (IPA + live highlight) and apply them. */
+function applyLiveSettings() {
+  showIpa = Boolean(getLocal("showIpa", true));
+  liveHighlight = Boolean(getLocal("liveHighlight", true));
+  if (els?.book) els.book.classList.toggle("no-ipa", !showIpa);
+}
+
+/** Coach volume (0–1) from the device prefs (spec 108). */
+function volumeSetting() {
+  const v = Number(getLocal("volume", 100));
+  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) / 100 : 1;
 }
