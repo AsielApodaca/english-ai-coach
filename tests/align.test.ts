@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alignWords, levenshtein } from "../src/lib/align.ts";
+import { alignWords, alignTextWords, levenshtein } from "../src/lib/align.ts";
 import type { WhisperWord } from "../src/lib/whisper.ts";
 
 /**
@@ -222,4 +222,123 @@ test("levenshtein: transposition costs 2 (align handles it via isTransposition)"
   // …and the aligner still colors the transposed word amber (not red).
   const r = alignWords(spoken("I haev"), "I have");
   assert.equal(r.words[1].status, "amber");
+});
+
+test("alignWords: transposition + filler — out-of-place word amber, filler stays extra", () => {
+  // Both fix aspects together: the transposed "worked" is reconciled (amber,
+  // never missing+extra) while the genuine filler "uh" remains an extra.
+  const r = alignWords(spoken("I worked have uh"), "I have worked");
+  assert.deepEqual(targetStatuses(r.words, 3), ["green", "green", "amber"]);
+  assert.equal(r.words[2].word, "worked");
+  assert.deepEqual({ startMs: r.words[2].startMs, endMs: r.words[2].endMs }, { startMs: 500, endMs: 900 });
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, ["uh"]);
+  assert.equal(r.words[3].status, "red"); // appended filler keeps its own ts
+  assert.deepEqual({ startMs: r.words[3].startMs, endMs: r.words[3].endMs }, { startMs: 1500, endMs: 1900 });
+  assert.equal(r.score, 100); // score counts green + amber target words
+});
+
+// ---------------------------------------------------------------------------
+// alignTextWords — text-only fallback (feature 105, no whisper)
+// ---------------------------------------------------------------------------
+
+test("alignTextWords: transposition + filler — out-of-place red & not missing, filler in extra", () => {
+  const r = alignTextWords("I worked have uh", "I have worked");
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "red"]);
+  assert.equal(r.words[2].word, "worked");
+  // The reconciled word is excluded from BOTH missing and extra (never both).
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, ["uh"]);
+  // Score counts only greens → the out-of-place word does not count.
+  assert.equal(r.score, 67);
+});
+
+test("alignTextWords: perfect match → every target word green, score 100", () => {
+  const r = alignTextWords("I handled the situation well", "I handled the situation well");
+  assert.equal(r.score, 100);
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "green", "green", "green"]);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+});
+
+test("alignTextWords: missing target word → red, score drops", () => {
+  const r = alignTextWords("I handled the well", "I handled the situation well");
+  assert.equal(r.words[3].word, "situation");
+  assert.equal(r.words[3].status, "red");
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "green", "red", "green"]);
+  assert.deepEqual(r.missing, ["situation"]);
+  assert.equal(r.score, 80);
+});
+
+test("alignTextWords: extra spoken words are reported but not rendered on the line", () => {
+  const r = alignTextWords("uh difficult situation hmm", "difficult situation");
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green"]);
+  assert.equal(r.words.length, 2); // extras never appear in words[]
+  assert.deepEqual(r.extra, ["uh", "hmm"]);
+  assert.equal(r.score, 100); // extras do not lower the score
+});
+
+test("alignTextWords: contraction expanded in speech ('I've' vs 'I have') → green", () => {
+  const r = alignTextWords("I have done it", "I've done it");
+  assert.equal(r.score, 100);
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "green"]);
+});
+
+test("alignTextWords: contraction half-spoken ('I've' vs 'I') → red (partial)", () => {
+  const r = alignTextWords("I", "I've done it");
+  assert.equal(r.words[0].word, "I've");
+  assert.equal(r.words[0].status, "red");
+  assert.deepEqual(r.words.map((w) => w.status), ["red", "red", "red"]);
+  assert.equal(r.score, 0);
+});
+
+test("alignTextWords: word-order transposition — out-of-place word is red, never missing+extra", () => {
+  const r = alignTextWords("I worked have", "I have worked");
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "red"]);
+  assert.equal(r.words[2].word, "worked");
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+  assert.equal(r.score, 67);
+});
+
+test("alignTextWords: repeated filler duplicate still surfaces once in extra", () => {
+  const r = alignTextWords("bye bye", "bye");
+  assert.equal(r.words.length, 1);
+  assert.equal(r.words[0].status, "green");
+  assert.equal(r.score, 100);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, ["bye"]);
+});
+
+test("alignTextWords: empty spoken → all target words red, score 0", () => {
+  const r = alignTextWords("", "hello world");
+  assert.deepEqual(r.words.map((w) => w.status), ["red", "red"]);
+  assert.equal(r.score, 0);
+  assert.deepEqual(r.missing, ["hello", "world"]);
+});
+
+test("alignTextWords: empty target → words [], score 0", () => {
+  const r = alignTextWords("hello world", "");
+  assert.deepEqual(r.words, []);
+  assert.equal(r.score, 0);
+  assert.deepEqual(r.extra, ["hello", "world"]);
+});
+
+test("alignTextWords: score == round(100 * green target words / target words)", () => {
+  const cases: Array<[spoken: string, target: string]> = [
+    ["I handled it well", "I handled it well"], // 100
+    ["I handled the well", "I handled the situation well"], // 80
+    ["uh difficult situation hmm", "difficult situation"], // 100 (extras don't weigh)
+    ["I worked have", "I have worked"], // 67 (out-of-place word is red textually)
+    ["", "one two three"], // 0
+    ["I", "I've done it"], // 0 (half contraction is red textually)
+  ];
+  for (const [sp, tg] of cases) {
+    const r = alignTextWords(sp, tg);
+    const n = targetCount(tg);
+    const good = r.words.filter((w) => w.status === "green").length;
+    const expected = n === 0 ? 0 : Math.round((100 * good) / n);
+    assert.equal(r.score, expected, `spoken="${sp}" target="${tg}"`);
+    assert.equal(r.words.length, n, `spoken="${sp}" target="${tg}"`);
+  }
 });

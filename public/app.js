@@ -13,6 +13,7 @@ import { initRouter } from "./ui/router.js";
 import { initSidebar } from "./ui/sidebar.js";
 import { initSettingsOverlay } from "./ui/settings-overlay.js";
 import { initConfigView } from "./ui/config-view.js";
+import { initPracticeView } from "./ui/practice-view.js";
 
 const store = createShellStore();
 
@@ -57,6 +58,7 @@ const router = initRouter(store, {
   settingsOverlay,
 });
 initConfigView(document.getElementById("view-config"), { navigate: router.navigate });
+initPracticeView(document.getElementById("view-practice"), { store, navigate: router.navigate });
 
 // ---------- global actions ----------
 btnNewSession.addEventListener("click", () => router.navigate("#/"));

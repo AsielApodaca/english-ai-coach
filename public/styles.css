@@ -1433,3 +1433,463 @@ body.overlay-open {
     display: none;
   }
 }
+
+/* ============================================================
+   Karaoke practice view (feature 105 / CU2)
+   ============================================================ */
+
+.practice-view {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: calc(100vh - var(--topbar-h) - 96px);
+}
+
+/* ---------- Header: title + speech pill ---------- */
+.practice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.practice-title {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-speech-pill {
+  flex-shrink: 0;
+}
+
+/* ---------- Feedback chip ---------- */
+.feedback-chip {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border);
+  background: var(--surface-variant);
+  color: var(--muted);
+}
+
+.feedback-chip.ok {
+  color: var(--green);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.feedback-chip.bad {
+  color: var(--amber);
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+/* ---------- Karaoke book ---------- */
+.karaoke-book {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+  padding: 12px 4px;
+  mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
+  scrollbar-width: none;
+}
+
+.karaoke-book::-webkit-scrollbar {
+  display: none;
+}
+
+.karaoke-line {
+  font-family: var(--font-display);
+  font-size: 32px;
+  line-height: 44px;
+  letter-spacing: -0.01em;
+  color: var(--subtle);
+  opacity: 0.35;
+  filter: blur(1px);
+  transition: opacity 0.25s ease, filter 0.25s ease, transform 0.25s ease, color 0.25s ease;
+  word-spacing: 0.08em;
+}
+
+.karaoke-line.current {
+  font-size: 40px;
+  line-height: 52px;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--text);
+  opacity: 1;
+  filter: none;
+  transform: scale(1.05);
+  transform-origin: left center;
+}
+
+.karaoke-line.past {
+  color: var(--subtle);
+  opacity: 0.55;
+  filter: none;
+}
+
+.karaoke-line.future {
+  color: var(--muted);
+  opacity: 0.35;
+  filter: blur(1px);
+}
+
+/* Word-level states */
+.kw {
+  transition: color 0.15s ease;
+}
+
+.kw-green {
+  color: var(--green);
+}
+
+.kw-amber {
+  color: var(--amber);
+}
+
+.kw-red {
+  color: var(--red);
+}
+
+.kw-spoken {
+  color: var(--accent-cyan);
+  text-shadow: 0 0 24px rgba(6, 182, 212, 0.45);
+}
+
+/* ---------- Coach transcript (question / sub) ---------- */
+.practice-sub {
+  margin-top: 4px;
+}
+
+.coach-transcript {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface-variant);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.coach-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent-cyan);
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.coach-text {
+  color: var(--text);
+}
+
+/* ---------- Done panel ---------- */
+.practice-done {
+  display: flex;
+  justify-content: center;
+  padding: 40px 0;
+}
+
+.practice-done-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 36px 44px;
+  background: var(--surface-variant);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  text-align: center;
+  max-width: 420px;
+}
+
+.practice-done-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+}
+
+.practice-done-icon .material-symbols-outlined {
+  font-size: 28px;
+  color: var(--green);
+}
+
+.practice-done-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.practice-done-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+/* ---------- Error state ---------- */
+.practice-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 60px 24px;
+  text-align: center;
+}
+
+.practice-error-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+
+.practice-error-icon .material-symbols-outlined {
+  font-size: 26px;
+  color: var(--red);
+}
+
+.practice-error-text {
+  color: var(--muted);
+  font-size: 14px;
+  max-width: 420px;
+}
+
+/* ============================================================
+   Audio dock (feature 105 / CU2)
+   ============================================================ */
+
+.audio-dock {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 18px 16px;
+  background: rgba(22, 25, 31, 0.82);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  border-radius: 16px;
+  box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.5);
+}
+
+.dock-waveform {
+  width: 100%;
+  height: 48px;
+  display: block;
+}
+
+.dock-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* Mic monitor */
+.dock-mic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.dock-mic-icon {
+  font-size: 16px;
+  color: var(--subtle);
+}
+
+.dock-mic-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dock-mic-db {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--subtle);
+}
+
+/* Push-to-talk orb */
+.orb {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: none;
+  background: var(--green);
+  color: #04120c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  box-shadow: 0 0 24px -6px rgba(16, 185, 129, 0.5);
+}
+
+.orb .orb-icon {
+  font-size: 26px;
+}
+
+.orb:hover {
+  transform: scale(1.04);
+}
+
+.orb:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.orb.armed {
+  box-shadow: 0 0 32px -6px rgba(16, 185, 129, 0.65);
+}
+
+.orb.recording {
+  background: var(--amber);
+  color: #1a1204;
+  box-shadow: 0 0 40px -8px rgba(245, 158, 11, 0.7);
+}
+
+/* Expanding concentric rings while recording */
+.orb.recording::before,
+.orb.recording::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  border: 2px solid rgba(16, 185, 129, 0.3);
+  animation: orb-ring 1.2s ease-out infinite;
+}
+
+.orb.recording::after {
+  animation-delay: 0.6s;
+}
+
+@keyframes orb-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+/* Tempo segmented control */
+.dock-tempo {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+}
+
+.dock-tempo-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.dock-tempo-btn:hover {
+  color: var(--text);
+}
+
+.dock-tempo-btn.active {
+  background: var(--panel-3);
+  color: var(--text);
+}
+
+/* Assistance pills */
+.dock-pills {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.dock-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.dock-pill:hover {
+  background: var(--panel-3);
+  border-color: var(--outline);
+}
+
+.dock-pill:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.dock-pill .material-symbols-outlined {
+  font-size: 15px;
+}
+
+/* ---------- Responsive (tablet / mobile) ---------- */
+@media (max-width: 767px) {
+  .karaoke-line {
+    font-size: 22px;
+    line-height: 32px;
+  }
+
+  .karaoke-line.current {
+    font-size: 26px;
+    line-height: 38px;
+  }
+
+  .dock-controls {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .dock-mic {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+}
