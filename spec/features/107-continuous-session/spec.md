@@ -10,7 +10,7 @@
 
 ## Qué hace
 
-Convierte la práctica de una pregunta en **sesión de práctica continua**: el sistema mantiene la conversación viva de pregunta en pregunta (Q1, Q2, … Q∞) con la misma sesión v2, hasta que el usuario dice "Finalizar Sesión" o hace un cierre explícito ("Siguiente Pregunta" por pedido o auto-advance según settings). La dificultad se adapta al desempeño (rigor/ritmo suben si las últimas 3 respuestas superan el objetivo; bajan si el desempeño decae) y hay tiempo de preparación configurable (0/3/5 s con beep) antes de que el coach lea el modelo.
+Convierte la práctica de una pregunta en **sesión de práctica continua**: el sistema mantiene la conversación viva de pregunta en pregunta (Q1, Q2, … Q∞) con la misma sesión v2, hasta que el usuario dice "Finalizar Sesión" o hace un cierre explícito ("Siguiente Pregunta" por pedido o auto-advance según settings). La dificultad se adapta al desempeño (rigor/ritmo suben si las últimas 3 respuestas superan el objetivo; bajan si el desempeño decae).
 
 ## Por qué
 
@@ -25,7 +25,7 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
   - si `avg(últimas 3) >= threshold.up` (default 90): subir nivel y/o rigor (B1→B2…, clamps independientes).
   - si `avg < threshold.down` (default 65): bajar.
   - el cambio informa al usuario: pill "Dificultad sube a B2 · rigor Estricto".
-- [x] **Tiempo de preparación:** 0/3/5 s (toggle en 108) — antes de que el coach lea la respuesta modelo, play de 3 beeps (o 1 en 0s); el usuario prepara. El texto del modelo no se oculta (solo pausa).
+- [x] **Tiempo de preparación (eliminado, 2026-09):** los beeps 0/3/5 s antes de leer el modelo se quitaron — el usuario no prepara nada en esa fase; el ready-beep hands-free (105) ya avisa en el turno real de captura.
 - [x] **Finalizar Sesión:** en cualquier momento → `saveSession(completed)` + pantalla de cierre con resumen: preguntas practicadas, scores, focus de mejora.
 - [x] **Badge de pregunta actual:** "ACTIVA (Q{n})" en el sidebar (109 lo lee).
 - [x] Guardado del contexto acumulado efectivo: `buildContextSummary` (topic + últimos N exchanges) se pasa al LLM en cada `next-question` (con memoria del aprendiz, convención tech-stack).
@@ -42,7 +42,7 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 
 ## Dependencias
 
-- 105 (flujo por pregunta), 102 (questions[]), 108 (settings: autoAdvance, tempo, prepTime, thresholds). Se apoya en 101 (shell/layout).
+- 105 (flujo por pregunta), 102 (questions[]), 108 (settings: autoAdvance, tempo, thresholds). Se apoya en 101 (shell/layout).
 
 ## Criterios de aceptación
 

@@ -32,10 +32,10 @@ export function renderGeneralAudio(root, ctx) {
       ]),
       settingsSection("Karaoke", [
         settingRow({
-          label: "Anotación IPA",
-          hint: "Muestra la transcripción fonética bajo la letra.",
+          label: "Anotación de pronunciación",
+          hint: "Muestra la pronunciación legible bajo la letra (sílabas separadas y tónica en mayúsculas, p. ej. working → WUR·king).",
           control: toggleControl({
-            label: "Anotación IPA",
+            label: "Anotación de pronunciación",
             checked: Boolean(getLocal("showIpa", true)),
             onChange: (v) => setLocal("showIpa", v),
           }),

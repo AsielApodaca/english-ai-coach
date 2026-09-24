@@ -9,11 +9,13 @@
  *        → fullAnswer → done
  *
  * The coach speaks each line via the server TTS (BrowserTTS), the user repeats
- * fragments push-to-talk (orb), attempts go to POST /api/attempt (whisper with
- * word timestamps; text fallback via BrowserSTT when whisper is unavailable),
- * and the karaoke book colors each word green/amber/red. A failed attempt
- * (score < passThreshold) retries the same fragment; after the last fragment
- * passes, the user reads the whole answer and the session is done.
+ * fragments hands-free (the mic listens automatically on their turn — VAD
+ * timing via `VadTracker`; no press required), attempts go to POST
+ * /api/attempt (whisper with word timestamps; text fallback via BrowserSTT
+ * when whisper is unavailable), and the karaoke book colors each word
+ * green/amber/red. A failed attempt (score < passThreshold) retries the same
+ * fragment; after the last fragment passes, the user reads the whole answer
+ * and the session is done.
  *
  * The view is a browser module: it cannot import `src/lib/*.ts` (no build
  * step), so the phase transitions are ported inline and kept in sync with the
@@ -23,14 +25,27 @@
 import { h, escapeHtml } from "./dom.js";
 import { createAudioDock } from "./audio-dock.js";
 import { WaveRecorder } from "../speech/recorder-wave.js";
+import { VadTracker } from "../speech/vad.js";
 import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
-import { ipaFor } from "./ipa.js";
+import { respellFor } from "./ipa.js";
 import { getLocal } from "./settings/local.js";
 
-/** Guard timeout: no speech detected while waiting → failed attempt + retry. */
+/** No speech heard this whole turn → failed attempt + retry. */
 const GUARD_TIMEOUT_MS = 20_000;
+
+/** Hard cap on a turn once speech was heard (fits long full-answer reads). */
+const MAX_TURN_MS = 60_000;
+
+/** RMS threshold (dBFS) above which a frame counts as speech. */
+const SPEECH_DB = -55;
+
+/** Sustained silence after speech that ends the turn automatically (VAD). */
+const SILENCE_MS = 1200;
+
+/** Gap between the ready beep and the mic starting to listen. */
+const BEEP_READY_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Module state (mirrors PracticeState in cu2.ts)
@@ -57,7 +72,6 @@ let explainLine = "";
 let fullLine = "";
 
 /** Continuous-session settings from the session snapshot (feature 107/108). */
-let prepTime = 0;
 let autoAdvance = false;
 
 /** Live device prefs (feature 108) — applied without reloading. */
@@ -81,15 +95,12 @@ let store = null;
 let navigate = null;
 
 /** The `#view-practice` stage slot (set in initPracticeView). */
-let root = null;
+  let root = null;
 
-/** DOM references. */
-let els = null;
-let dock = null;
-let tts = null;
-
-/** Swappable capture handlers wired into the dock (one capture at a time). */
-let captureHandlers = null;
+  /** DOM references. */
+  let els = null;
+  let dock = null;
+  let tts = null;
 
 /** Last recorded WAV blob (replayed on retry with word highlighting). */
 let lastWavBlob = null;
@@ -165,7 +176,6 @@ function cancelFlow() {
     dock.destroy();
     dock = null;
   }
-  captureHandlers = null;
   lastWavBlob = null;
   store?.set({ activeQuestion: null });
 }
@@ -210,8 +220,6 @@ async function startFlow(sessionId) {
     dock = createAudioDock(
       root,
       {
-        onRecordStart: () => captureHandlers?.onRecordStart(),
-        onRecordEnd: () => captureHandlers?.onRecordEnd(),
         onRetry: () => tts.stop(),
         onFinish: () => finishSession(),
       },
@@ -242,7 +250,6 @@ async function loadSessionPayload(sessionId, token) {
   explainLine = data.explainLine;
   fullLine = data.fullLine;
   passThreshold = data.passThreshold ?? 70;
-  prepTime = data.prepTime ?? 0;
   autoAdvance = data.autoAdvance ?? false;
   fragmentCount = question?.fragments?.length ?? 0;
 }
@@ -278,7 +285,7 @@ function isResume() {
 }
 
 /**
- * One question pass: question → prep → model → explaining → fragments →
+ * One question pass: question → model → explaining → fragments →
  * full → done. Reused by `nextQuestion()` for the continuous session
  * (feature 107), skipping the intro. When `resume` is true (feature 109) the
  * fragment loop starts at the first unpassed fragment instead of fragment 0.
@@ -298,12 +305,6 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   renderQuestion();
   await speak(question.q, token);
   if (token !== flowToken) return;
-
-  // PREP TIME — beeps before the coach reads the model (spec 107).
-  if (prepTime > 0) {
-    await prepTimePause(prepTime, token);
-    if (token !== flowToken) return;
-  }
 
   // MODEL — the strong answer as karaoke lyrics, read with word progress.
   setPhase("model");
@@ -388,7 +389,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
 
 /**
  * Next question (feature 107): POST /api/session/next-question, then reload
- * the session snapshot (fresh explainLine/fullLine/prepTime/autoAdvance + the
+ * the session snapshot (fresh explainLine/fullLine/autoAdvance + the
  * new last question) and restart the question loop from the QUESTION phase.
  */
 async function nextQuestion() {
@@ -430,10 +431,10 @@ function setPhase(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Prep-time beeps (feature 107)
+// Beep + timing helpers
 // ---------------------------------------------------------------------------
 
-/** Play a short 880 Hz beep (WebAudio oscillator). */
+/** Play a short 880 Hz beep (WebAudio oscillator) — the hands-free "ready" cue. */
 function playBeep() {
   try {
     const ctx = new AudioContext();
@@ -449,24 +450,6 @@ function playBeep() {
     osc.onended = () => ctx.close().catch(() => {});
   } catch {
     // audio unavailable — the pause still happens
-  }
-}
-
-/**
- * Prep-time pause: 3 beeps evenly spaced across `seconds` before the coach
- * reads the model (spec 107). The model text stays visible on screen.
- */
-async function prepTimePause(seconds, token) {
-  if (seconds <= 0) {
-    playBeep();
-    await sleep(300);
-    return;
-  }
-  const step = seconds / 3;
-  for (let i = 0; i < 3; i++) {
-    if (token !== flowToken) return;
-    playBeep();
-    await sleep(step * 1000);
   }
 }
 
@@ -560,25 +543,27 @@ function animateWordProgress(durationMs, token) {
 }
 
 // ---------------------------------------------------------------------------
-// Attempt capture (push-to-talk → whisper / browser STT → /api/attempt)
+// Attempt capture (hands-free auto-listen → whisper / browser STT → /api/attempt)
 // ---------------------------------------------------------------------------
 
 /**
  * Capture one attempt (fragment or full answer) and return its outcome.
  *
- * Engine selection: whisper (record WAV → audio attempt) when ready, else
- * BrowserSTT (live speech → text attempt). If the whisper attempt fails
- * mid-flight, fall back to BrowserSTT + text mode.
+ * Both engines are hands-free: the mic starts listening automatically when the
+ * turn begins (feature 105 auto-listen) and ends itself — via silence
+ * detection (whisper/VAD) or the Web Speech API's own end-of-speech
+ * (BrowserSTT). Engine selection: whisper (record WAV → audio attempt) when
+ * ready, else BrowserSTT (live speech → text attempt). If the whisper attempt
+ * fails mid-flight, fall back to BrowserSTT + text mode.
  */
 async function captureAttempt(target, kind, token) {
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
   if (stt === "whisper") {
-    const { blob, timedOut, short, error } = await waitForUserRecording(token);
+    const { blob, timedOut, error } = await waitForUserRecording(token);
     if (token !== flowToken) return null;
     if (error) throw new Error(error);
     if (timedOut) return timedOutOutcome(target, kind);
-    if (short) return shortAttemptOutcome(target, kind);
     lastWavBlob = blob;
     try {
       return await submitAudio(blob, target, kind);
@@ -596,136 +581,133 @@ async function captureAttempt(target, kind, token) {
   return await submitText(text, target, kind);
 }
 
-/** Arm the orb and wait for a push-to-talk WAV recording (or the guard timeout). */
+/**
+ * Arms a hands-free whisper turn: ready beep, then the mic listens by itself.
+ *
+ * The turn ends when:
+ *   - VAD hears sustained silence (SILENCE_MS) after speech → capture,
+ *   - the no-speech guard expires (nothing said this turn) → timed out,
+ *   - MAX_TURN_MS elapses after speech began (long full-answer reads) → capture.
+ *
+ * The orb is a status indicator only (dock.setMode/setOrbEnabled); it is not
+ * clickable — the recording cannot be stuck "on" by a missed release.
+ */
 function waitForUserRecording(token) {
   return new Promise((resolve) => {
     let recorder = null;
-    let pressed = false;
-    let stopped = false;
     let settled = false;
+    const vad = new VadTracker({ speechDb: SPEECH_DB, silenceMs: SILENCE_MS, now: () => performance.now() });
 
-    const settle = (value) => {
+    const settle = (value, { cancel = true } = {}) => {
       if (settled) return;
       settled = true;
-      clearTimeout(guard);
-      if (!stopped) recorder?.cancel();
+      clearTimeout(noSpeechGuard);
+      clearTimeout(maxTurn);
+      if (cancel) recorder?.cancel();
+      dock?.setMode("idle");
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
       resolve(value);
     };
 
-    // Guard fires only when the user never pressed the orb.
-    const guard = setTimeout(() => {
-      if (!pressed) settle({ blob: null, timedOut: true });
+    const settleWithBlob = () => {
+      const blob = recorder?.stop();
+      settle({ blob, timedOut: false }, { cancel: false });
+    };
+
+    // Nothing heard for the whole turn → "didn't hear you".
+    const noSpeechGuard = setTimeout(() => {
+      if (!vad.speechSeen) settle({ blob: null, timedOut: true });
     }, GUARD_TIMEOUT_MS);
+
+    // Heard speech but the silence sniper never fired (e.g. loud ambient):
+    // cap the turn and keep everything captured so far.
+    const maxTurn = setTimeout(() => {
+      if (vad.speechSeen) settleWithBlob();
+    }, MAX_TURN_MS);
 
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
+    dock?.setMicLabel("Te toca a ti…");
 
-    // Prewarm the mic + WebAudio graph NOW so capture is instant when the
-    // user presses (getUserMedia takes ~200-500ms; without this a quick
-    // press-and-release can end before a single sample is captured).
-    // The device matches the one saved in Config/Settings (`engcoach.mic`);
-    // a bare `{ audio: true }` would silently use the OS default input.
+    // Prewarm the mic + WebAudio graph NOW so capture is instant once the
+    // beep plays (getUserMedia takes ~200-500ms).
     recorder = new WaveRecorder({ deviceId: getLocal("mic", "") || undefined });
-    recorder.prewarm().catch(() => {
-      // Ignored: start() retries and surfaces a friendly error if needed.
-    });
 
-    captureHandlers = {
-      onRecordStart: async () => {
-        if (settled || pressed) return;
-        pressed = true;
-        dock?.setMicLabel("Grabando…");
-        // Signal watch: if the input channel stays silent for a second, the
-        // saved device is probably muted/unplugged — surface that instead of a
-        // mystifying "didn't hear you".
-        let silentTimer = setTimeout(() => {
-          if (!settled) dock?.setMicLabel("Sin señal del micrófono — revisa Config > Dispositivo");
-        }, 1000);
-        recorder.onLevel = (db) => {
-          dock?.setVU(db);
-          if (Number.isFinite(db) && db > -55) {
-            clearTimeout(silentTimer);
-            silentTimer = null;
-            dock?.setMicLabel("Grabando…");
-          }
-        };
-        try {
-          await recorder.start();
-        } catch {
-          if (silentTimer) clearTimeout(silentTimer);
-          settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
-        }
-      },
-      onRecordEnd: async () => {
-        if (settled || !pressed) return;
-        // The stop reads the recorded samples; make sure start() finished so a
-        // quick release still captures.
-        if (!recorder.recording) {
-          try {
-            await recorder.start().catch(() => {});
-          } catch {
-            return;
-          }
-        }
-        const blob = recorder.stop();
-        stopped = true;
-        console.info(
-          `[rec] dur=${recorder.lastDurationMs}ms samples=${recorder.lastSampleCount} ctx=${recorder.ctx ? "built" : "none"} rate=${recorder.sampleRate ?? "?"}`,
-        );
-        dock?.setMicLabel("Micrófono");
-        // A near-silent, sub-100ms clip means the button was tapped instead of
-        // held — failing the real recording would feel like "no audio".
-        if ((recorder.lastDurationMs ?? 0) < 100) {
-          settle({ blob: null, timedOut: false, short: true });
-          return;
-        }
-        settle({ blob, timedOut: false });
-      },
+    recorder.onLevel = (db) => {
+      dock?.setVU(db);
+      const signal = vad.feed(db);
+      if (signal === "start") {
+        dock?.setMode("recording");
+        dock?.setMicLabel("Escuchando…");
+      } else if (signal === "silence") {
+        settleWithBlob();
+      }
     };
+
+    (async () => {
+      try {
+        await recorder.prewarm();
+      } catch {
+        settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
+        return;
+      }
+      if (settled) return;
+      playBeep();
+      await sleep(BEEP_READY_MS);
+      if (settled) return;
+      try {
+        await recorder.start();
+        dock?.setMode("recording");
+        dock?.setMicLabel("Te toca a ti · habla…");
+      } catch {
+        settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
+      }
+    })();
   });
 }
 
-/** Capture speech via the browser Web Speech API (push-to-talk). */
+/**
+ * Capture speech via the browser Web Speech API (hands-free fallback).
+ *
+ * The recognition starts automatically after the ready beep and ends on its
+ * own when the user stops talking (Web Speech end-of-speech), so the orb
+ * requires no press either.
+ */
 function captureBrowserSpeech(token) {
   return new Promise((resolve) => {
+    let done = false;
+    let guard = null;
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(guard);
+      dock?.setOrbEnabled(false);
+      dock?.setRetryEnabled(false);
+      resolve(value);
+    };
+
     const stt = new BrowserSTT({
       onFinal: () => {},
-      onEnd: () => {
-        clearTimeout(guard);
-        dock?.setOrbEnabled(false);
-        dock?.setRetryEnabled(false);
-        resolve(stt.result() || null);
-      },
-      onError: () => {
-        clearTimeout(guard);
-        dock?.setOrbEnabled(false);
-        dock?.setRetryEnabled(false);
-        resolve(null);
-      },
+      onEnd: () => finish(stt.result() || null),
+      onError: () => finish(null),
     });
-    if (!stt.isSupported()) {
-      resolve(null);
+    if (!stt.isSupported() || token !== flowToken) {
+      finish(null);
       return;
     }
-    const guard = setTimeout(() => {
+    guard = setTimeout(() => {
       stt.abort();
-      resolve(null);
+      finish(null);
     }, GUARD_TIMEOUT_MS);
 
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
-    let started = false;
-    captureHandlers = {
-      onRecordStart: () => {
-        if (!started) {
-          started = true;
-          stt.start();
-        }
-      },
-      onRecordEnd: () => stt.stop(),
-    };
+    dock?.setMicLabel("Te toca a ti…");
+    playBeep();
+    sleep(BEEP_READY_MS).then(() => {
+      if (token === flowToken && !done) stt.start();
+    });
   });
 }
 
@@ -801,19 +783,6 @@ function timedOutOutcome(target, kind) {
   };
 }
 
-/** Outcome when the orb was tapped instead of held (clip < 100ms). */
-function shortAttemptOutcome(target, kind) {
-  return {
-    kind,
-    score: 0,
-    verdict: "retry",
-    passed: false,
-    words: [],
-    target,
-    coachLine: "Hold the orb pressed while you speak, then let go.",
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
@@ -874,15 +843,17 @@ function renderKaraokeBook() {
   setCurrentLine(0);
 }
 
-/** Build one karaoke line of word spans (+ optional IPA annotation). */
+/** Build one karaoke line of word spans (+ optional pronunciation annotation). */
 function buildLine(index, text) {
   const words = text.trim().split(/\s+/).filter(Boolean);
   const line = h("div", { class: "karaoke-line", dataset: { index: String(index) } });
   for (const w of words) {
-    const ipa = ipaFor(w);
+    const pron = respellFor(w);
     const wrap = h("span", { class: "kw-wrap" }, [
       h("span", { class: "kw", dataset: { word: w } }, escapeHtml(w)),
-      ...(ipa ? [h("span", { class: "kw-ipa" }, ipa)] : []),
+      ...(pron
+        ? [h("span", { class: "kw-ipa" + (pron.approximate ? " approx" : "") }, escapeHtml((pron.approximate ? "~" : "") + pron.text))]
+        : []),
     ]);
     line.appendChild(wrap);
   }

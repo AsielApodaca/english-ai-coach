@@ -54,7 +54,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 - **Sidebar historial:** compacto; la sesión actual con badge **"ACTIVA (Q1)"** (número de pregunta en curso).
 - **Central stage (karaoke):**
   - Chip de feedback del encabezado: "Buen flujo · Foco en /tʃ/ · 92%".
-  - **Líneas de letra estilo Spotify:** la línea activa es la más grande y brillante; líneas siguiente/anterior más bajas y atenuadas; **anotación IPA palabra por palabra** sobre la línea activa (ej. `[maɪ] My`, `[ˈɡreɪtɪst] greatest`).
+  - **Líneas de letra estilo Spotify:** la línea activa es la más grande y brillante; líneas siguiente/anterior más bajas y atenuadas; **anotación de pronunciación legible palabra por palabra** sobre la línea activa (ej. `[WUR·king] working`, `[PRAH·jekt] project`; aproximaciones con `~`).
   - Subestrofa "Coach:" resaltada cuando el coach está hablando.
 - **Dock inferior:**
   - Orb grabación (vivo), **waveform 32 barras**, mp anteparcial del transcript en curso de la IA.
@@ -73,7 +73,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 - **Micrófono:** selector de input device + "prueba de sonido".
 - **Volumen / prueba de audio.**
 - **Interacción con el karaoke:**
-  - "Mostrar anotación IPA debajo de la letra" (toggle).
+  - "Mostrar anotación de pronunciación debajo de la letra" (toggle).
   - "Avanzar automáticamente al siguiente fragmento" (toggle).
   - "Resaltado en vivo de errores mientras hablas" (toggle; requiere el motor de timestamps).
 
@@ -97,9 +97,8 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 - **Flujo continuo (Q1→Q∞) con dificultad adaptativa:**
   - Toggle "Flujo continuo de preguntas hasta que pidas pausar".
   - Política: si las últimas 3 respuestas > 90%, sube el nivel/rigor un escalón (auto).
-- **Tiempo de preparación:** `0s / 3s / 5s` (pausa con beep antes de que el coach lea el modelo del usuario).
 
-**Mapeo:** feature `108-settings` (Entrenamiento & Pronunciación) y `107-continuous-session` (adaptativa).
+**Mapeo:** feature `108-settings` (Entrenamiento & Pronunciación) y `107-continuous-session` (adaptativa). ⚠ El "Tiempo de preparación" (0/3/5s con beeps) se eliminó en 2026-09: no hay nada que preparar entre la pregunta y el modelo; el ready-beep se escucha en el turno real del usuario.
 
 ---
 

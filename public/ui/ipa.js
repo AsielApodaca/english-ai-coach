@@ -1,14 +1,21 @@
 /**
- * Small IPA dictionary for the karaoke book (feature 108: "Mostrar anotación
- * IPA bajo la letra").
+ * Pronunciation annotations for the karaoke book (feature 108).
  *
  * `ipaFor(word)` returns the phonemic transcription (General American) of a
- * lowercase word, or `null` when the word is not in the dictionary — the
- * practice view then renders no annotation for that word instead of guessing.
+ * lowercase word, or `null` when the word is not in the dictionary.
  *
- * The dictionary is intentionally compact: it covers the high-frequency
- * words of the practice domain (interviews, standups, technical talk) plus
- * common English function words. It is a static lookup, never a guesser.
+ * The karaoke view does not render raw IPA (its symbols are too opaque for
+ * learners). Instead it shows a *readable respelling* derived deterministically
+ * from the dictionary IPA: syllables joined with `·` and the primary-stressed
+ * syllable capitalized, e.g. `working → WUR·king`, `project → PRAH·jekt`.
+ *
+ * Coverage rules (see `respellFor`):
+ *  1. Word in the dictionary → accurate respelling from its IPA.
+ *  2. Word outside the dictionary → letter-based approximate respelling,
+ *     flagged by the caller with `~` (never silently presented as exact).
+ *  3. Non-alphabetic input → `null` (no annotation), same as before.
+ *
+ * The acronym "IPA" is kept in the internal names; the UI never shows it raw.
  */
 
 const DICT = {
@@ -452,4 +459,265 @@ export function ipaFor(word) {
   const key = String(word ?? "").toLowerCase().replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, "");
   if (!key) return null;
   return DICT[key] ?? null;
+}
+
+/* ---------------------------------------------------------------------------
+ * Readable pronunciation respelling
+ * ------------------------------------------------------------------------- */
+
+/** One IPA phoneme/token → its learner-friendly letter respelling. */
+const IPA_TO_RESPELL = {
+  // vowels
+  ə: "uh", ʌ: "uh", ɪ: "ih", i: "ee", iː: "ee", iə: "ee·uh",
+  ɛ: "eh", e: "eh",
+  æ: "a", ɑ: "ah", ɑː: "ah", ɒ: "ah", ɔ: "aw", ɔː: "aw",
+  ʊ: "oo", u: "oo", uː: "oo",
+  ɜːr: "ur", ɑːr: "ar", ɔːr: "or", ʊr: "ur", uə: "yuh",
+  aɪ: "ai", aʊ: "ow", oʊ: "oh", eɪ: "ay", ɔɪ: "oy",
+  // consonants
+  b: "b", d: "d", f: "f", g: "g", ɡ: "g", h: "h", k: "k", l: "l",
+  m: "m", n: "n", p: "p", r: "r", s: "s", t: "t", v: "v", w: "w",
+  z: "z", j: "y", ʃ: "sh", ʒ: "zh", θ: "th", ð: "th", ŋ: "ng",
+  tʃ: "ch", dʒ: "j",
+  o: "oh", // ASCII fallback for stray dictionary tokens
+};
+
+/** Multi-character IPA tokens; tokenize longests first. */
+const IPA_COMPOUND = [
+  "ɜːr", "ɑːr", "ɔːr", "ʊr", "uə", "iə",
+  "aɪ", "aʊ", "oʊ", "eɪ", "ɔɪ",
+  "iː", "uː", "ɑː", "ɔː",
+  "tʃ", "dʒ",
+];
+
+const IPA_SINGLETON = "bdfgɡhklmnprstvwzjʃʒθðŋæaieouɒɔəɛɪʊʌ";
+const STRESS_PRIMARY = "ˈ";
+const STRESS_SECONDARY = "ˌ";
+const STRESS_MARKS = STRESS_PRIMARY + STRESS_SECONDARY;
+const VOWELISH = /[əæɑɒɔɛɜɪʊʌaeiou]/;
+
+/** Tolerant tokenizer: longest-match; unknown glyphs fall through as-is. */
+function tokenizeIpa(ipa) {
+  const out = [];
+  const t = String(ipa ?? "").replace(/^\/+|\/+$/g, "");
+  let i = 0;
+  while (i < t.length) {
+    const three = t.slice(i, i + 3);
+    if (IPA_COMPOUND.includes(three)) {
+      out.push(three);
+      i += 3;
+    } else {
+      const two = t.slice(i, i + 2);
+      if (IPA_COMPOUND.includes(two)) {
+        out.push(two);
+        i += 2;
+      } else if (IPA_SINGLETON.includes(t[i])) {
+        out.push(t[i]);
+        i += 1;
+      } else {
+        out.push(t[i]);
+        i += 1;
+      }
+    }
+  }
+  return out;
+}
+
+function isVowelish(token) {
+  return VOWELISH.test(token);
+}
+
+/**
+ * Split phoneme tokens into syllables and resolve stress.
+ *
+ * A vowelish token opens a syllable. Intervening consonants attach to the
+ * next syllable when solitary; otherwise the first consonant closes the
+ * current syllable (coda) and the rest open the next one (maximal-onset
+ * approximation). A stress marker (ˈ/ˌ) applies to the following syllable;
+ * only the primary-stressed syllable is rendered capitalized.
+ *
+ * @param {string[]} tokens
+ * @returns {{ tokens: string[], stress: string|null }[]}
+ */
+function syllabify(tokens) {
+  const syllables = [];
+  let pend = [];
+  let hasNucleus = false;
+  for (const tok of tokens) {
+    if (STRESS_MARKS.includes(tok)) {
+      pend.push(tok);
+      continue;
+    }
+    if (isVowelish(tok)) {
+      const cons = pend.filter((c) => !STRESS_MARKS.includes(c));
+      const stress = pend.find((c) => STRESS_MARKS.includes(c)) ?? null;
+      let onset = cons;
+      let coda = [];
+      if (hasNucleus && cons.length >= 2) {
+        coda = [cons[0]];
+        onset = cons.slice(1);
+      }
+      if (syllables.length) syllables[syllables.length - 1].tokens.push(...coda);
+      syllables.push({ tokens: [...onset, tok], stress });
+      pend = [];
+      hasNucleus = true;
+    } else {
+      pend.push(tok);
+    }
+  }
+  if (syllables.length) {
+    syllables[syllables.length - 1].tokens.push(
+      ...pend.filter((c) => !STRESS_MARKS.includes(c)),
+    );
+  } else if (pend.some((c) => !STRESS_MARKS.includes(c))) {
+    syllables.push({ tokens: pend.filter((c) => !STRESS_MARKS.includes(c)), stress: null });
+  }
+  return syllables;
+}
+
+/** Local fixes that make joined output read more naturally. */
+function fixRespell(s) {
+  return s
+    .replace(/ihngz$/, "ings")
+    .replace(/ihng$/, "ing")
+    .replace(/ihj$/, "ij")
+    .replace(/chyuh/g, "chuh")
+    .replace(/jyuh/g, "juh")
+    .replace(/shyuh/g, "shuh")
+    .replace(/zhyuh/g, "zhuh")
+    .replace(/yyuh/g, "yuh");
+}
+
+/**
+ * Convert a dictionary IPA string to its readable respelling, e.g.
+ * `/ˈwɜːrkɪŋ/` → `WUR·king`.
+ *
+ * @param {string} ipa
+ * @returns {string}
+ */
+export function ipaToRespell(ipa) {
+  const syllables = syllabify(tokenizeIpa(ipa));
+  const text = syllables
+    .map((syl) => {
+      let t = syl.tokens.map((tok) => IPA_TO_RESPELL[tok] ?? tok).join("");
+      if (t && syl.stress === STRESS_PRIMARY) t = t.toUpperCase();
+      return t;
+    })
+    .join("·");
+  return fixRespell(text);
+}
+
+/* ---- Letter-based approximate fallback for out-of-dictionary words ---- */
+
+/** Long suffixes mapped to a stable sound. */
+const APPROX_SUFFIX = [
+  ["tion", "shun"],
+  ["sion", "zhun"],
+  ["ture", "chur"],
+  ["age", "ij"],
+];
+
+/** Common digraphs and their respelling. */
+const APPROX_DIGRAPH = {
+  ph: "f", qu: "kw", wh: "w", ck: "k",
+  ch: "ch", sh: "sh", th: "th", ng: "ng",
+  ee: "ee", oo: "oo", oa: "oh", ai: "ay", ay: "ay", ea: "ee",
+  ou: "ow", oi: "oy",
+};
+
+const APPROX_SHORT = { a: "a", e: "eh", i: "ih", o: "o", u: "uh" };
+const APPROX_LONG = { a: "ay", e: "ee", i: "ai", o: "oh", u: "yoo" };
+
+/** Insert `·` between syllables of a continuous respelling (V·CV heuristic). */
+function segmentSyllables(text) {
+  return text.replace(/(?<=[aeiou][bcdfghjklmnpqrstvwxyz])(?=[aeiou])/g, "·");
+}
+
+/**
+ * Best-effort letter→sound respelling for words missing from the dictionary.
+ *
+ * Deterministic but deliberately approximate: only the most common English
+ * spelling rules are applied (digraphs, magic-e, c/g softening, silent final
+ * e). Callers should mark the result as approximate (symbol `~`) — it is a
+ * readable guess, never an authoritative transcription.
+ *
+ * @param {string} word
+ * @returns {string|null} lowercase respelling or `null` when not guessable
+ */
+export function approxRespell(word) {
+  const key = String(word ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  if (!key) return null;
+  let out = "";
+  let i = 0;
+  const n = key.length;
+  while (i < n) {
+    const hit = APPROX_SUFFIX.find(([s]) => key.startsWith(s, i));
+    if (hit) {
+      out += hit[1];
+      i += hit[0].length;
+      continue;
+    }
+    const two = key.slice(i, i + 2);
+    if (APPROX_DIGRAPH[two]) {
+      out += APPROX_DIGRAPH[two];
+      i += 2;
+      continue;
+    }
+    const ch = key[i];
+    if (/[aeiou]/.test(ch)) {
+      const magic = key.slice(i).match(/^([aeiou])([bcdfghjklmnpqrstvwxyz])(e$)/);
+      if (magic) {
+        out += APPROX_LONG[magic[1]];
+        i += 3;
+        continue;
+      }
+      if (ch === "e" && i === n - 1) {
+        i += 1; // silent final e
+        continue;
+      }
+      out += APPROX_SHORT[ch];
+      i += 1;
+      continue;
+    }
+    if (ch === "c") {
+      out += /[eiy]/.test(key[i + 1] ?? "") ? "s" : "k";
+      i += 1;
+      continue;
+    }
+    if (ch === "g") {
+      out += /[eiy]/.test(key[i + 1] ?? "") ? "j" : "g";
+      i += 1;
+      continue;
+    }
+    if (ch === "x") {
+      out += "ks";
+      i += 1;
+      continue;
+    }
+    if (ch === "y") {
+      out += i === n - 1 ? "ee" : "y";
+      i += 1;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return segmentSyllables(out);
+}
+
+/**
+ * Pronunciation annotation for a karaoke word.
+ *
+ * Prefers the accurate dictionary respelling; falls back to the approximate
+ * letter-based one otherwise. Non-alphabetic input returns `null`.
+ *
+ * @param {string} word
+ * @returns {{ text: string, approximate: boolean } | null}
+ */
+export function respellFor(word) {
+  const ipa = ipaFor(word);
+  if (ipa) return { text: ipaToRespell(ipa), approximate: false };
+  const approx = approxRespell(word);
+  if (approx) return { text: approx, approximate: true };
+  return null;
 }
