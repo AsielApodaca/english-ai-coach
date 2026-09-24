@@ -12,6 +12,7 @@
  * @property {string|null} sessionId
  * @property {boolean} speechReady
  * @property {boolean} sidebarOpen
+ * @property {number|null} activeQuestion - question count of the active session (feature 107)
  */
 
 /**
@@ -28,6 +29,7 @@ export function createShellStore() {
     sessionId: null,
     speechReady: false,
     sidebarOpen: true,
+    activeQuestion: null,
   };
   const listeners = new Set();
 

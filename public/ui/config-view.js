@@ -22,6 +22,7 @@
 
 import { h, escapeHtml } from "./dom.js";
 import { WaveRecorder } from "../speech/recorder-wave.js";
+import { allLocalSettings } from "./settings/local.js";
 
 const TOPIC_MAX = 6000;
 const DEFAULT_PROMPT =
@@ -836,6 +837,7 @@ function openLaunchModal({ navigate }) {
           contextFiles: draft.contextFiles,
           accent: draft.accent,
           focusPhonemes: draft.phonemes,
+          settings: allLocalSettings(),
         }),
       });
       const json = await res.json();

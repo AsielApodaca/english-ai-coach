@@ -25,6 +25,15 @@ const GROUPS = [
 export function initSidebar(store, root) {
   const slots = root.querySelector("#history-slots");
   slots.innerHTML = "";
+
+  // Active-session slot (feature 107): "ACTIVA (Q{n})" while a continuous
+  // session is running; hidden otherwise.
+  const activeSlot = h("div", { class: "history-slot active-session", hidden: true }, [
+    h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "graphic_eq"),
+    h("span", { class: "history-slot-text" }, "ACTIVA"),
+  ]);
+  slots.appendChild(activeSlot);
+
   for (const group of GROUPS) {
     slots.appendChild(
       h("div", { class: "history-group", dataset: { group: group.key } }, [
@@ -49,7 +58,16 @@ export function initSidebar(store, root) {
   closeBtn?.addEventListener("click", () => store.set({ sidebarOpen: false }));
   backdrop?.addEventListener("click", () => store.set({ sidebarOpen: false }));
 
-  const apply = (s) => document.body.classList.toggle("sidebar-open", s.sidebarOpen);
+  const apply = (s) => {
+    document.body.classList.toggle("sidebar-open", s.sidebarOpen);
+    const q = s.activeQuestion;
+    if (q != null && q > 0) {
+      activeSlot.hidden = false;
+      activeSlot.querySelector(".history-slot-text").textContent = `ACTIVA (Q${q})`;
+    } else {
+      activeSlot.hidden = true;
+    }
+  };
   apply(store.state);
   return store.subscribe(apply);
 }

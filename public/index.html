@@ -97,21 +97,21 @@
       </main>
     </div>
 
-    <!-- Settings overlay (feature 108) -->
+    <!-- Settings overlay (feature 108): left nav + content pane -->
     <div id="settings-overlay" class="overlay" hidden>
-      <div class="overlay-panel" role="dialog" aria-modal="true" aria-label="Settings">
+      <div class="overlay-panel settings-overlay-panel" role="dialog" aria-modal="true" aria-label="Settings">
         <div class="overlay-head">
           <h2 class="overlay-title">Settings</h2>
           <button id="btn-settings-close" class="icon-btn" title="Close" aria-label="Close settings">
             <span class="material-symbols-outlined" aria-hidden="true">close</span>
           </button>
         </div>
-        <div class="overlay-body">
-          <div class="settings-placeholder">
-            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
-            <p>Settings arriving with feature 108.</p>
+        <div class="settings-layout">
+          <nav id="settings-nav" class="settings-nav" aria-label="Settings sections"></nav>
+          <div class="settings-main">
+            <div id="settings-content" class="settings-content"></div>
+            <div id="settings-status" class="settings-status" role="status"></div>
           </div>
-          <div id="engine-status" class="engine-status"></div>
         </div>
       </div>
     </div>

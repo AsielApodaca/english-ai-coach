@@ -1,9 +1,9 @@
 import { buildDocumentContext, type ExtractedFile } from "./extract.ts";
 import { buildLearnerMemory, deriveSessionTitle } from "./learner.ts";
 import { generateFirstQuestion, type Candidate } from "./practice.ts";
+import { buildSettingsSnapshot, mergeSettings, parseLocalSettings, profileSettings } from "./settings.ts";
 import {
   DEFAULT_ACCENT,
-  DEFAULT_SETTINGS_SNAPSHOT,
   isLevel,
   type ContextFileRef,
   type CreateSessionOptions,
@@ -65,7 +65,7 @@ export async function handleSessionStartRequest(
   candidates: Candidate[],
   body: unknown,
 ): Promise<SessionStartResponse> {
-  const { topicPrompt, level, contextFiles, accent, focusPhonemes } = (body ?? {}) as Record<string, unknown>;
+  const { topicPrompt, level, contextFiles, accent, focusPhonemes, settings } = (body ?? {}) as Record<string, unknown>;
   if (typeof topicPrompt !== "string" || topicPrompt.trim().length === 0) {
     return { status: 400, json: { error: "topicPrompt is required." } };
   }
@@ -76,6 +76,13 @@ export async function handleSessionStartRequest(
   const profile = deps.loadProfile();
   const sessions = deps.loadAllSessions();
   const learnerMemory = buildLearnerMemory(profile, sessions);
+
+  // Settings snapshot (feature 108): merge the device prefs sent by the
+  // frontend (localStorage) over the profile-persisted settings, then capture
+  // the training keys into the session config so it is self-contained.
+  const localSettings = settings && typeof settings === "object" ? parseLocalSettings(settings as Record<string, unknown>) : {};
+  const mergedSettings = mergeSettings({ local: localSettings, profile: profileSettings(profile) });
+  const settingsSnapshot = buildSettingsSnapshot(mergedSettings);
 
   // Resolve attached context files to their extracted text (draft bucket) and
   // build the DOCUMENT CONTEXT block (feature 104). Files whose text is missing
@@ -116,7 +123,7 @@ export async function handleSessionStartRequest(
       accent: typeof accent === "string" && accent.trim() ? accent.trim() : DEFAULT_ACCENT,
       phonemes: Array.isArray(focusPhonemes) ? focusPhonemes.filter((p): p is string => typeof p === "string") : [],
       contextFiles: files.map(({ name, size, kind, textRef }) => ({ name, size, kind, textRef })),
-      settingsSnapshot: DEFAULT_SETTINGS_SNAPSHOT,
+      settingsSnapshot,
     };
 
     const sessionId = deps.createSession(config, { title, provider });
