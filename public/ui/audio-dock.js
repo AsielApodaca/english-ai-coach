@@ -128,6 +128,11 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
     orbBtn.classList.add("recording");
     setMode("recording");
     handlers.onRecordStart();
+    // End the recording on ANY pointer release, not just ones over the orb:
+    // with the orb armed, a press that drifts a few pixels used to hit
+    // `pointerleave` and cut the capture to a near-silent clip.
+    window.addEventListener("pointerup", endRecording);
+    window.addEventListener("pointercancel", endRecording);
   });
 
   const endRecording = () => {
@@ -135,11 +140,10 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
     recording = false;
     orbBtn.classList.remove("recording");
     setMode("idle");
+    window.removeEventListener("pointerup", endRecording);
+    window.removeEventListener("pointercancel", endRecording);
     handlers.onRecordEnd();
   };
-  orbBtn.addEventListener("pointerup", endRecording);
-  orbBtn.addEventListener("pointerleave", endRecording);
-  orbBtn.addEventListener("pointercancel", endRecording);
 
   // -------------------------------------------------------------------------
   // Waveform visualizer (32 bars)
