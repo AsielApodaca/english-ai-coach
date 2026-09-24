@@ -1,6 +1,6 @@
 # 105 · Práctica karaoke estilo Spotify (CU2)
 
-**Estado:** planificado 🔜 (ola 4)
+**Estado:** implementado ✅ (ola 4)
 
 ## Contexto
 
@@ -37,17 +37,17 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 
 ## Requerimientos funcionales
 
-- [ ] **Máquina de estados de práctica** (client): `intro → question → model → explaining → repeatingFragment → feedback → fullAnswer → done`, con transiciones reactivas a eventos TTS/STT (timeout de guarda en cada fase).
-- [ ] **INTRO:** texto de apertura generado por LLM (topic + dinámica), hablado con pausas medias (007); transcript IA se muestra como subtítulo (diseño: "columna del coach").
-- [ ] **QUESTION:** `POST /api/practice/next` (o `session/next-question`) genera `{ question }` y la respuesta modelo `{ answer, fragments[] }` (fragmentos = cortes por cláusula/pausa natural, no >18 palabras).
-- [ ] **Karaoke:** línea activa grande (`40px`), líneas adyacentes atenuadas, blur, scroll con mask-gradient; al reproducir audio del coach el texto se subraya palabra a palabra (timestamps del TTS de Piper si se generan; fallback: progreso lineal por duración).
-- [ ] **LOOP fragmentos:** UI habilita el orb (push-to-talk del dock) solo en fases de repetición; al soltar graba WAV (recorder-wave), llama `/api/evaluate` (score, missing, extras, issues) + `/api/transcribe` con word-timestamps (106). Resultado: `words[]` con estados green/amber/red sobre la línea activa + animación sincronizada con audio propio del usuario (nuevo intento reproduce su WAV con la letra iluminada).
-- [ ] **Feedback del coach:** LLM genera feedback con corrección enfocada (include ipa suggestions si 004 fuera activable); se habla; la chip de feedback del diseño ("Buen flujo · Foco en /tʃ/ · 92%") se muestra en el header.
-- [ ] **Reintento:** si `score < passThreshold` (settings 108; default 70), coach reclama el fragmento y loop interno de reintento (CU2 alt).
-- [ ] **FULL / cierre:** fase de respuesta entera con el mismo pipeline; consolidación del feedback final y guardado del `eval` de la pregunta en la sesión (102).
-- [ ] **Persistence:** cada paso relevante hace `saveSession` (idempotente) — al terminar fragmento, al cierre; el "Cancelar/Salir" deja status `active` (resumible, 109).
-- [ ] **"Hacer otra práctica"** → `#/` (config).
-- [ ] Indicador de driver de voz en curso: pill "Speech Engine · READY" refleja whisper/edge/piper vividos.
+- [x] **Máquina de estados de práctica** (client): `intro → question → model → explaining → repeatingFragment → feedback → fullAnswer → done`, con transiciones reactivas a eventos TTS/STT (timeout de guarda en cada fase).
+- [x] **INTRO:** texto de apertura generado por LLM (topic + dinámica), hablado con pausas medias (007); transcript IA se muestra como subtítulo (diseño: "columna del coach").
+- [x] **QUESTION:** `POST /api/session/start` (103) genera `{ question }` y la respuesta modelo `{ answer, fragments[] }` (fragmentos = cortes por cláusula/pausa natural, no >18 palabras); `GET /api/session/:id` los sirve a la vista.
+- [x] **Karaoke:** línea activa grande (`40px`), líneas adyacentes atenuadas, blur, scroll con mask-gradient; al reproducir audio del coach el texto se subraya palabra a palabra (fallback: progreso lineal por duración).
+- [x] **LOOP fragmentos:** UI habilita el orb (push-to-talk del dock) solo en fases de repetición; al soltar graba WAV (recorder-wave), llama `/api/attempt` (transcribe + evalúa + alinea + persiste). Resultado: `words[]` con estados green/amber/red sobre la línea activa + animación sincronizada con audio propio del usuario (nuevo intento reproduce su WAV con la letra iluminada).
+- [x] **Feedback del coach:** `buildFeedbackText` genera el feedback hablado (score + foco en missing); se habla; la chip de feedback del diseño ("Buen flujo · N%") se muestra en el header.
+- [x] **Reintento:** si `score < passThreshold` (settings 108; default 70), coach reclama el fragmento y loop interno de reintento (CU2 alt).
+- [x] **FULL / cierre:** fase de respuesta entera con el mismo pipeline; consolidación del feedback final y guardado del `eval` de la pregunta en la sesión (102).
+- [x] **Persistence:** cada paso relevante hace `saveSession` (idempotente) — al terminar fragmento, al cierre; el "Cancelar/Salir" deja status `active` (resumible, 109).
+- [x] **"Hacer otra práctica"** → `#/` (config).
+- [x] Indicador de driver de voz en curso: pill "Speech Engine · READY" refleja whisper/edge/piper vividos.
 
 ## Requerimientos no funcionales
 
@@ -68,10 +68,10 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 
 ## Criterios de aceptación
 
-- [ ] El flujo completo CU2 se puede recorrer con whisper instalado; con whisper ausente, colores degradan a green/red por matching textual (106 fallback).
-- [ ] El coloreado refleja las palabras mal dichas; el reintento funciona; el porcentaje score por fragmento se persiste en `session.questions[0].fragments[i]`.
-- [ ] Al "Finalizar Sesión" la sesión queda `completed` con `eval` y aparece en el historial (109).
-- [ ] Tests: evaluación por fragmento (wordmatch test amplía a `words[]`), máquina de estados (tests/cu2.test.ts), y `npm test` / `npm run check` verdes.
+- [x] El flujo completo CU2 se puede recorrer con whisper instalado; con whisper ausente, colores degradan a green/red por matching textual (106 fallback).
+- [x] El coloreado refleja las palabras mal dichas; el reintento funciona; el porcentaje score por fragmento se persiste en `session.questions[0].fragments[i]`.
+- [x] Al "Finalizar Sesión" la sesión queda `completed` con `eval` y aparece en el historial (109).
+- [x] Tests: evaluación por fragmento (wordmatch test amplía a `words[]`), máquina de estados (tests/cu2.test.ts), y `npm test` / `npm run check` verdes.
 
 ## Fuera de alcance
 

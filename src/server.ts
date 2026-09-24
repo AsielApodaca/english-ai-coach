@@ -10,8 +10,16 @@ import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
 import { evaluateFragment, generatePracticeSet, tokenize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
-import { checkWhisper, transcribeWav, transcribeWords, downloadModel } from "./lib/whisper.ts";
-import { alignWords } from "./lib/align.ts";
+import { checkWhisper, transcribeWav, transcribeWords, downloadModel, type WhisperWord } from "./lib/whisper.ts";
+import { alignWords, alignTextWords } from "./lib/align.ts";
+import {
+  buildExplainLine,
+  buildFeedbackText,
+  buildFullLine,
+  buildIntroText,
+  DEFAULT_PASS_THRESHOLD,
+  readPassThreshold,
+} from "./lib/cu2.ts";
 import { handleExtractRequest } from "./lib/extract.ts";
 import { handleSessionStartRequest } from "./lib/session-start.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
@@ -25,6 +33,7 @@ import {
   type AttemptWord,
   type FeedbackIssue,
   type Profile,
+  type SessionEval,
   type SessionV2,
 } from "./lib/storage.ts";
 
@@ -131,26 +140,57 @@ function persistAttempt(params: {
   words?: AttemptWord[];
   /** Fragment score override (feature 106: align score, coherent with words). */
   score?: number;
+  /** Persist as the question's full answer instead of a fragment (feature 105). */
+  full?: boolean;
+  /** Pass decision (feature 105: score >= passThreshold); overrides evaluation.next. */
+  passed?: boolean;
 }): void {
-  const { evaluation, sessionId, fragmentId, userText, words = [], score } = params;
-  if (!sessionId || !fragmentId) return;
+  const { evaluation, sessionId, fragmentId, userText, words = [], score, full = false, passed } = params;
+  if (!sessionId) return;
   const session = storage.loadSession(sessionId);
   if (!session) return;
-  const frag = session.questions.flatMap((q) => q.fragments).find((f) => f.id === fragmentId);
-  if (!frag) return;
-  frag.attempts.push({
-    text: userText,
-    words,
-    score: score ?? evaluation.score,
-    startedAt: new Date().toISOString(),
-    durationMs: 0,
-  });
-  if (evaluation.next) frag.passed = true;
+  const question = session.questions[0];
+  if (!question) return;
+  const passedFlag = passed ?? evaluation.next;
+  if (full) {
+    question.fullAttempt = {
+      text: userText,
+      words,
+      score: score ?? evaluation.score,
+      startedAt: new Date().toISOString(),
+      durationMs: 0,
+    };
+    question.eval = {
+      score: evaluation.score,
+      verdict: evaluation.verdict,
+      matched: evaluation.matched,
+      missing: evaluation.missing,
+      extra: evaluation.extra,
+      issues: evaluation.issues,
+      tips: evaluation.tips,
+      next: passedFlag,
+    };
+  } else {
+    if (!fragmentId) return;
+    const frag = question.fragments.find((f) => f.id === fragmentId);
+    if (!frag) return;
+    // Fragments created by session-start may lack the attempts array; initialize
+    // it defensively so the first attempt never crashes.
+    frag.attempts = frag.attempts ?? [];
+    frag.attempts.push({
+      text: userText,
+      words,
+      score: score ?? evaluation.score,
+      startedAt: new Date().toISOString(),
+      durationMs: 0,
+    });
+    if (passedFlag) frag.passed = true;
+  }
   // refresh profile from aggregated data
   const profile = storage.loadProfile();
   const sessions = storage.loadAllSessions();
   updateProfile(profile, sessions);
-  const topic = session.questions[0]?.q ?? session.config.topicPrompt;
+  const topic = question.q ?? session.config.topicPrompt;
   profile.recentTopics = [topic, ...(profile.recentTopics ?? []).filter((t) => t !== topic)].slice(0, 12);
   storage.saveProfile(profile);
   try {
@@ -264,6 +304,64 @@ app.post("/api/session/start", async (req, res) => {
   res.status(status).json(json);
 });
 
+/**
+ * GET /api/session/:id — karaoke practice data for a session (feature 105).
+ *
+ * Returns the stored v2 session plus the spoken lines the view needs to run
+ * the CU2 flow without importing server-side modules: the intro speech, the
+ * fragment-dynamics explanation, the full-answer instruction and the pass
+ * threshold from the session's settings snapshot (feature 108). 404 when the
+ * session does not exist.
+ */
+app.get("/api/session/:id", (req, res) => {
+  const session = storage.loadSession(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found." });
+  const question = session.questions[0];
+  res.json({
+    session,
+    intro: buildIntroText({ topicPrompt: session.config.topicPrompt, level: session.config.level }),
+    explainLine: buildExplainLine(),
+    fullLine: buildFullLine(),
+    passThreshold: readPassThreshold(session.config.settingsSnapshot),
+    question: question
+      ? { q: question.q, answer: question.answer, fragments: question.fragments }
+      : null,
+  });
+});
+
+/**
+ * POST /api/session/checkpoint — persist karaoke progress (feature 105).
+ *
+ * Body: { id, status?, fullAttempt?, eval? }. Idempotent saveSession: marks
+ * the session completed (or leaves it active), stores the full-answer attempt
+ * and its consolidated evaluation on questions[0]. Returns { id }.
+ */
+app.post("/api/session/checkpoint", (req, res) => {
+  const { id, status, fullAttempt, eval: evalValue } = req.body ?? {};
+  if (typeof id !== "string" || !id) return res.status(400).json({ error: "id is required." });
+  const session = storage.loadSession(id);
+  if (!session) return res.status(404).json({ error: "Session not found." });
+  if (status === "completed" || status === "active") session.status = status;
+  const question = session.questions[0];
+  if (question) {
+    if (fullAttempt && typeof fullAttempt === "object") {
+      question.fullAttempt = {
+        text: String(fullAttempt.text ?? ""),
+        words: Array.isArray(fullAttempt.words) ? fullAttempt.words : [],
+        score: Number(fullAttempt.score ?? 0),
+        startedAt: String(fullAttempt.startedAt ?? new Date().toISOString()),
+        durationMs: Number(fullAttempt.durationMs ?? 0),
+      };
+    }
+    if (evalValue && typeof evalValue === "object") {
+      question.eval = evalValue as SessionEval;
+    }
+  }
+  session.updatedAt = new Date().toISOString();
+  storage.saveSession(session);
+  res.json({ id: session.id });
+});
+
 app.get("/api/history", (_req, res) => {
   const sessions = storage.loadAllSessions();
   const profile = storage.loadProfile();
@@ -368,7 +466,12 @@ function forcedAmberWordsFromIssues(issues: FeedbackIssue[], target: string): st
  * single endpoint the karaoke UI (feature 105) will call.
  *
  * Query params: target (required), question, level (B1|B2|C1), optional
- * sessionId + fragmentId for persistence.
+ * sessionId + fragmentId for persistence, full=1 to persist as the question's
+ * full answer, mode=text to skip whisper (JSON body { userText } instead of a
+ * raw WAV — the karaoke fallback when whisper is unavailable).
+ *
+ * Response adds `coachLine`: the spoken feedback the coach reads after the
+ * attempt (built from the same score/missing/tips the view renders).
  */
 app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
   const buf = req.body as Buffer | undefined;
@@ -377,28 +480,51 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
   const level = typeof req.query.level === "string" ? req.query.level : "B2";
   const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : undefined;
   const fragmentId = typeof req.query.fragmentId === "string" ? req.query.fragmentId : undefined;
+  const mode = typeof req.query.mode === "string" ? req.query.mode : "audio";
+  const isFull = req.query.full === "1" || req.query.full === "true";
+  const passThreshold = clampNumber(req.query.passThreshold, 1, 100, DEFAULT_PASS_THRESHOLD);
 
-  if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
   if (!target) return res.status(400).json({ error: "target is required." });
   if (!isLevel(level)) return res.status(400).json({ error: "Invalid level." });
 
-  const whisper = checkWhisper(WHISPER_MODEL, rootDir);
-  if (!whisper.available) return res.status(400).json({ error: whisper.hint });
-  if (!whisper.modelReady) {
-    try {
-      await downloadModel(WHISPER_MODEL, rootDir);
-    } catch (err) {
-      return res.status(500).json({ error: `Model download failed: ${(err as Error).message}` });
+  let text: string;
+  let words: WhisperWord[] = [];
+  let durationMs = 0;
+
+  if (mode === "text") {
+    const body = (req.body ?? {}) as { userText?: unknown };
+    if (typeof body.userText !== "string" || body.userText.trim().length === 0) {
+      return res.status(400).json({ error: "userText is required in text mode." });
     }
-    return res.status(400).json({ error: "Model downloaded. Please record again.", code: "MODEL_DOWNLOADED" });
+    text = body.userText;
+  } else {
+    if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
+    const whisper = checkWhisper(WHISPER_MODEL, rootDir);
+    if (!whisper.available) return res.status(400).json({ error: whisper.hint });
+    if (!whisper.modelReady) {
+      try {
+        await downloadModel(WHISPER_MODEL, rootDir);
+      } catch (err) {
+        return res.status(500).json({ error: `Model download failed: ${(err as Error).message}` });
+      }
+      return res.status(400).json({ error: "Model downloaded. Please record again.", code: "MODEL_DOWNLOADED" });
+    }
+
+    const tmpDir = join(rootDir, "data", "tmp");
+    mkdirSync(tmpDir, { recursive: true });
+    const wavPath = join(tmpDir, `attempt-${randomUUID()}.wav`);
+    writeFileSync(wavPath, buf);
+    try {
+      const result = await transcribeWords(wavPath, whisper.modelPath!, rootDir);
+      text = result.text;
+      words = result.words;
+      durationMs = result.durationMs;
+    } finally {
+      rmSync(wavPath, { force: true });
+    }
   }
 
-  const tmpDir = join(rootDir, "data", "tmp");
-  mkdirSync(tmpDir, { recursive: true });
-  const wavPath = join(tmpDir, `attempt-${randomUUID()}.wav`);
-  writeFileSync(wavPath, buf);
   try {
-    const { text, words, durationMs } = await transcribeWords(wavPath, whisper.modelPath!, rootDir);
     const { evaluation } = await evaluateFragment(candidates(), {
       target,
       userText: text,
@@ -406,7 +532,8 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       level,
     });
     const forcedAmberWords = evaluation.provider === "none" ? [] : forcedAmberWordsFromIssues(evaluation.issues, target);
-    const align = alignWords(words, target, { forcedAmberWords });
+    const align = words.length > 0 ? alignWords(words, target, { forcedAmberWords }) : alignTextWords(text, target);
+    const passed = align.score >= passThreshold;
     persistAttempt({
       evaluation,
       sessionId,
@@ -415,6 +542,8 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       target,
       words: align.words,
       score: align.score,
+      full: isFull,
+      passed,
     });
     res.json({
       text,
@@ -429,11 +558,15 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       tips: evaluation.tips,
       provider: evaluation.provider,
       durationMs,
+      coachLine: buildFeedbackText({
+        score: align.score,
+        passed,
+        missing: align.missing,
+        tips: evaluation.tips,
+      }),
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
-  } finally {
-    rmSync(wavPath, { force: true });
   }
 });
 

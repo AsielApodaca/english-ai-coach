@@ -231,3 +231,24 @@ test("session/start: LLM failure → 502 and no session file", async () => {
   assert.ok((res.json.error as string).length > 0);
   assert.deepEqual(sessionFiles(), []);
 });
+
+// ---------------------------------------------------------------------------
+// Feature 105 fix: fragments are born with attempts[] and passed=false
+// (consumers persistAttempt/computeStats assume both exist from birth)
+// ---------------------------------------------------------------------------
+
+test("session/start: fragments are born with attempts: [] and passed: false", async () => {
+  const s = createStorage(dir);
+  const { candidate } = scriptedFake([FAKE_FIRST, FAKE_TITLE]);
+  const res = await handleSessionStartRequest(s, [candidate], { topicPrompt: "Role", level: "B2" });
+  assert.equal(res.status, 200);
+
+  const { sessionId } = res.json as { sessionId: string };
+  const session = s.loadSession(sessionId)!;
+  const fragments = session.questions[0].fragments;
+  assert.equal(fragments.length, 2);
+  for (const fragment of fragments) {
+    assert.deepEqual(fragment.attempts, []);
+    assert.equal(fragment.passed, false);
+  }
+});

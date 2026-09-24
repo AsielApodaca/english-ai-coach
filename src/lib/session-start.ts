@@ -123,7 +123,15 @@ export async function handleSessionStartRequest(
     const session = deps.loadSession(sessionId);
     if (session) {
       session.questions = [
-        { q: question.q, answer: question.answer, fragments: question.fragments, fullAttempt: null, eval: null },
+        {
+          q: question.q,
+          answer: question.answer,
+          // Fragments must carry an attempts array from birth: consumers
+          // (persistAttempt, computeStats) assume it exists.
+          fragments: question.fragments.map((f) => ({ ...f, attempts: [], passed: false })),
+          fullAttempt: null,
+          eval: null,
+        },
       ];
       deps.saveSession(session);
     }

@@ -261,3 +261,122 @@ export function alignWords(
 
   return { words, score, matched, missing, extra };
 }
+
+// ---------------------------------------------------------------------------
+// Text-only alignment (feature 105 fallback without whisper)
+// ---------------------------------------------------------------------------
+
+/** One colored word of a text-only alignment (no timestamps). */
+export interface TextAlignedWord {
+  word: string;
+  status: "green" | "red";
+}
+
+/** Result of aligning a plain transcription against a target fragment. */
+export interface TextAlignResult {
+  words: TextAlignedWord[];
+  score: number;
+  matched: string[];
+  missing: string[];
+  extra: string[];
+}
+
+/**
+ * Align a plain (timestamp-less) transcription against a target fragment and
+ * color each target word green/red. Used by the karaoke UI when whisper is
+ * unavailable (feature 105 fallback): the browser Web Speech API transcribes
+ * the user and the server colors the words textually — same matching semantics
+ * as feature 001, no timestamps.
+ *
+ * Coloring per target word: green when every normalized sub-token of the word
+ * is matched by the LCS; red otherwise. Spoken tokens with no target position
+ * (extras) are returned in `extra` (not rendered on the line). `score` is
+ * `round(100 * matchedTargetWords / targetWords)`.
+ */
+export function alignTextWords(spokenText: string, target: string): TextAlignResult {
+  const rawTarget = target.trim().split(/\s+/).filter(Boolean);
+  const targetTokens: TargetToken[] = rawTarget.map((raw) => ({ raw, norm: tokenize(raw) }));
+  const targetNorms: NormTargetToken[] = [];
+  for (let i = 0; i < targetTokens.length; i++) {
+    for (const norm of targetTokens[i].norm) targetNorms.push({ norm, rawIdx: i });
+  }
+  const spokenNorms = tokenize(spokenText);
+
+  // Plain LCS over normalized tokens (exact matches only — no phonetic grading).
+  const n = targetNorms.length;
+  const m = spokenNorms.length;
+  const width = m + 1;
+  const dp = new Uint16Array((n + 1) * width);
+  const at = (i: number, j: number) => dp[i * width + j];
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      dp[i * width + j] =
+        targetNorms[i - 1].norm === spokenNorms[j - 1]
+          ? at(i - 1, j - 1) + 1
+          : Math.max(at(i - 1, j), at(i, j - 1));
+    }
+  }
+  const matchedNorms = new Set<number>();
+  const matchedSpoken = new Set<number>();
+  let i = n;
+  let j = m;
+  while (i > 0 && j > 0) {
+    if (targetNorms[i - 1].norm === spokenNorms[j - 1]) {
+      matchedNorms.add(i - 1);
+      matchedSpoken.add(j - 1);
+      i--;
+      j--;
+    } else if (at(i - 1, j) >= at(i, j - 1)) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+
+  // Reconciliation pass: pair unmatched spoken tokens with unmatched target
+  // positions (word-order transpositions). The word was said, just out of
+  // place → it stays red but is excluded from both missing and extra (same
+  // invariant as alignWords: never missing AND extra at once). Track spoken
+  // tokens by INDEX (not by normalized value) so genuine duplicates of an
+  // already-consumed word still surface as extra.
+  const reconciled = new Array<number>(targetNorms.length).fill(false);
+  const usedSpoken = new Set<number>(matchedSpoken);
+  for (let si = 0; si < spokenNorms.length; si++) {
+    if (usedSpoken.has(si)) continue;
+    for (let ti = 0; ti < targetNorms.length; ti++) {
+      if (matchedNorms.has(ti) || reconciled[ti]) continue;
+      if (targetNorms[ti].norm === spokenNorms[si]) {
+        reconciled[ti] = true;
+        usedSpoken.add(si);
+        break;
+      }
+    }
+  }
+
+  const matchedCount = new Array<number>(targetTokens.length).fill(0);
+  const anyReconciled = new Array<boolean>(targetTokens.length).fill(false);
+  for (let idx = 0; idx < targetNorms.length; idx++) {
+    if (matchedNorms.has(idx) || reconciled[idx]) matchedCount[targetNorms[idx].rawIdx]++;
+    if (reconciled[idx]) anyReconciled[targetNorms[idx].rawIdx] = true;
+  }
+
+  const words: TextAlignedWord[] = targetTokens.map((tt, idx) => ({
+    word: tt.raw,
+    status:
+      tt.norm.length > 0 && matchedCount[idx] === tt.norm.length && !anyReconciled[idx]
+        ? "green"
+        : "red",
+  }));
+  // Only fully-matched (green) words count toward the score; partially matched
+  // and out-of-place words are red and reported as missing (feedback focus).
+  const matched = targetTokens
+    .filter((_, idx) => matchedCount[idx] === targetTokens[idx].norm.length && !anyReconciled[idx])
+    .map((t) => t.raw);
+  const missing = targetTokens
+    .filter((_, idx) => matchedCount[idx] < targetTokens[idx].norm.length && !anyReconciled[idx])
+    .map((t) => t.raw);
+  const extra = spokenNorms.filter((_, idx) => !usedSpoken.has(idx));
+  const score = targetTokens.length === 0 ? 0 : Math.round((100 * matched.length) / targetTokens.length);
+
+  return { words, score, matched, missing, extra };
+}
