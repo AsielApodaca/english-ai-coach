@@ -114,13 +114,19 @@ export async function handleSessionStartRequest(
   const documentContext = buildDocumentContext(files);
 
   try {
-    const { question, provider } = await generateFirstQuestion(candidates, {
-      topicPrompt: topicPrompt.trim(),
-      level,
-      learnerMemory,
-      documentContext: documentContext || undefined,
-    });
-    const { title } = await deriveSessionTitle(candidates, topicPrompt.trim());
+    // The first question and the session title are independent LLM calls; run
+    // them concurrently so the shared (and possibly slow) provider chain is
+    // hit only once in wall-clock terms. Each is still capped by the provider
+    // timeout so a stalled model triggers fallback instead of hanging.
+    const [{ question, provider }, { title }] = await Promise.all([
+      generateFirstQuestion(candidates, {
+        topicPrompt: topicPrompt.trim(),
+        level,
+        learnerMemory,
+        documentContext: documentContext || undefined,
+      }),
+      deriveSessionTitle(candidates, topicPrompt.trim()),
+    ]);
 
     const config: SessionConfig = {
       topicPrompt: topicPrompt.trim(),
