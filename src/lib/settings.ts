@@ -9,7 +9,7 @@
 //
 // Device prefs (mic, volume, showIpa, autoAdvance, liveHighlight, stt, tempo,
 // whisperModel, voice) live in localStorage under `engcoach.*`; training and
-// persona settings (rigor, fillers, adaptive, prepTime, provider, persona,
+// persona settings (rigor, fillers, adaptive, provider, persona,
 // prompt, focusPhonemes) live in `profile.json`. The server reads the profile
 // to build the session snapshot at creation time (103); the frontend keeps the
 // device prefs in localStorage.
@@ -38,8 +38,6 @@ export const STT_CHOICES = ["auto", "whisper", "browser"] as const;
 export type SttChoice = (typeof STT_CHOICES)[number];
 
 export const TEMPO_CHOICES = [0.75, 1, 1.25] as const;
-
-export const PREP_TIME_CHOICES = [0, 3, 5] as const;
 
 export const PROVIDER_CHOICES = ["auto", "zen", "gemini", "cloudflare", "ollama"] as const;
 
@@ -79,7 +77,6 @@ export interface AppSettings {
   fillers: FillerLevel;
   tempo: number;
   adaptive: AdaptiveSettings;
-  prepTime: number;
   provider: string;
   whisperModel: string;
   voice: string;
@@ -102,7 +99,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fillers: "Moderado",
   tempo: 1,
   adaptive: { enabled: true, up: 90, down: 65 },
-  prepTime: 3,
   provider: "auto",
   whisperModel: "small.en",
   voice: "auto",
@@ -145,10 +141,6 @@ export function isSttChoice(v: unknown): v is SttChoice {
 
 export function isTempo(v: unknown): v is number {
   return typeof v === "number" && (TEMPO_CHOICES as readonly number[]).includes(v);
-}
-
-export function isPrepTime(v: unknown): v is number {
-  return typeof v === "number" && (PREP_TIME_CHOICES as readonly number[]).includes(v);
 }
 
 export function isProviderChoice(v: unknown): v is string {
@@ -212,8 +204,6 @@ export function parseProfileSettings(raw: Record<string, unknown>): Partial<AppS
       down: typeof a.down === "number" ? a.down : DEFAULT_SETTINGS.adaptive.down,
     };
   }
-  const prepTime = toFiniteNumber(raw.prepTime);
-  if (prepTime !== null && isPrepTime(prepTime)) out.prepTime = prepTime;
   if (isProviderChoice(raw.provider)) out.provider = raw.provider;
   if (typeof raw.personaName === "string") out.personaName = raw.personaName;
   if (typeof raw.targetLevel === "string" && isLevel(raw.targetLevel)) out.targetLevel = raw.targetLevel;
@@ -248,8 +238,6 @@ export function readSnapshotSettings(snapshot?: SettingsSnapshot): Partial<AppSe
       down: typeof a.down === "number" ? a.down : DEFAULT_SETTINGS.adaptive.down,
     };
   }
-  const prepTime = toFiniteNumber(overrides.prepTime);
-  if (prepTime !== null && isPrepTime(prepTime)) out.prepTime = prepTime;
   if (isProviderChoice(overrides.provider)) out.provider = overrides.provider;
   if (typeof overrides.autoAdvance === "boolean") out.autoAdvance = overrides.autoAdvance;
   return out;
@@ -291,7 +279,7 @@ export function mergeSettings(params: {
 /**
  * Build the session settings snapshot (feature 102/108). Always writes the
  * training keys so the session is self-contained: rigor, fillers, adaptive,
- * prepTime, provider, autoAdvance and the derived passThreshold.
+ * provider, autoAdvance and the derived passThreshold.
  */
 export function buildSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
   return {
@@ -300,18 +288,11 @@ export function buildSettingsSnapshot(settings: AppSettings): SettingsSnapshot {
       rigor: settings.rigor,
       fillers: settings.fillers,
       adaptive: { ...settings.adaptive },
-      prepTime: settings.prepTime,
       provider: settings.provider,
       autoAdvance: settings.autoAdvance,
       passThreshold: RIGOR_THRESHOLDS[settings.rigor],
     },
   };
-}
-
-/** Read the prep time (seconds) captured in a session snapshot. */
-export function readPrepTime(snapshot?: SettingsSnapshot): number {
-  const n = toFiniteNumber(snapshot?.overrides?.prepTime);
-  return n !== null && isPrepTime(n) ? n : DEFAULT_SETTINGS.prepTime;
 }
 
 /** Read the auto-advance flag captured in a session snapshot. */
@@ -338,7 +319,6 @@ export function applyProfileSettings(profile: Profile, settings: Partial<AppSett
             down: typeof settings.adaptive.down === "number" ? settings.adaptive.down : DEFAULT_SETTINGS.adaptive.down,
           }
         : prev.adaptive,
-      prepTime: settings.prepTime ?? prev.prepTime,
       provider: settings.provider ?? prev.provider,
       personaName: settings.personaName ?? prev.personaName,
       targetLevel: settings.targetLevel ?? prev.targetLevel,

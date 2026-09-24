@@ -17,7 +17,7 @@ export interface ProviderInfo {
   name: string;
 }
 
-export type ProviderId = "gemini" | "cloudflare" | "ollama";
+export type ProviderId = "gemini" | "cloudflare" | "ollama" | "mock";
 
 export interface Provider {
   readonly id: ProviderId;

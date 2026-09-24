@@ -16,13 +16,15 @@ export class WaveRecorder {
   /**
    * Acquire the mic stream ahead of time.
    *
-   * getUserMedia takes ~200-500ms; fetching it before the user presses the orb
-   * means push-to-talk capture starts instantly. The WebAudio graph is NOT
-   * built here on purpose: an AudioContext created outside a user gesture is
-   * created "suspended" by Chrome's autoplay policy, and resuming it later is
-   * finicky. Instead the graph is built in start(), inside the press gesture,
-   * where a fresh context is guaranteed to start "running" — same pattern used
-   * by the (working) config sound test.
+   * getUserMedia takes ~200-500ms; fetching it before the turn starts (hands-
+   * free auto-listen, feature 105) means the mic is live the moment the ready
+   * beep plays. The WebAudio graph is NOT
+   * built here on purpose: an AudioContext created without the page having
+   * user activation is created "suspended" by Chrome's autoplay policy, and
+   * resuming it later is finicky. In practice the page is always activated
+   * before the flow runs (the user clicked "Iniciar práctica"/"Continuar"),
+   * so contexts created per-turn start "running"; the start() resume() below
+   * covers the rare leftovers. Same pattern as the (working) config sound test.
    *
    * The device honours the saved `engcoach.mic` choice: a plain
    * `{ audio: true }` request falls back to the OS default input, which is
@@ -35,10 +37,7 @@ export class WaveRecorder {
     if (this.stream) return true;
     if (this._prewarming) return this._prewarming;
     this._prewarming = (async () => {
-      const constraints = this.deviceId
-        ? { audio: { deviceId: { exact: this.deviceId } } }
-        : { audio: true };
-      this.stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.stream = await this.acquireStream();
       return true;
     })().finally(() => {
       this._prewarming = null;
@@ -47,28 +46,74 @@ export class WaveRecorder {
   }
 
   /**
-   * Build the capture graph NOW and start recording. Must run inside a user
-   * gesture (the orb press): a context created here starts "running", which
-   * guarantees onaudioprocess fires and real samples reach the mic.
+   * Acquire the mic stream, preferring the saved device but degrading to the
+   * OS default input when that exact device is gone (unplugged / renamed).
+   * An OverconstrainedError for a stale `deviceId` used to fail the whole
+   * capture silently — the tab turned the mic on, the blob was empty.
+   */
+  async acquireStream() {
+    if (this.deviceId) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({
+          audio: { deviceId: { exact: this.deviceId } },
+        });
+      } catch {
+        // Saved device no longer present: fall through to the default input.
+      }
+    }
+    return navigator.mediaDevices.getUserMedia({ audio: true });
+  }
+
+  /**
+   * Build the capture graph NOW and start recording.
+   *
+   * Hands-free turns (feature 105) call this right after the ready beep — not
+   * inside a press gesture. Chrome's autoplay policy only blocks Web Audio
+   * until the page receives its FIRST user activation, which already happened
+   * when the session was started; if a context still comes out "suspended",
+   * it is explicitly resumed here (onaudioprocess never fires on a suspended
+   * context, which used to fail every recording with a silent WAV while the
+   * tab mic indicator was on).
    */
   async start() {
     if (this.recording) return true;
-    await this.prewarm();
+    if (!this.stream) await this.prewarm();
     if (this.ctx) {
       this.ctx.close().catch(() => {});
       this.ctx = null;
     }
     this.buildGraph();
+    if (this.ctx.state === "suspended") {
+      try {
+        await this.ctx.resume();
+      } catch {
+        // context stays suspended — the attempt will come back empty and the
+        // guard/retry feedback will surface it.
+      }
+    }
     this.recording = true;
     return true;
   }
 
   /** Create a fresh AudioContext + capture graph from the prewarmed stream. */
   buildGraph() {
-    const ctx = new AudioContext();
+    // whisper.cpp expects a 16 kHz mono WAV. Recording at the native rate
+    // (typically 48 kHz) worked on most builds (whisper.cpp resamples its WAV
+    // input) but failed on others with an empty transcript. Forcing 16 kHz
+    // here makes the blob whisper-native on every build.
+    let ctx;
+    try {
+      ctx = new AudioContext({ sampleRate: 16000 });
+    } catch {
+      // AudioContextOptions.sampleRate unsupported (older WebKit) — keep the
+      // native rate; whisper.cpp still resamples those WAVs.
+      ctx = new AudioContext();
+    }
     this.sampleRate = ctx.sampleRate;
     const source = ctx.createMediaStreamSource(this.stream);
-    const processor = ctx.createScriptProcessor(4096, 1, 1);
+    // 2048 frames @ 16 kHz ≈ 128 ms: keeps the sub-100 ms tap detection and the
+    // live VU meter responsive now that the graph runs at whisper's 16 kHz.
+    const processor = ctx.createScriptProcessor(2048, 1, 1);
     // Zero-gain tail into the destination: keeps the processor active (so
     // onaudioprocess fires) without routing the mic back through the speakers.
     const silentOut = ctx.createGain();

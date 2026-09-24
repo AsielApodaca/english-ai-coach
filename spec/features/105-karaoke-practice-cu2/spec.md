@@ -2,6 +2,21 @@
 
 **Estado:** implementado ✅ (ola 4)
 
+## Correcciones de bugs y decisión de captura (2026-09)
+
+**Decisión de UX: escucha automática (hands-free) en el turno del usuario.** Tras dos rondas de reportes ("el botón del mic se queda naranja" y "el micro se enciende pero no captura audio") se identificó la causa raíz de percepción: al empezar el turno el micrófono se pre-calentaba (indicador del SO encendido) y el orb pulsaba en verde, pero solo se grababa **manteniendo presionado** (push-to-talk) → sensación de "escucha automática que no captura" y ambigüedad sobre el estado naranja. Resuelto cambiando el flujo a escucha automática:
+
+- **Turno del usuario:** beep de preparación → el micrófono escucha solo (sin pulsar) → el turno termina por **detección de silencio** (`VadTracker` en `public/speech/vad.js`, 1.2 s de silencio tras hablar), por guard sin habla (20 s → "I didn't hear you"), o por tope de turno (60 s para lecturas largas de respuesta completa).
+- **El orb ya NO es clickeable** — es un indicador de estado: dim/gris en espera, pulso verde en "tu turno", ámbar + anillos mientras escucha, y VU en vivo. El ámbar se gestiona solo desde `setMode()` del dock (fuente única), por lo que no puede quedar pegado.
+- El path de browser STT (fallback texto) también arranca solo tras el beep; el propio engine detecta el fin de habla (Web Speech).
+- **Se eliminó el "tiempo de preparación" (0/3/5 s con beeps, spec 107)** que sonaba entre la pregunta y el modelo: ahí el usuario no prepara nada (solo escucha). El único beep que existe ahora es el ready-beep hands-free del turno real de captura.
+
+**Otros fixes de audio (mantenidos):**
+- `AudioContext` a 16 kHz (`new AudioContext({ sampleRate: 16000 })`, fallback a rate nativo) — whisper.cpp espera WAV 16 kHz mono. El `AudioContext` se crea por turno sin gesto: Chrome lo permite desde la primera activación de la página (el clic que inicia la práctica); si queda `suspended`, `start()` lo reanuda.
+- Buffer del ScriptProcessor 4096→2048 (≈128 ms @16 kHz) para VAD/VU reactivos.
+- `acquireStream()` en `recorder-wave.js` degrada al input por defecto cuando el `deviceId` guardado (`engcoach.mic`) quedó obsoleto (evita fallo silencioso).
+- Browser STT no pierde captura en interacciones cortas (flag `started` en `browser-stt.js`).
+
 ## Contexto
 
 - Caso de uso: **CU2** (`spec/use-cases/CU2.md`) — el corazón del producto.
@@ -17,7 +32,7 @@ Implementa el flujo de práctica por fases de CU2 para **una pregunta** (el fluj
 INTRO     coach habla (TTS): contexto del tópico + dinámica (CU2 paso 1)
 QUESTION  pregunta mostrada en pantalla y leída (p.1-2); transcript en vivo del coach
 MODEL     LLM genera respuesta fuerte del coach; se muestra como letra Spotify
-          (karaoke 40px Space Grotesk, anotación IPA opcional) — coach la lee completa (p.3-5)
+          (karaoke 40px Space Grotesk, anotación de pronunciación legible opcional: respelling WUR·king derivado de IPA, fallback aproximado ~ para palabras fuera del dict) — coach la lee completa (p.3-5)
 EXPLAIN   coach explica: "voy a leer por fragmentos, repítelos" (p.6); se resalta el fragmento (p.7)
 LOOP      por cada fragmento:
              coach dice fragmento (p.8)
@@ -41,7 +56,7 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 - [x] **INTRO:** texto de apertura generado por LLM (topic + dinámica), hablado con pausas medias (007); transcript IA se muestra como subtítulo (diseño: "columna del coach").
 - [x] **QUESTION:** `POST /api/session/start` (103) genera `{ question }` y la respuesta modelo `{ answer, fragments[] }` (fragmentos = cortes por cláusula/pausa natural, no >18 palabras); `GET /api/session/:id` los sirve a la vista.
 - [x] **Karaoke:** línea activa grande (`40px`), líneas adyacentes atenuadas, blur, scroll con mask-gradient; al reproducir audio del coach el texto se subraya palabra a palabra (fallback: progreso lineal por duración).
-- [x] **LOOP fragmentos:** UI habilita el orb (push-to-talk del dock) solo en fases de repetición; al soltar graba WAV (recorder-wave), llama `/api/attempt` (transcribe + evalúa + alinea + persiste). Resultado: `words[]` con estados green/amber/red sobre la línea activa + animación sincronizada con audio propio del usuario (nuevo intento reproduce su WAV con la letra iluminada).
+- [x] **LOOP fragmentos:** en fases de repetición el micrófono **escucha automáticamente** (beep de preparación → VAD por silencio, orb como indicador no clickeable) y graba WAV (recorder-wave) → llama `/api/attempt` (transcribe + evalúa + alinea + persiste). Resultado: `words[]` con estados green/amber/red sobre la línea activa + animación sincronizada con audio propio del usuario (nuevo intento reproduce su WAV con la letra iluminada).
 - [x] **Feedback del coach:** `buildFeedbackText` genera el feedback hablado (score + foco en missing); se habla; la chip de feedback del diseño ("Buen flujo · N%") se muestra en el header.
 - [x] **Reintento:** si `score < passThreshold` (settings 108; default 70), coach reclama el fragmento y loop interno de reintento (CU2 alt).
 - [x] **FULL / cierre:** fase de respuesta entera con el mismo pipeline; consolidación del feedback final y guardado del `eval` de la pregunta en la sesión (102).

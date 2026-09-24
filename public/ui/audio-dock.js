@@ -4,15 +4,16 @@
  * Bottom dock with:
  *   - 32-bar canvas waveform: idle slate pulse, cyan sine while the AI speaks,
  *     lime→amber VU meter while the user records.
- *   - 64px push-to-talk orb (green, white mic icon) with expanding concentric
- *     rings while recording; armed only during repetition phases.
+ *   - 64px mic orb (green / amber) as a pure STATUS indicator: hands-free
+ *     turns start and stop listening on their own (VAD), so the orb is NOT
+ *     clickable — it just shows "your turn" (green pulse) and "listening"
+ *     (amber ring + live VU).
  *   - Tempo segmented control (0.75× / 1× / 1.25×) applied to coach TTS.
  *   - Mic label + live dB monitor.
  *   - Assistance pills: "Reintentar fragmento" (retry) and "Finalizar Sesión".
  *
- * The dock is effectful UI only: it reports user intent through callbacks
- * (onRecordStart / onRecordEnd / onRetry / onFinish) and exposes a small
- * imperative API for the practice view to drive its state.
+ * The dock is effectful UI only: it wires the two assistance pills up and
+ * exposes a small imperative API for the practice view to drive its state.
  */
 
 import { h } from "./dom.js";
@@ -25,8 +26,6 @@ const ORB_SIZE = 64;
  *
  * @param {HTMLElement} root
  * @param {{
- *   onRecordStart: () => void,
- *   onRecordEnd: () => void,
  *   onRetry: () => void,
  *   onFinish: () => void,
  * }} handlers
@@ -48,7 +47,7 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   const canvas = h("canvas", { class: "dock-waveform", width: "640", height: "48", "aria-hidden": "true" });
   const ctx = canvas.getContext("2d");
 
-  const orbBtn = h("button", { type: "button", class: "orb", title: "Mantén pulsado para hablar", "aria-label": "Push to talk" }, [
+  const orbBtn = h("button", { type: "button", class: "orb", disabled: true, title: "A la espera", "aria-label": "Estado del micrófono" }, [
     h("span", { class: "material-symbols-outlined orb-icon", "aria-hidden": "true" }, "mic"),
   ]);
 
@@ -100,8 +99,6 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
 
   /** @type {"idle"|"ai"|"recording"} */
   let mode = "idle";
-  let orbEnabled = false;
-  let recording = false;
   let rate = 1;
   let raf = 0;
   let phase = 0;
@@ -109,7 +106,7 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   let destroyed = false;
 
   // -------------------------------------------------------------------------
-  // Orb (push-to-talk)
+  // Orb (status indicator — NOT clickable; turns are hands-free, feature 105)
   // -------------------------------------------------------------------------
 
   function selectTempo(value) {
@@ -120,30 +117,6 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
     window.dispatchEvent(new CustomEvent("engcoach:settings-changed"));
   }
   selectTempo(initialRate);
-
-  orbBtn.addEventListener("pointerdown", (e) => {
-    if (!orbEnabled || recording) return;
-    e.preventDefault();
-    recording = true;
-    orbBtn.classList.add("recording");
-    setMode("recording");
-    handlers.onRecordStart();
-    // End the recording on ANY pointer release, not just ones over the orb:
-    // with the orb armed, a press that drifts a few pixels used to hit
-    // `pointerleave` and cut the capture to a near-silent clip.
-    window.addEventListener("pointerup", endRecording);
-    window.addEventListener("pointercancel", endRecording);
-  });
-
-  const endRecording = () => {
-    if (!recording) return;
-    recording = false;
-    orbBtn.classList.remove("recording");
-    setMode("idle");
-    window.removeEventListener("pointerup", endRecording);
-    window.removeEventListener("pointercancel", endRecording);
-    handlers.onRecordEnd();
-  };
 
   // -------------------------------------------------------------------------
   // Waveform visualizer (32 bars)
@@ -193,12 +166,31 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   return {
     setMode(m) {
       mode = m;
+      // Single source of truth for the amber orb: entering "recording" latches
+      // it, ANY other mode (or disable) clears it. Because the orb is not
+      // clickable, every recording is driven through this API — a stale amber
+      // can never survive a phase change.
+      if (m === "recording") {
+        orbBtn.classList.add("recording");
+      } else {
+        orbBtn.classList.remove("recording");
+      }
       dock.dataset.mode = m;
     },
     setOrbEnabled(enabled) {
-      orbEnabled = enabled;
-      orbBtn.classList.toggle("armed", enabled);
+      // Mark the turn as active for the indicator; the orb itself is a
+      // disabled (non-clickable) element that just reflects state.
       orbBtn.disabled = !enabled;
+      if (enabled) {
+        orbBtn.classList.add("armed");
+      } else {
+        orbBtn.classList.remove("armed");
+        orbBtn.classList.remove("recording");
+      }
+      // Hands-free hint: the turn is being listened to automatically, no press
+      // required (feature 105 — user chose auto-listen over push-to-talk).
+      orbBtn.title = enabled ? "La IA te está escuchando" : "A la espera";
+      if (enabled && mode === "idle") micLabel.textContent = "Te toca a ti…";
     },
     setMicLabel(label) {
       micLabel.textContent = label;

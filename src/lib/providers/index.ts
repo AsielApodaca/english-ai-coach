@@ -3,6 +3,7 @@ import { ProviderError } from "./types.ts";
 import { createGeminiProvider } from "./gemini.ts";
 import { createCloudflareProvider } from "./cloudflare.ts";
 import { createOllamaProvider } from "./ollama.ts";
+import { createMockProvider } from "./mock.ts";
 
 export * from "./types.ts";
 
@@ -13,11 +14,15 @@ export interface Env extends Record<string, string | undefined> {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_MODEL?: string;
   OLLAMA_MODEL?: string;
+  /** TEMPORARY testing aid: MOCK_LLM=1 serves canned LLM replies (provider "mock"). */
+  MOCK_LLM?: string;
 }
 
 /** Build the provider registry from environment/config. */
 export function buildProviders(env: Env): Provider[] {
+  const mock = env.MOCK_LLM ? [createMockProvider()] : [];
   return [
+    ...mock,
     createGeminiProvider(env.GEMINI_API_KEY),
     createCloudflareProvider(env.CLOUDFLARE_API_TOKEN, env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_MODEL),
     createOllamaProvider(undefined, env.OLLAMA_MODEL),

@@ -18,7 +18,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 | --- | --- | --- | --- |
 | Dispositivo de entrada (micro) | select | localStorage `engcoach.mic` | system default |
 | Volumen / prueba de sonido | slider + button | localStorage `engcoach.volume` | 100 |
-| Mostrar anotación IPA bajo la letra | toggle | localStorage `engcoach.showIpa` | true |
+| Mostrar anotación de pronunciación bajo la letra | toggle | localStorage `engcoach.showIpa` | true |
 | Avanzar automáticamente al siguiente fragmento | toggle | localStorage `engcoach.autoAdvance` | false |
 | Resaltado en vivo de errores (colores de 106) | toggle | localStorage `engcoach.liveHighlight` | true |
 
@@ -30,7 +30,6 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 | Sensibilidad a muletillas (Relajado/Moderado 2/frase/Sensible/Tolerancia Cero) | segmented | profile `settings.fillers` | Moderado |
 | Ritmo de práctica (0.75/1/1.25×) | segmented | localStorage `engcoach.tempo` | 1× |
 | Flujo continuo adaptativo (auto-adjust level/rigor) | toggle + thresholds | profile `settings.adaptive` | on, up 90/down 65 |
-| Tiempo de preparación (0/3/5 s) | segmented | profile `settings.prepTime` | 3 s |
 
 ### 3 · Modelo IA (`hidden-model.html`, en términos del stack real)
 | Setting | Tipo | Persiste | Default |
@@ -54,7 +53,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 
 - [x] Panel Settings como **overlay** (101) con sub-tabs a la izquierda; close no pierde la práctica activa.
 - [x] Cada sub-tab edita su porción de estado; **precedencia:** `settingsSnapshot` de la sesión (102) > preferencias de localStorage > defaults de `profile.json > defaults` de código.
-- [x] Los toggles de IPA/autoAdvance/liveHighlight afectan en vivo a la práctica karaoke (105/106) sin recargar.
+- [x] Los toggles de anotación/autoAdvance/liveHighlight afectan en vivo a la práctica karaoke (105/106) sin recargar.
 - [x] Rigor/fillers/adaptive/prepTempo alimentan `config.settingsSnapshot` al **crear** sesión (103), no en runtime.
 - [x] "Export JSON" descarga `data/profile.json` (y opcionalmente sesiones elegidas) como archivo.
 - [x] Mapa de motor ("Speech Engine · READY" / "not installed") refleja whisper/piper/edge según instalados (data de `/api/health`).
@@ -77,7 +76,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 ## Criterios de aceptación
 
 - [x] Cambiar rigor/muletillas/adaptive → nueva sesión creada con `settingsSnapshot` correcto (test unitario merge).
-- [x] Toggle IPA encendido/apagado se refleja en el karaoke en vivo.
+- [x] Toggle de anotación de pronunciación encendido/apagado se refleja en el karaoke en vivo.
 - [x] Export JSON descarga `profile.json`.
 - [x] `npm test` y `npm run check` verdes.
 

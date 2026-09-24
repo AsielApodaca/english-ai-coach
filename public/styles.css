@@ -1900,12 +1900,17 @@ body.overlay-open {
 }
 
 .kw-ipa {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 14px;
+  font-family: var(--font-body);
+  font-size: 12.5px;
+  line-height: 15px;
   color: var(--muted);
   letter-spacing: 0;
-  opacity: 0.8;
+  opacity: 0.85;
+}
+
+.kw-ipa.approx {
+  font-style: italic;
+  opacity: 0.6;
 }
 
 .karaoke-book.no-ipa .kw-ipa {
@@ -2215,7 +2220,9 @@ body.overlay-open {
   color: var(--subtle);
 }
 
-/* Push-to-talk orb */
+/* Mic orb — pure status indicator (feature 105: hands-free turns). The orb is
+   never clickable; it reflects "your turn" (green pulse) and "listening"
+   (amber + rings). Disabled = waiting/off turns. */
 .orb {
   position: relative;
   width: 64px;
@@ -2228,7 +2235,7 @@ body.overlay-open {
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
+  cursor: default;
   transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease;
   box-shadow: 0 0 24px -6px rgba(16, 185, 129, 0.5);
 }
@@ -2237,24 +2244,34 @@ body.overlay-open {
   font-size: 26px;
 }
 
-.orb:hover {
-  transform: scale(1.04);
-}
-
 .orb:disabled {
   opacity: 0.35;
-  cursor: not-allowed;
+  cursor: default;
   box-shadow: none;
 }
 
 .orb.armed {
   box-shadow: 0 0 32px -6px rgba(16, 185, 129, 0.65);
+  animation: orb-armed-pulse 1.8s ease-in-out infinite;
+}
+
+/* Glow pulse while armed (feature 105 UX): signals "your turn — the coach is
+   listening to you" without needing the label. Removed while recording. */
+@keyframes orb-armed-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 24px -6px rgba(16, 185, 129, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 44px -4px rgba(16, 185, 129, 0.9);
+  }
 }
 
 .orb.recording {
   background: var(--amber);
   color: #1a1204;
   box-shadow: 0 0 40px -8px rgba(245, 158, 11, 0.7);
+  animation: none;
 }
 
 /* Expanding concentric rings while recording */

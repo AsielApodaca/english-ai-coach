@@ -8,6 +8,8 @@ export class BrowserSTT {
     this.rec = null;
     this.finalText = "";
     this.lastText = "";
+    /** True once the recognition started listening (set on `onstart`). */
+    this.started = false;
   }
 
   isSupported() {
@@ -24,7 +26,11 @@ export class BrowserSTT {
     rec.interimResults = true;
     this.finalText = "";
     this.lastText = "";
+    this.started = false;
 
+    rec.onstart = () => {
+      this.started = true;
+    };
     rec.onresult = (event) => {
       let interim = "";
       for (let i = event.resultIndex; i < event.results.length; i++) {

@@ -10,7 +10,6 @@ import {
   parseProfileSettings,
   profileSettings,
   readAutoAdvance,
-  readPrepTime,
   readSnapshotSettings,
 } from "../src/lib/settings.ts";
 import type { Profile } from "../src/lib/storage.ts";
@@ -22,7 +21,6 @@ import type { Profile } from "../src/lib/storage.ts";
 test("settings: defaults match spec 108", () => {
   assert.equal(DEFAULT_SETTINGS.rigor, "Balanceado");
   assert.equal(DEFAULT_SETTINGS.fillers, "Moderado");
-  assert.equal(DEFAULT_SETTINGS.prepTime, 3);
   assert.equal(DEFAULT_SETTINGS.provider, "auto");
   assert.equal(DEFAULT_SETTINGS.whisperModel, "small.en");
   assert.equal(DEFAULT_SETTINGS.voice, "auto");
@@ -89,7 +87,6 @@ test("settings: parseProfileSettings keeps only profile-persisted keys", () => {
     rigor: "Estricto",
     fillers: "Tolerancia Cero",
     adaptive: { enabled: false, up: 85, down: 60 },
-    prepTime: 5,
     provider: "gemini",
     personaName: "Google EM",
     targetLevel: "C1",
@@ -101,7 +98,6 @@ test("settings: parseProfileSettings keeps only profile-persisted keys", () => {
   assert.equal(parsed.rigor, "Estricto");
   assert.equal(parsed.fillers, "Tolerancia Cero");
   assert.deepEqual(parsed.adaptive, { enabled: false, up: 85, down: 60 });
-  assert.equal(parsed.prepTime, 5);
   assert.equal(parsed.provider, "gemini");
   assert.equal(parsed.personaName, "Google EM");
   assert.equal(parsed.targetLevel, "C1");
@@ -119,11 +115,10 @@ test("settings: profileSettings reads settings + legacy focusPhonemes", () => {
     vocabGaps: [],
     recentTopics: [],
     focusPhonemes: ["θ"],
-    settings: { rigor: "Flexible", prepTime: 0 },
+    settings: { rigor: "Flexible" },
   };
   const parsed = profileSettings(profile);
   assert.equal(parsed.rigor, "Flexible");
-  assert.equal(parsed.prepTime, 0);
   assert.deepEqual(parsed.focusPhonemes, ["θ"]);
 });
 
@@ -138,7 +133,6 @@ test("settings: readSnapshotSettings reads the captured overrides", () => {
       rigor: "Estricto",
       fillers: "Sensible",
       adaptive: { enabled: true, up: 92, down: 68 },
-      prepTime: 5,
       provider: "ollama",
       autoAdvance: true,
       passThreshold: 93,
@@ -148,7 +142,6 @@ test("settings: readSnapshotSettings reads the captured overrides", () => {
   assert.equal(s.rigor, "Estricto");
   assert.equal(s.fillers, "Sensible");
   assert.deepEqual(s.adaptive, { enabled: true, up: 92, down: 68 });
-  assert.equal(s.prepTime, 5);
   assert.equal(s.provider, "ollama");
   assert.equal(s.autoAdvance, true);
 });
@@ -159,13 +152,12 @@ test("settings: readSnapshotSettings reads the captured overrides", () => {
 
 test("settings: mergeSettings precedence snapshot > local > profile > defaults", () => {
   const merged = mergeSettings({
-    snapshot: { version: 1, overrides: { rigor: "Estricto", prepTime: 5, provider: "ollama" } },
-    local: { rigor: "Flexible", prepTime: 0, stt: "whisper" },
-    profile: { rigor: "Balanceado", fillers: "Sensible", prepTime: 3, provider: "gemini" },
+    snapshot: { version: 1, overrides: { rigor: "Estricto", provider: "ollama" } },
+    local: { rigor: "Flexible", stt: "whisper" },
+    profile: { rigor: "Balanceado", fillers: "Sensible", provider: "gemini" },
   });
-  // snapshot wins on rigor/prepTime/provider
+  // snapshot wins on rigor/provider
   assert.equal(merged.rigor, "Estricto");
-  assert.equal(merged.prepTime, 5);
   assert.equal(merged.provider, "ollama");
   // local wins on stt (snapshot has none)
   assert.equal(merged.stt, "whisper");
@@ -187,7 +179,7 @@ test("settings: mergeSettings deep-merges adaptive", () => {
 });
 
 // ---------------------------------------------------------------------------
-// buildSettingsSnapshot — always writes the 7 training keys
+// buildSettingsSnapshot — always writes the training keys
 // ---------------------------------------------------------------------------
 
 test("settings: buildSettingsSnapshot writes all training keys", () => {
@@ -196,7 +188,6 @@ test("settings: buildSettingsSnapshot writes all training keys", () => {
     rigor: "Estricto",
     fillers: "Tolerancia Cero",
     adaptive: { enabled: false, up: 88, down: 55 },
-    prepTime: 5,
     provider: "gemini",
     autoAdvance: true,
   });
@@ -204,7 +195,6 @@ test("settings: buildSettingsSnapshot writes all training keys", () => {
   assert.equal(snapshot.overrides.rigor, "Estricto");
   assert.equal(snapshot.overrides.fillers, "Tolerancia Cero");
   assert.deepEqual(snapshot.overrides.adaptive, { enabled: false, up: 88, down: 55 });
-  assert.equal(snapshot.overrides.prepTime, 5);
   assert.equal(snapshot.overrides.provider, "gemini");
   assert.equal(snapshot.overrides.autoAdvance, true);
   assert.equal(snapshot.overrides.passThreshold, RIGOR_THRESHOLDS.Estricto);
@@ -218,16 +208,8 @@ test("settings: buildSettingsSnapshot derives passThreshold from rigor", () => {
 });
 
 // ---------------------------------------------------------------------------
-// readPrepTime / readAutoAdvance
+// readAutoAdvance
 // ---------------------------------------------------------------------------
-
-test("settings: readPrepTime falls back to the default", () => {
-  assert.equal(readPrepTime(undefined), 3);
-  assert.equal(readPrepTime({ version: 1, overrides: {} }), 3);
-  assert.equal(readPrepTime({ version: 1, overrides: { prepTime: 0 } }), 0);
-  assert.equal(readPrepTime({ version: 1, overrides: { prepTime: 5 } }), 5);
-  assert.equal(readPrepTime({ version: 1, overrides: { prepTime: 99 } }), 3);
-});
 
 test("settings: readAutoAdvance falls back to the default", () => {
   assert.equal(readAutoAdvance(undefined), false);
@@ -250,12 +232,10 @@ test("settings: applyProfileSettings persists profile keys and preserves the res
   };
   const updated = applyProfileSettings(profile, {
     rigor: "Estricto",
-    prepTime: 5,
     provider: "ollama",
     focusPhonemes: ["θ", "ð"],
   });
   assert.equal(updated.settings?.rigor, "Estricto");
-  assert.equal(updated.settings?.prepTime, 5);
   assert.equal(updated.settings?.provider, "ollama");
   assert.deepEqual(updated.focusPhonemes, ["θ", "ð"]);
   assert.equal(updated.level, "B2");
@@ -268,10 +248,9 @@ test("settings: applyProfileSettings is idempotent (missing fields keep previous
     weakErrors: {},
     vocabGaps: [],
     recentTopics: [],
-    settings: { rigor: "Flexible", prepTime: 0, provider: "gemini" },
+    settings: { rigor: "Flexible", provider: "gemini" },
   };
-  const updated = applyProfileSettings(profile, { prepTime: 5 });
+  const updated = applyProfileSettings(profile, { provider: "ollama" });
   assert.equal(updated.settings?.rigor, "Flexible");
-  assert.equal(updated.settings?.prepTime, 5);
-  assert.equal(updated.settings?.provider, "gemini");
+  assert.equal(updated.settings?.provider, "ollama");
 });
