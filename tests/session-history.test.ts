@@ -53,7 +53,7 @@ function makeSession(id: string, updatedAt: string, status: SessionStatus = "com
     createdAt: updatedAt,
     updatedAt,
     config,
-    provider: "zen",
+    provider: "gemini",
     questions: [],
     title: fallbackTitle(config.topicPrompt),
   };
@@ -133,7 +133,7 @@ test("history: toSessionSummary extracts only light fields (no topicPrompt, no q
   assert.equal(summary.id, "p");
   assert.equal(summary.title, practiced.title);
   assert.equal(summary.level, "B2");
-  assert.equal(summary.provider, "zen");
+  assert.equal(summary.provider, "gemini");
   assert.equal(summary.status, "completed");
   assert.equal(summary.updatedAt, practiced.updatedAt);
   assert.equal(summary.score, 87);
@@ -302,7 +302,7 @@ test("session/start: contextBucket resolves files from the previous session and 
   const prevId = s.createSession(makeConfig());
   const textRef = s.saveContextText(prevId, { name: "job.md", size: 9, kind: "md" }, "the job spec");
 
-  const res = await handleSessionStartRequest(s, [fake("zen", FAKE_FIRST), fake("zen", FAKE_TITLE)], {
+  const res = await handleSessionStartRequest(s, [fake("amber", FAKE_FIRST), fake("amber", FAKE_TITLE)], {
     topicPrompt: "Role",
     level: "B2",
     contextBucket: prevId,

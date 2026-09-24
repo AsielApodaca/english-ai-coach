@@ -75,7 +75,6 @@ app.get("/api/health", async (_req, res) => {
     providers: Object.fromEntries(status),
     primary: primaryProviderId,
     notes: {
-      zen: "OpenCode Zen free-tier models only work inside the OpenCode app; from custom apps use Gemini or Cloudflare.",
       gemini: "Set GEMINI_API_KEY (free from https://aistudio.google.com/apikey).",
       cloudflare: "Uses CLOUDFLARE_API_TOKEN (+ account id auto-discovered from your opencode config).",
     },

@@ -84,7 +84,7 @@ function makeSession(
         },
       },
     },
-    { title: "EM Interview", provider: "zen" },
+    { title: "EM Interview", provider: "amber" },
   );
   const session = storage.loadSession(id)!;
   const count = opts.count ?? 0;
@@ -208,14 +208,14 @@ test("continuous: buildContextSummary includes topic and last exchanges", () => 
 
 test("next-question: missing sessionId → 400", async () => {
   const s = createStorage(dir);
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], {});
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], {});
   assert.equal(res.status, 400);
   assert.match(res.json.error as string, /sessionId/);
 });
 
 test("next-question: unknown session → 404", async () => {
   const s = createStorage(dir);
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], { sessionId: "nope" });
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], { sessionId: "nope" });
   assert.equal(res.status, 404);
 });
 
@@ -224,7 +224,7 @@ test("next-question: completed session → 409", async () => {
   const session = makeSession(s, { count: 1, scores: [80] });
   session.status = "completed";
   s.saveSession(session);
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], { sessionId: session.id });
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], { sessionId: session.id });
   assert.equal(res.status, 409);
 });
 
@@ -235,7 +235,7 @@ test("next-question: completed session → 409", async () => {
 test("next-question: last question without eval is returned idempotently", async () => {
   const s = createStorage(dir);
   const session = makeSession(s, { count: 2, scores: [80], lastEvalNull: true });
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], { sessionId: session.id });
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], { sessionId: session.id });
   assert.equal(res.status, 200);
   assert.equal(res.json.idempotent, true);
   assert.equal((res.json.question as { q: string }).q, "Question 2");
@@ -250,7 +250,7 @@ test("next-question: last question without eval is returned idempotently", async
 test("next-question: generates Q_n+1 and applies the adaptive step", async () => {
   const s = createStorage(dir);
   const session = makeSession(s, { level: "B1", count: 3, scores: [95, 92, 90] });
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], { sessionId: session.id });
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], { sessionId: session.id });
 
   assert.equal(res.status, 200);
   const json = res.json as {
@@ -262,7 +262,7 @@ test("next-question: generates Q_n+1 and applies the adaptive step", async () =>
   };
   assert.equal(json.question.q, "How did you handle a conflict inside your team?");
   assert.equal(json.question.fragments.length, 2);
-  assert.equal(json.provider, "zen");
+  assert.equal(json.provider, "amber");
   assert.equal(json.adjustment, "Dificultad sube a B2 · rigor Estricto");
   assert.equal(json.level, "B2");
   assert.equal(json.rigor, "Estricto");
@@ -284,7 +284,7 @@ test("next-question: generates Q_n+1 and applies the adaptive step", async () =>
 test("next-question: no adjustment when the rolling average is in the middle band", async () => {
   const s = createStorage(dir);
   const session = makeSession(s, { level: "B1", count: 3, scores: [70, 75, 80] });
-  const res = await handleNextQuestionRequest(s, [fake("zen", FAKE_NEXT)], { sessionId: session.id });
+  const res = await handleNextQuestionRequest(s, [fake("amber", FAKE_NEXT)], { sessionId: session.id });
   assert.equal(res.status, 200);
   assert.equal(res.json.adjustment, null);
   assert.equal(res.json.level, "B1");
@@ -301,7 +301,7 @@ test("next-question: no adjustment when the rolling average is in the middle ban
 test("next-question: LLM failure → 502, session stays active and unchanged", async () => {
   const s = createStorage(dir);
   const session = makeSession(s, { count: 3, scores: [95, 92, 90] });
-  const res = await handleNextQuestionRequest(s, [failing("zen"), failing("gemini")], { sessionId: session.id });
+  const res = await handleNextQuestionRequest(s, [failing("amber"), failing("gemini")], { sessionId: session.id });
   assert.equal(res.status, 502);
   assert.ok((res.json.error as string).length > 0);
   const stored = s.loadSession(session.id)!;

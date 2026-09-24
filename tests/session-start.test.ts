@@ -50,7 +50,7 @@ function scriptedFake(calls: string[]): { candidate: Candidate; messages: unknow
   return {
     messages,
     candidate: {
-      id: "zen" as never,
+      id: "amber" as never,
       async available() {
         return true;
       },
@@ -93,7 +93,7 @@ function sessionFiles(): string[] {
 
 test("session/start: missing topicPrompt → 400", async () => {
   const s = createStorage(dir);
-  const res = await handleSessionStartRequest(s, [fake("zen", FAKE_FIRST)], { level: "B2" });
+  const res = await handleSessionStartRequest(s, [fake("amber", FAKE_FIRST)], { level: "B2" });
   assert.equal(res.status, 400);
   assert.match(res.json.error as string, /topicPrompt/);
   assert.deepEqual(sessionFiles(), []);
@@ -101,14 +101,14 @@ test("session/start: missing topicPrompt → 400", async () => {
 
 test("session/start: blank topicPrompt → 400", async () => {
   const s = createStorage(dir);
-  const res = await handleSessionStartRequest(s, [fake("zen", FAKE_FIRST)], { topicPrompt: "   ", level: "B2" });
+  const res = await handleSessionStartRequest(s, [fake("amber", FAKE_FIRST)], { topicPrompt: "   ", level: "B2" });
   assert.equal(res.status, 400);
   assert.deepEqual(sessionFiles(), []);
 });
 
 test("session/start: invalid level → 400", async () => {
   const s = createStorage(dir);
-  const res = await handleSessionStartRequest(s, [fake("zen", FAKE_FIRST)], { topicPrompt: "Role", level: "C3" });
+  const res = await handleSessionStartRequest(s, [fake("amber", FAKE_FIRST)], { topicPrompt: "Role", level: "C3" });
   assert.equal(res.status, 400);
   assert.match(res.json.error as string, /level/i);
   assert.deepEqual(sessionFiles(), []);
@@ -116,7 +116,7 @@ test("session/start: invalid level → 400", async () => {
 
 test("session/start: missing level → 400", async () => {
   const s = createStorage(dir);
-  const res = await handleSessionStartRequest(s, [fake("zen", FAKE_FIRST)], { topicPrompt: "Role" });
+  const res = await handleSessionStartRequest(s, [fake("amber", FAKE_FIRST)], { topicPrompt: "Role" });
   assert.equal(res.status, 400);
   assert.deepEqual(sessionFiles(), []);
 });
@@ -152,7 +152,7 @@ test("session/start: creates a v2 session and persists the first question", asyn
   assert.deepEqual(session.config.phonemes, ["θ", "ð"]);
   assert.deepEqual(session.config.contextFiles, []);
   assert.equal(session.title, "Leading a Difficult Project");
-  assert.equal(session.provider, "zen");
+  assert.equal(session.provider, "amber");
   assert.equal(session.questions.length, 1);
   assert.equal(session.questions[0].q, firstQuestion.q);
   assert.equal(session.questions[0].answer, firstQuestion.answer);
@@ -223,7 +223,7 @@ test("session/start: missing context text is skipped defensively", async () => {
 
 test("session/start: LLM failure → 502 and no session file", async () => {
   const s = createStorage(dir);
-  const res = await handleSessionStartRequest(s, [failing("zen"), failing("gemini")], {
+  const res = await handleSessionStartRequest(s, [failing("amber"), failing("gemini")], {
     topicPrompt: "Role",
     level: "B2",
   });

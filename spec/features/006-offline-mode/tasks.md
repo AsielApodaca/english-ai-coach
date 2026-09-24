@@ -2,7 +2,7 @@
 
 ## Config / providers
 
-- [ ] `OFFLINE_MODE=1`: `buildProviders` excluye zen/gemini/cloudflare; cadena = `[ollama]`.
+- [ ] `OFFLINE_MODE=1`: `buildProviders` excluye gemini/cloudflare; cadena = `[ollama]`.
 - [ ] `.env.example` documenta `OFFLINE_MODE=1` y stack local.
 - [ ] `/api/health` con `offline: true` y `stack: { llm, stt, tts }`; sin instrucciones web.
 

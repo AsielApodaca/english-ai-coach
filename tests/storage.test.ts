@@ -44,7 +44,7 @@ function makeSession(id: string, updatedAt: string, status: SessionStatus = "com
     createdAt: updatedAt,
     updatedAt,
     config,
-    provider: "zen",
+    provider: "gemini",
     questions: [],
     title: fallbackTitle(config.topicPrompt),
   };
@@ -93,11 +93,11 @@ test("storage: createSession writes an active session and returns its id", () =>
 
 test("storage: createSession uses the provided title and provider", () => {
   const s = createStorage(dir);
-  const id = s.createSession(makeConfig(), { title: "Junior SWE First Interview", provider: "zen" });
+  const id = s.createSession(makeConfig(), { title: "Junior SWE First Interview", provider: "gemini" });
   const session = s.loadSession(id);
   assert.ok(session);
   assert.equal(session.title, "Junior SWE First Interview");
-  assert.equal(session.provider, "zen");
+  assert.equal(session.provider, "gemini");
 });
 
 test("storage: saveSession is idempotent and replaces the whole file", () => {

@@ -9,7 +9,6 @@ Monolito pequeño en Node/Express con feature-free frontend. El LLM se usa para 
 1. Scaffolding: `package.json`, `tsconfig.json`, `.env.example`, `.gitignore`, `scripts/setup.sh` (setup Whisper opcional).
 2. `src/lib/storage.ts` — carga/guarda `data/profile.json` y `data/sessions/*.json` (JSON atómico: escribir a tmp + rename).
 3. `src/lib/providers/*` — interfaz `chatJSON(req)`, implementaciones:
-   - `zen.ts`: OpenAI-compatible, llave desde `~/.local/share/opencode/auth.json` o `ZEN_API_KEY`, modelo `big-pickle`.
    - `gemini.ts`: REST `generateContent`, modelo `gemini-2.5-flash`, llave `GEMINI_API_KEY`.
    - `cloudflare.ts`: REST Workers AI, `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`, modelo free-tier.
    - `ollama.ts`: OpenAI-compatible local.

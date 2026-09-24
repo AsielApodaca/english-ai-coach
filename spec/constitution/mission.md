@@ -20,7 +20,7 @@ Asistente web local que entrena inglés técnico hablado como una conversación 
 - **Naturalidad conversacional** — la IA actúa como un interlocutor humano: turnos fluidos, contexto, correcciones sobre la marcha; no como un reproductor "dice la frase / tú la repites".
 - **Precisión fonética** — la pronunciación se evalúa por análisis de audio (fonemas, estrés, ritmo, entonación) y la transcripción se usa como complemento, no como única fuente.
 - **Costo cero** — solo se usan LLMs, STT y TTS gratuitos o locales; nada de suscripciones.
-- **Cero fricción** — la app debe funcionar con la configuración ya existente del equipo (llave de OpenCode Zen) sin pasos extra para el caso principal.
+- **Cero fricción** — la app debe funcionar solo con LLMs gratuitos (Gemini o Cloudflare) sin pasos extra para el caso principal.
 - **Memoria como primera clase** — ninguna interacción importante ignora el historial; el perfil del aprendiz se incluye en generación y evaluación.
 - **Local y privado** — los datos de práctica viven en `data/` (JSON local), fuera de git; el audio se procesa en local y no se persiste.
 - **Extensible y modular** — los componentes son intercambiables (proveedores LLM, STT, motor fonético) y cada módulo puede usar la tecnología más adecuada (p. ej. Node para la app, Python para fonética/audio).

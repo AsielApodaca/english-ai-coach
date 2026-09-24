@@ -8,13 +8,13 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - **Conversación hablada** — subtítulos en vivo etiquetados Coach/You, palabras faltantes resaltadas en la frase del coach, extras resaltadas en lo que dijiste, y feedback hablado (voz mejorable; roadmap → feature 007).
 - **Evaluación híbrida** — score 0-100 por word-match determinista + correcciones del LLM (grammar, word-choice, fluency, pronunciation).
 - **Memoria** — el perfil del aprendiz (nivel, debilidades, temas recientes, next step) se inyecta en cada generación/evaluación.
-- **Multi-proveedor LLM con fallback** — OpenCode Zen, Gemini, Cloudflare Workers AI y Ollama local.
+- **Multi-proveedor LLM con fallback** — Gemini, Cloudflare Workers AI y Ollama local.
 - **STT** — whisper.cpp local por defecto cuando está instalado (100% offline/privado); Chrome Web Speech como fallback automático.
 
 ## Requisitos
 
 - macOS (o Linux), **Node ≥ 23.4** (type stripping nativo, sin build).
-- Sin suscripciones: un API key de LLM gratis (Gemini o Cloudflare) o una llave de OpenCode Zen.
+- Sin suscripciones: un API key de LLM gratis (Gemini o Cloudflare).
 
 ## Puesta en marcha
 
@@ -32,7 +32,7 @@ Abre http://localhost:3000.
 
 | Variable | Default | Descripción |
 | --- | --- | --- |
-| `LLM_PROVIDER` | `cloudflare` | `cloudflare` · `gemini` · `zen` · `ollama` |
+| `LLM_PROVIDER` | `cloudflare` | `cloudflare` · `gemini` · `ollama` |
 | `GEMINI_API_KEY` | – | Free-tier de Google AI Studio |
 | `CLOUDFLARE_API_TOKEN` | – | Workers AI (account id auto-descubierto) |
 | `OLLAMA_MODEL` | `llama3.1` | Modelo Ollama local |

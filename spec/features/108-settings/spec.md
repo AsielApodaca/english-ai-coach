@@ -35,7 +35,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 ### 3 · Modelo IA (`hidden-model.html`, en términos del stack real)
 | Setting | Tipo | Persiste | Default |
 | --- | --- | --- | --- |
-| Proveedor LLM primario (zen/gemini/cloudflare/ollama) | select | profile `settings.provider` | auto (`001`) |
+| Proveedor LLM primario (gemini/cloudflare/ollama) | select | profile `settings.provider` | auto (`001`) |
 | Modelo whisper (tiny/base/small/medium/large) | select | localStorage `engcoach.whisperModel` | `002` |
 | Motor TTS (piper/edge/speechSynthesis) + voz | select | localStorage `engcoach.voice` | auto (`007`) |
 | Modo sin conexión (OFFLINE_MODE excluye proveedores web) | toggle | env + UI hint | off |

@@ -1,6 +1,5 @@
 import type { ChatMessage, CompleteOptions, Provider, ProviderId } from "./types.ts";
 import { ProviderError } from "./types.ts";
-import { createZenProvider } from "./zen.ts";
 import { createGeminiProvider } from "./gemini.ts";
 import { createCloudflareProvider } from "./cloudflare.ts";
 import { createOllamaProvider } from "./ollama.ts";
@@ -9,7 +8,6 @@ export * from "./types.ts";
 
 export interface Env extends Record<string, string | undefined> {
   LLM_PROVIDER?: string;
-  ZEN_API_KEY?: string;
   GEMINI_API_KEY?: string;
   CLOUDFLARE_API_TOKEN?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
@@ -20,7 +18,6 @@ export interface Env extends Record<string, string | undefined> {
 /** Build the provider registry from environment/config. */
 export function buildProviders(env: Env): Provider[] {
   return [
-    createZenProvider(env.ZEN_API_KEY),
     createGeminiProvider(env.GEMINI_API_KEY),
     createCloudflareProvider(env.CLOUDFLARE_API_TOKEN, env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_MODEL),
     createOllamaProvider(undefined, env.OLLAMA_MODEL),
@@ -50,6 +47,13 @@ export async function providerStatus(providers: Provider[]): Promise<Map<string,
  * Try completing with a list of candidate providers (primary first). Falls back
  * on checkable failures (unavailable / canRetry). Skips providers that are not
  * configured. Throws a combined ProviderError if every candidate fails.
+ *
+ * Every provider call is bounded by a generous safety timeout (default 5min,
+ * override with LLM_TIMEOUT_MS) meant ONLY to catch a true infinite hang and
+ * let the chain try the next provider. It is NOT a fast lane: a slow-but-alive
+ * provider (common on free tiers) is allowed to finish, because cutting it off
+ * and failing over to unconfigured providers would turn a slow start into a
+ * hard 502.
  */
 export async function completeWithFallback(
   candidates: Pick<Provider, "id" | "available" | "complete">[],
@@ -57,13 +61,15 @@ export async function completeWithFallback(
   options: CompleteOptions = {},
 ): Promise<{ provider: string; text: string }> {
   const errors: string[] = [];
+  const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 300_000) || 300_000;
+  const signal = options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
   for (const candidate of candidates) {
     try {
       if (!(await candidate.available())) {
         errors.push(`${candidate.id}: not configured`);
         continue;
       }
-      const text = await candidate.complete(messages, options);
+      const text = await candidate.complete(messages, { ...options, signal });
       return { provider: candidate.id, text };
     } catch (err) {
       const e = err instanceof ProviderError ? err : new ProviderError(String(err));

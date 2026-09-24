@@ -16,7 +16,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 
 ## Estructura del proyecto
 - `src/server.ts` — Express: sirve `public/` y expone `/api/*`.
-- `src/lib/providers/` — capa LLM (zen, gemini, cloudflare, ollama) + registry con fallback.
+- `src/lib/providers/` — capa LLM (gemini, cloudflare, ollama) + registry con fallback.
 - `src/lib/practice.ts` — generación de sets de práctica y evaluación híbrida (determinista + LLM).
 - `src/lib/learner.ts` — memoria: perfil, progreso, próximo paso.
 - `src/lib/storage.ts` — persistencia JSON de `data/profile.json` y `data/sessions/*.json`.
@@ -31,7 +31,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - El código escrito debe llevar documentación (comentarios/JSDoc en funciones no triviales); la documentación debe ser en inglés.
 - Toda salida de LLM se asume texto ≥ JSON; extraer JSON robusto (tolera code fences y ruido) antes de usar.
 - Errores de red LLM: envolver en `ProviderError` y dejar que la cadena de fallback pruebe el siguiente proveedor.
-- La llave de Zen se lee de `~/.local/share/opencode/auth.json` (fallback: `ZEN_API_KEY` env). Nunca hardcodear llaves.
+- La llave de Cloudflare se auto-descubre desde `~/.local/share/opencode/auth.json` (fallback: `CLOUDFLARE_API_TOKEN` env) y la de Gemini desde `GEMINI_API_KEY`. Nunca hardcodear llaves.
 - Peticiones a `/api/*` con body JSON; errores como `{ error: string }` con status HTTP coherente.
 
 ## No hagas

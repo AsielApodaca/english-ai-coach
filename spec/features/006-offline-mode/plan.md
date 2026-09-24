@@ -7,7 +7,7 @@ La arquitectura ya es módulos intercambiables con degradación (providers, STT,
 ## Componentes
 
 1. **Env / config** (`src/lib/providers/index.ts` + `.env`):
-   - `OFFLINE_MODE=1` → `buildProviders` omite zen/gemini/cloudflare; la cadena queda solo `[ollama]`.
+   - `OFFLINE_MODE=1` → `buildProviders` omite gemini/cloudflare; la cadena queda solo `[ollama]`.
    - Sin `OFFLINE_MODE`, comportamiento actual (todo disponible según claves).
 2. **Health** (`/api/health`): con `OFFLINE_MODE`, status solo de `ollama` + `whisper` + `piper`; agrega campos `offline: true` y `stack: { llm, stt, tts }` de disponibilidad; `notes` sin instrucciones de red.
 3. **TTS **: depender de 007 — `speak()` usa Piper si está listo; en offline, si Piper falta, degrada a `speechSynthesis` del navegador (local, no red) con aviso en Settings.

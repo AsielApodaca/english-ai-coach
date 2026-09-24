@@ -12,7 +12,6 @@ import { getLocal, setLocal } from "./local.js";
 
 const PROVIDER_OPTIONS = [
   { value: "auto", label: "Auto" },
-  { value: "zen", label: "Zen (local)" },
   { value: "gemini", label: "Gemini" },
   { value: "cloudflare", label: "Cloudflare" },
   { value: "ollama", label: "Ollama (local)" },

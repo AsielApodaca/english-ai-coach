@@ -2,7 +2,7 @@
 
 - [x] Scaffolding: package.json, tsconfig, .env.example, .gitignore, scripts/setup.sh
 - [x] storage.ts: perfil + sesiones JSON (escritura atómica)
-- [x] providers: zen.ts, gemini.ts, cloudflare.ts, ollama.ts, index.ts (extractJSON + fallback)
+- [x] providers: gemini.ts, cloudflare.ts, ollama.ts, index.ts (extractJSON + fallback). zen.ts se retiró: sus modelos free-tier solo funcionan dentro de la app OpenCode y no pueden usarse desde la app (ver README).
 - [x] practice.ts: generación (JSON) + evaluación híbrida (word-match + LLM)
 - [x] learner.ts: resumen del aprendiz + next step
 - [x] whisper.ts: subprocess whisper-cli + detección de disponibilidad

@@ -11,7 +11,6 @@
 ### Servicios externos
 
 - **LLM (multi-proveedor, $0):**
-  - OpenCode Zen — modelo `big-pickle`, API OpenAI-compatible, llave en `~/.local/share/opencode/auth.json` (fallback: `ZEN_API_KEY`)
   - Google Gemini — `gemini-2.5-flash` free tier, llave en `GEMINI_API_KEY`
   - Cloudflare Workers AI — free tier, `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
   - Ollama local — `http://localhost:11434/v1/chat/completions` (opcional offline)
@@ -34,7 +33,6 @@
 
 - `src/server.ts` — Express: sirve `public/`, expone `/api/*`.
 - `src/lib/providers/index.ts` — registro de proveedores, selección y cadena de fallback.
-- `src/lib/providers/zen.ts` — cliente OpenAI-compatible (big-pickle), llave desde auth.json.
 - `src/lib/providers/gemini.ts` — cliente Generative Language API.
 - `src/lib/providers/cloudflare.ts` — cliente Workers AI.
 - `src/lib/providers/ollama.ts` — cliente Ollama local.
