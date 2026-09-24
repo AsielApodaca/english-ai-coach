@@ -38,6 +38,7 @@ export interface SessionStartDeps {
   loadProfile(): Profile;
   loadAllSessions(): SessionV2[];
   loadContextText(bucket: string, textRef: string): string | undefined;
+  copyContextText(fromBucket: string, toBucket: string, textRef: string): boolean;
   createSession(config: SessionConfig, opts?: CreateSessionOptions): string;
   loadSession(id: string): SessionV2 | undefined;
   saveSession(session: SessionV2): void;
@@ -65,13 +66,18 @@ export async function handleSessionStartRequest(
   candidates: Candidate[],
   body: unknown,
 ): Promise<SessionStartResponse> {
-  const { topicPrompt, level, contextFiles, accent, focusPhonemes, settings } = (body ?? {}) as Record<string, unknown>;
+  const { topicPrompt, level, contextFiles, accent, focusPhonemes, settings, contextBucket } = (body ?? {}) as Record<string, unknown>;
   if (typeof topicPrompt !== "string" || topicPrompt.trim().length === 0) {
     return { status: 400, json: { error: "topicPrompt is required." } };
   }
   if (!isLevel(level)) {
     return { status: 400, json: { error: "Invalid level. Expected one of: A1, A2, B1, B2, C1, C2." } };
   }
+
+  // Source bucket for attached context files (feature 109 "Practicar de
+  // nuevo"): the previous session id when prefilled from a completed session,
+  // otherwise the "draft" bucket used by the CU1 dropzone.
+  const sourceBucket = typeof contextBucket === "string" && contextBucket ? contextBucket : "draft";
 
   const profile = deps.loadProfile();
   const sessions = deps.loadAllSessions();
@@ -84,7 +90,7 @@ export async function handleSessionStartRequest(
   const mergedSettings = mergeSettings({ local: localSettings, profile: profileSettings(profile) });
   const settingsSnapshot = buildSettingsSnapshot(mergedSettings);
 
-  // Resolve attached context files to their extracted text (draft bucket) and
+  // Resolve attached context files to their extracted text (source bucket) and
   // build the DOCUMENT CONTEXT block (feature 104). Files whose text is missing
   // are skipped defensively — they only enrich the prompt.
   const files: ExtractedFile[] = [];
@@ -93,7 +99,7 @@ export async function handleSessionStartRequest(
       if (!entry || typeof entry !== "object") continue;
       const f = entry as Partial<ContextFileRef>;
       if (typeof f.textRef !== "string" || !f.textRef) continue;
-      const text = deps.loadContextText("draft", f.textRef);
+      const text = deps.loadContextText(sourceBucket, f.textRef);
       if (text === undefined) continue;
       files.push({
         name: typeof f.name === "string" && f.name ? f.name : "file",
@@ -127,6 +133,11 @@ export async function handleSessionStartRequest(
     };
 
     const sessionId = deps.createSession(config, { title, provider });
+    // Make the new session self-contained: duplicate the resolved context
+    // texts into its own bucket (feature 109 "Practicar de nuevo").
+    for (const f of files) {
+      deps.copyContextText(sourceBucket, sessionId, f.textRef);
+    }
     const session = deps.loadSession(sessionId);
     if (session) {
       session.questions = [

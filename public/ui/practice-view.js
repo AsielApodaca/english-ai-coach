@@ -166,7 +166,7 @@ function cancelFlow() {
   store?.set({ activeQuestion: null });
 }
 
-/** Load the session payload and run the CU2 flow. */
+/** Load the session payload and run the CU2 flow (or render the review). */
 async function startFlow(sessionId) {
   const token = ++flowToken;
   root.innerHTML = "";
@@ -184,17 +184,6 @@ async function startFlow(sessionId) {
   lastWavBlob = null;
 
   tts = new BrowserTTS();
-  dock = createAudioDock(
-    root,
-    {
-      onRecordStart: () => captureHandlers?.onRecordStart(),
-      onRecordEnd: () => captureHandlers?.onRecordEnd(),
-      onRetry: () => tts.stop(),
-      onFinish: () => finishSession(),
-    },
-    { rate: Number(getLocal("tempo", 1)) },
-  );
-  dock.startVisualizer();
 
   try {
     const healthRes = await fetch("/api/health").then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -204,7 +193,27 @@ async function startFlow(sessionId) {
     await loadSessionPayload(sessionId, token);
     if (token !== flowToken) return;
     applyLiveSettings();
+
+    // Completed sessions open in read-only review mode (feature 109): no
+    // audio dock, no TTS, no recording — just the transcript with colors.
+    if (session.status === "completed") {
+      renderReview();
+      return;
+    }
+
     store.set({ activeQuestion: session.questions.length });
+
+    dock = createAudioDock(
+      root,
+      {
+        onRecordStart: () => captureHandlers?.onRecordStart(),
+        onRecordEnd: () => captureHandlers?.onRecordEnd(),
+        onRetry: () => tts.stop(),
+        onFinish: () => finishSession(),
+      },
+      { rate: Number(getLocal("tempo", 1)) },
+    );
+    dock.startVisualizer();
 
     renderHeader();
     await runFlow(token);
@@ -239,20 +248,47 @@ async function loadSessionPayload(sessionId, token) {
 // ---------------------------------------------------------------------------
 
 async function runFlow(token) {
-  // INTRO — coach explains the dynamics (first question only).
-  setPhase("intro");
-  await speak(introText, token);
-  if (token !== flowToken) return;
+  // INTRO — coach explains the dynamics (first question only). Resumed
+  // sessions (feature 109) skip it: they continue at the exact checkpoint.
+  const resuming = isResume();
+  if (!resuming) {
+    setPhase("intro");
+    await speak(introText, token);
+    if (token !== flowToken) return;
+  }
 
-  await runQuestionLoop(token);
+  await runQuestionLoop(token, { resume: resuming });
+}
+
+/**
+ * True when the session has progress to resume (feature 109): more than one
+ * question, or the last question already has attempts / a full answer / an
+ * evaluation. A fresh session starts from the intro.
+ */
+function isResume() {
+  const q = session?.questions?.at(-1);
+  return (
+    (session?.questions?.length ?? 0) > 1 ||
+    Boolean(q && (q.fragments.some((f) => f.attempts.length > 0) || q.fullAttempt || q.eval))
+  );
 }
 
 /**
  * One question pass: question → prep → model → explaining → fragments →
  * full → done. Reused by `nextQuestion()` for the continuous session
- * (feature 107), skipping the intro.
+ * (feature 107), skipping the intro. When `resume` is true (feature 109) the
+ * fragment loop starts at the first unpassed fragment instead of fragment 0.
  */
-async function runQuestionLoop(token) {
+async function runQuestionLoop(token, { resume = false } = {}) {
+  // A question whose eval is already checkpointed is done: resumed sessions
+  // land directly on the done panel (offer the next question).
+  if (question.eval) {
+    setPhase("done");
+    renderDone({ finished: false });
+    await checkpoint({ status: "active" });
+    return;
+  }
+
   // QUESTION — shown and read aloud.
   setPhase("question");
   renderQuestion();
@@ -277,7 +313,12 @@ async function runQuestionLoop(token) {
   if (token !== flowToken) return;
 
   // LOOP — one pass per fragment; failed attempts retry the same fragment.
+  // Resumed sessions continue from the first fragment that did not pass.
   let fi = 0;
+  if (resume) {
+    const firstUnpassed = question.fragments.findIndex((f) => !f.passed);
+    fi = firstUnpassed === -1 ? fragmentCount : firstUnpassed;
+  }
   while (fi < fragmentCount) {
     fragmentIndex = fi;
     attemptCount = 0;
@@ -909,6 +950,128 @@ function renderError(message) {
       h("button", { type: "button", class: "btn ghost", onclick: () => navigate("#/") }, "Volver a Config"),
     ]),
   );
+}
+
+// ---------------------------------------------------------------------------
+// Review mode (feature 109): read-only view of a completed session
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a completed session in read-only review mode: every question with
+ * its model answer, the colored attempts (words[] from 106), the full-answer
+ * attempt and the consolidated evaluation. No recording, no TTS. Offers
+ * "Practicar de nuevo" (prefills the config from this session) and
+ * "Volver a Config".
+ */
+function renderReview() {
+  root.innerHTML = "";
+  const head = h("div", { class: "practice-head" }, [
+    h("div", { class: "practice-title" }, escapeHtml(session.title || "Practice")),
+    h("div", { class: "status-pill review-pill" }, [
+      h("span", { class: "status-dot", "aria-hidden": "true" }),
+      h("span", { class: "status-label" }, "COMPLETED"),
+    ]),
+  ]);
+  const list = h("div", { class: "review-list" });
+  for (const q of session.questions ?? []) {
+    list.appendChild(renderReviewQuestion(q));
+  }
+  const actions = h("div", { class: "review-actions" }, [
+    h("button", { type: "button", class: "btn start-btn", onclick: () => practiceAgain() }, [
+      h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "refresh"),
+      "Practicar de nuevo",
+    ]),
+    h("button", { type: "button", class: "btn ghost", onclick: () => navigate("#/") }, [
+      h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "arrow_back"),
+      "Volver a Config",
+    ]),
+  ]);
+  root.append(head, list, actions);
+}
+
+/** One review card: question, model answer, fragment attempts, eval. */
+function renderReviewQuestion(q) {
+  const card = h("div", { class: "review-question" }, [
+    h("div", { class: "coach-transcript" }, [
+      h("span", { class: "coach-label" }, "Coach:"),
+      h("span", { class: "coach-text" }, escapeHtml(q.q)),
+    ]),
+    h("div", { class: "review-answer" }, [
+      h("span", { class: "review-label" }, "Model answer"),
+      h("div", { class: "review-text" }, escapeHtml(q.answer)),
+    ]),
+  ]);
+
+  for (const f of q.fragments ?? []) {
+    const frag = h("div", { class: "review-fragment" }, [
+      h("div", { class: "review-frag-text" }, coloredWords(f.text, f.attempts.at(-1)?.words ?? [])),
+    ]);
+    for (const a of f.attempts ?? []) {
+      frag.appendChild(
+        h("div", { class: "review-attempt", dataset: { passed: String(f.passed) } }, [
+          h("span", { class: "review-attempt-score" }, `${a.score}%`),
+          coloredWords(a.text, a.words),
+        ]),
+      );
+    }
+    card.appendChild(frag);
+  }
+
+  if (q.fullAttempt) {
+    card.appendChild(
+      h("div", { class: "review-full" }, [
+        h("div", { class: "review-label" }, "Full answer attempt"),
+        h("div", { class: "review-attempt" }, [
+          h("span", { class: "review-attempt-score" }, `${q.fullAttempt.score}%`),
+          coloredWords(q.fullAttempt.text, q.fullAttempt.words),
+        ]),
+      ]),
+    );
+  }
+
+  if (q.eval) {
+    const rows = [];
+    if (q.eval.missing?.length) {
+      rows.push(h("div", { class: "review-eval-row" }, ["Missing: ", h("span", { class: "review-eval-missing" }, escapeHtml(q.eval.missing.join(", ")))]));
+    }
+    if (q.eval.tips?.length) {
+      rows.push(h("div", { class: "review-eval-row" }, ["Tips: ", h("span", { class: "review-eval-tips" }, escapeHtml(q.eval.tips.join(" · ")))]));
+    }
+    card.appendChild(
+      h("div", { class: "review-eval" }, [
+        h("div", { class: "review-label" }, `Evaluation · ${q.eval.score}% · ${q.eval.verdict}`),
+        ...rows,
+      ]),
+    );
+  }
+  return card;
+}
+
+/** Word spans colored green/amber/red from a stored words[] alignment (106). */
+function coloredWords(text, words) {
+  const tokens = String(text ?? "").trim().split(/\s+/).filter(Boolean);
+  const wrap = h("span", { class: "review-words" });
+  tokens.forEach((w, i) => {
+    const status = words?.[i]?.status;
+    const span = h("span", { class: "kw" }, escapeHtml(w));
+    if (status === "green" || status === "amber" || status === "red") span.classList.add(`kw-${status}`);
+    wrap.appendChild(span);
+    if (i < tokens.length - 1) wrap.appendChild(document.createTextNode(" "));
+  });
+  return wrap;
+}
+
+/**
+ * "Practicar de nuevo": dispatch the prefill event with this session's config
+ * so the config view restores it (feature 109), then go home.
+ */
+function practiceAgain() {
+  window.dispatchEvent(
+    new CustomEvent("engcoach:prefill-session", {
+      detail: { config: session.config, sessionId: session.id },
+    }),
+  );
+  navigate("#/");
 }
 
 // ---------------------------------------------------------------------------
