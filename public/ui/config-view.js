@@ -3,25 +3,28 @@
  *
  * Layout follows the Stitch design "Configurar Sesión con AI Coach -
  * Minimalist": a centered hero headline, scenario pills, a Claude/ChatGPT-style
- * prompt box (textarea + toolbar with CEFR level, attach, live mic dB, clear,
- * char counter, start button) and a subtle meta strip (accent / phonetic focus
- * / history). Files can be attached via the toolbar button OR by dragging
- * anywhere on the window: a full-screen dimmed overlay announces the drop zone.
+ * prompt box (textarea + toolbar with CEFR level, attach, clear, char counter,
+ * start button) and a subtle meta strip (accent / phonetic focus / history).
+ * Files can be attached via the toolbar button OR by dragging anywhere on the
+ * window: a full-screen dimmed overlay announces the drop zone.
  *
  * The user describes the coach role (topicPrompt), picks a CEFR level, may
- * attach context files (feature 104), verifies the microphone, and starts a
- * practice. "Iniciar práctica" stays disabled until topicPrompt is non-empty
- * and the level is valid; pressing it opens the "Iniciando Sala de Audio"
- * launch modal and only "Entrar al Estudio" creates the session via
- * POST /api/session/start (CU3: no session is created before that).
+ * attach context files (feature 104), and starts a practice. "Iniciar
+ * práctica" stays disabled until topicPrompt is non-empty and the level is
+ * valid; pressing it opens the "Iniciando Sala de Audio" launch modal and only
+ * "Entrar al Estudio" creates the session via POST /api/session/start (CU3: no
+ * session is created before that).
  *
  * The config draft lives in module state only (no disk autosave — feature 109
  * owns the data/tmp draft), so leaving the view and returning within the same
  * page load restores the form.
+ *
+ * NOTE: Config does NOT open the microphone anymore. The live dB meter was
+ * removed so the config screen never captures audio; the input device is
+ * chosen in Settings → Audio (engcoach.mic) and the practice view uses it.
  */
 
 import { h, escapeHtml } from "./dom.js";
-import { WaveRecorder } from "../speech/recorder-wave.js";
 import { allLocalSettings } from "./settings/local.js";
 
 const TOPIC_MAX = 6000;
@@ -90,12 +93,11 @@ const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md"];
 /** In-memory draft so the form survives route changes within the page load. */
 let draft = {
   topicPrompt: DEFAULT_PROMPT,
-  topic: "Google EM Mock Interview",
+  topic: "",
   level: "B2",
   accent: ACCENTS[0],
   phonemes: [],
   contextFiles: [],
-  micDeviceId: "",
   /** Source session bucket for context files (feature 109 "Practicar de nuevo"). */
   contextBucket: undefined,
 };
@@ -122,7 +124,6 @@ export function initConfigView(root, { navigate }) {
   bindEvents({ navigate });
   applyDraft();
   loadProfile();
-  initAudio();
   initDropOverlay();
 
   // Feature 109 "Practicar de nuevo": a completed session's review dispatches
@@ -209,15 +210,6 @@ function buildView() {
               { id: "attach-btn", type: "button", class: "toolbar-icon-btn", title: "Adjuntar documento de contexto" },
               [h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "attach_file")],
             ),
-            // Mic status indicator (opens audio popover)
-            h(
-              "button",
-              { id: "mic-indicator", type: "button", class: "mic-indicator", title: "Micrófono y prueba de sonido" },
-              [
-                h("span", { class: "material-symbols-outlined mic-icon", "aria-hidden": "true" }, "mic"),
-                h("span", { id: "mic-db", class: "mic-db" }, "— dB"),
-              ],
-            ),
             // Clear button
             h("button", { id: "clear-prompt-btn", type: "button", class: "toolbar-text-btn" }, "Limpiar"),
           ]),
@@ -228,24 +220,6 @@ function buildView() {
               h("span", { class: "start-btn-label" }, "Iniciar práctica"),
               h("kbd", {}, "↵"),
             ]),
-          ]),
-        ]),
-        // --- Audio I/O popover (device select + sound test + level meter) ---
-        h("div", { id: "audio-popover", class: "audio-popover", hidden: true }, [
-          h("div", { class: "audio-popover-head" }, [
-            h("label", { class: "field-label", for: "mic-select" }, "Micrófono"),
-            h("select", { id: "mic-select", class: "level-select" }, [h("option", { value: "" }, "Default")]),
-          ]),
-          h("div", { class: "meter-row" }, [
-            h("div", { class: "meter-wrap" }, [h("div", { id: "meter-bar", class: "meter-bar" })]),
-            h("span", { id: "meter-db", class: "meter-db" }, "— dB"),
-          ]),
-          h("div", { class: "audio-actions" }, [
-            h("button", { id: "sound-test-btn", type: "button", class: "btn ghost" }, [
-              h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "volume_up"),
-              "Prueba de sonido",
-            ]),
-            h("span", { id: "sound-test-result", class: "sound-test-result" }),
           ]),
         ]),
       ]),
@@ -284,14 +258,6 @@ function collectElements(root) {
     fileInput: root.querySelector("#file-input"),
     attachBtn: root.querySelector("#attach-btn"),
     fileChips: root.querySelector("#file-chips"),
-    micIndicator: root.querySelector("#mic-indicator"),
-    micDb: root.querySelector("#mic-db"),
-    audioPopover: root.querySelector("#audio-popover"),
-    micSelect: root.querySelector("#mic-select"),
-    meterBar: root.querySelector("#meter-bar"),
-    meterDb: root.querySelector("#meter-db"),
-    soundTestBtn: root.querySelector("#sound-test-btn"),
-    soundTestResult: root.querySelector("#sound-test-result"),
     clearBtn: root.querySelector("#clear-prompt-btn"),
     startBtn: root.querySelector("#start-btn"),
     historyScore: root.querySelector("#history-score"),
@@ -319,6 +285,17 @@ function updateStart() {
   els.startBtn.disabled = !valid;
 }
 
+/**
+ * Label for the launch-modal "Role Topic" row: the template topic when one was
+ * applied, otherwise a short excerpt of the topicPrompt (never a stale default).
+ */
+function topicLabel() {
+  const prompt = draft.topicPrompt.trim();
+  if (!prompt) return "Sesión libre";
+  const excerpt = prompt.length > 40 ? `${prompt.slice(0, 40)}…` : prompt;
+  return draft.topic || excerpt;
+}
+
 /** Fill the textarea + level + persona topic from a template pill. */
 function applyTemplate(t) {
   els.prompt.value = t.prompt;
@@ -337,6 +314,7 @@ function applyTemplate(t) {
 function bindEvents({ navigate }) {
   els.prompt.addEventListener("input", () => {
     draft.topicPrompt = els.prompt.value;
+    draft.topic = "";
     els.counter.textContent = `${els.prompt.value.length} / ${TOPIC_MAX}`;
     updateStart();
   });
@@ -367,33 +345,35 @@ function bindEvents({ navigate }) {
     els.prompt.focus();
   });
 
-  els.micIndicator.addEventListener("click", () => {
-    els.audioPopover.hidden = !els.audioPopover.hidden;
-  });
-  document.addEventListener("click", (e) => {
-    if (!els.audioPopover.hidden && !els.audioPopover.contains(e.target) && !els.micIndicator.contains(e.target)) {
-      els.audioPopover.hidden = true;
-    }
-  });
-
   els.startBtn.addEventListener("click", () => openLaunchModal({ navigate }));
-  els.soundTestBtn.addEventListener("click", runSoundTest);
 }
 
 // ---------------------------------------------------------------------------
 // Profile-driven defaults (level, history, phonetic focus)
 // ---------------------------------------------------------------------------
 
-/** Fetch /api/profile and apply level default, history strip and phonemes. */
+/**
+ * Fetch /api/profile and apply level default, history strip and phonemes.
+ * The CEFR level defaults to the last created session's level (newest by
+ * updatedAt); falls back to the profile level, then "B2".
+ */
 async function loadProfile() {
   try {
-    const res = await fetch("/api/profile");
-    if (!res.ok) return;
-    const json = await res.json();
+    const [profileRes, sessionsRes] = await Promise.all([
+      fetch("/api/profile"),
+      fetch("/api/sessions"),
+    ]);
+    const json = profileRes.ok ? await profileRes.json() : {};
+    const sessions = sessionsRes.ok ? await sessionsRes.json() : {};
     const profile = json.profile ?? {};
     const stats = json.stats ?? {};
 
-    const level = LEVELS.some((l) => l.value === profile.level) ? profile.level : "B2";
+    const recentLevel = Array.isArray(sessions.sessions) ? sessions.sessions[0]?.level : undefined;
+    const level = LEVELS.some((l) => l.value === recentLevel)
+      ? recentLevel
+      : LEVELS.some((l) => l.value === profile.level)
+        ? profile.level
+        : "B2";
     els.levelSelect.value = level;
     draft.level = level;
 
@@ -592,150 +572,6 @@ function formatBytes(bytes) {
 }
 
 // ---------------------------------------------------------------------------
-// Audio I/O: device selector, live dB meter, sound test
-// ---------------------------------------------------------------------------
-
-let meterStream = null;
-let meterCtx = null;
-let meterAnalyser = null;
-let meterRaf = 0;
-let meterPeakDb = -Infinity;
-
-/** Populate the mic device list and start the live level meter. */
-async function initAudio() {
-  try {
-    const devices = await navigator.mediaDevices.enumerateDevices();
-    const mics = devices.filter((d) => d.kind === "audioinput");
-    els.micSelect.innerHTML = "";
-    els.micSelect.appendChild(h("option", { value: "" }, "Default"));
-    for (const d of mics) {
-      els.micSelect.appendChild(h("option", { value: d.deviceId }, d.label || `Micrófono ${mics.indexOf(d) + 1}`));
-    }
-  } catch {
-    // enumerateDevices unavailable — keep the default option
-  }
-  els.micSelect.addEventListener("change", () => {
-    draft.micDeviceId = els.micSelect.value;
-    startMeter();
-  });
-  startMeter();
-}
-
-/** Start the live dB meter on the selected input device (recorder-wave pipeline). */
-async function startMeter() {
-  stopMeter();
-  try {
-    const constraints = draft.micDeviceId ? { audio: { deviceId: { exact: draft.micDeviceId } } } : { audio: true };
-    meterStream = await navigator.mediaDevices.getUserMedia(constraints);
-    meterCtx = new AudioContext();
-    meterAnalyser = meterCtx.createAnalyser();
-    meterAnalyser.fftSize = 1024;
-    meterCtx.createMediaStreamSource(meterStream).connect(meterAnalyser);
-    const data = new Uint8Array(meterAnalyser.fftSize);
-    const loop = () => {
-      meterAnalyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        const v = (data[i] - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / data.length);
-      const db = rms === 0 ? -Infinity : 20 * Math.log10(rms);
-      meterPeakDb = Math.max(meterPeakDb, db);
-      renderMeter(db);
-      meterRaf = requestAnimationFrame(loop);
-    };
-    loop();
-  } catch {
-    els.meterDb.textContent = "mic no disponible";
-    els.meterBar.style.width = "0%";
-  }
-}
-
-function stopMeter() {
-  cancelAnimationFrame(meterRaf);
-  if (meterStream) {
-    meterStream.getTracks().forEach((t) => t.stop());
-    meterStream = null;
-  }
-  if (meterCtx) {
-    meterCtx.close().catch(() => {});
-    meterCtx = null;
-  }
-  meterAnalyser = null;
-}
-
-function renderMeter(db) {
-  const clamped = Math.max(-60, Math.min(0, db));
-  els.meterBar.style.width = `${((clamped + 60) / 60) * 100}%`;
-  const dbText = db === -Infinity ? "—" : `${db.toFixed(1)}`;
-  els.meterDb.textContent = `${dbText} dB`;
-  els.micDb.textContent = `${dbText} dB`;
-  els.micDb.classList.toggle("muted", db === -Infinity);
-}
-
-/** Play a 440 Hz tone and capture it through the mic (recorder-wave pipeline). */
-async function runSoundTest() {
-  els.soundTestBtn.disabled = true;
-  els.soundTestResult.textContent = "Reproduciendo tono…";
-  try {
-    if (!meterStream) await startMeter();
-    if (!meterCtx) throw new Error("Micrófono no disponible");
-    const recorder = new WaveRecorder();
-    await recorder.start();
-    const osc = meterCtx.createOscillator();
-    const gain = meterCtx.createGain();
-    osc.frequency.value = 440;
-    osc.type = "sine";
-    gain.gain.value = 0.25;
-    osc.connect(gain).connect(meterCtx.destination);
-    osc.start();
-    await new Promise((r) => setTimeout(r, 1500));
-    osc.stop();
-    const blob = recorder.stop();
-    const { db, sampleRate } = await wavPeakDb(blob);
-    const peak = db === -Infinity ? "—" : `${db.toFixed(1)} dB`;
-    els.soundTestResult.textContent = `Tono capturado · pico ${peak} (${sampleRate} Hz)`;
-  } catch (err) {
-    els.soundTestResult.textContent = err.message;
-  } finally {
-    els.soundTestBtn.disabled = false;
-  }
-}
-
-/** Compute the peak level (dB) of a WAV blob produced by WaveRecorder. */
-function wavPeakDb(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const view = new DataView(reader.result);
-        const sampleRate = view.getUint32(24, true);
-        const bits = view.getUint16(34, true);
-        const dataLen = view.getUint32(40, true);
-        const bytesPerSample = bits / 8;
-        const n = Math.floor(dataLen / bytesPerSample);
-        let peak = 0;
-        for (let i = 0; i < n; i++) {
-          let v;
-          if (bits === 16) v = view.getInt16(44 + i * 2, true) / 0x8000;
-          else if (bits === 8) v = (view.getUint8(44 + i) - 128) / 128;
-          else if (bits === 32) v = view.getFloat32(44 + i * 4, true);
-          else continue;
-          peak = Math.max(peak, Math.abs(v));
-        }
-        const db = peak === 0 ? -Infinity : 20 * Math.log10(peak);
-        resolve({ db, sampleRate });
-      } catch (err) {
-        reject(err);
-      }
-    };
-    reader.onerror = () => reject(new Error("No se pudo leer la captura"));
-    reader.readAsArrayBuffer(blob);
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Launch modal ("Iniciando Sala de Audio")
 // ---------------------------------------------------------------------------
 
@@ -786,7 +622,7 @@ function openLaunchModal({ navigate }) {
         ]),
         h("div", { class: "launch-row", dataset: { step: "topic" } }, [
           h("span", { class: "launch-row-label" }, "Role Topic:"),
-          h("span", { class: "launch-row-value launch-topic" }, draft.topic || draft.topicPrompt.slice(0, 40)),
+          h("span", { class: "launch-row-value launch-topic" }, topicLabel()),
         ]),
       ]),
       h("div", { id: "launch-error", class: "launch-error", hidden: true }),
@@ -843,7 +679,7 @@ function openLaunchModal({ navigate }) {
       rows[2].classList.add("active");
       setTimeout(() => {
         if (cancelled) return;
-        setValue(2, draft.topic || draft.topicPrompt.slice(0, 40), true);
+        setValue(2, topicLabel(), true);
         enterBtn.disabled = false;
       }, 600);
     });
