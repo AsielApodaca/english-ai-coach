@@ -5,7 +5,7 @@
  * and keeps the sidebar "Speech Engine" pill in sync with `/api/health`.
  * The old tab-based fabric (practice / free chat / progress / settings) is
  * gone; the stage zones are placeholders owned by features 103/105/109/108.
- * The audio dock (push-to-talk orb / waveform) belongs to feature 105 (CU2).
+ * The audio dock (hands-free mic indicator / waveform) belongs to feature 105 (CU2).
  */
 
 import { createShellStore } from "./ui/store.js";
