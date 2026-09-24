@@ -77,7 +77,6 @@ function makeSession(
           rigor,
           fillers: "Moderado",
           adaptive: { enabled: true, up: 90, down: 65 },
-          prepTime: 3,
           provider: "auto",
           autoAdvance: false,
           passThreshold: RIGOR_THRESHOLDS[rigor as keyof typeof RIGOR_THRESHOLDS],

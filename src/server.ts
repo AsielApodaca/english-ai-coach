@@ -23,7 +23,7 @@ import {
 import { handleExtractRequest } from "./lib/extract.ts";
 import { handleSessionStartRequest } from "./lib/session-start.ts";
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
-import { applyProfileSettings, parseProfileSettings, readAutoAdvance, readPrepTime } from "./lib/settings.ts";
+import { applyProfileSettings, parseProfileSettings, readAutoAdvance } from "./lib/settings.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import {
@@ -44,7 +44,9 @@ const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = process.env as NodeJS.ProcessEnv;
 
 const providers = buildProviders(env as never);
-const primaryProviderId = env.LLM_PROVIDER ?? "cloudflare";
+const primaryProviderId = env.LLM_PROVIDER ?? (env.MOCK_LLM ? "mock" : "cloudflare");
+/** TEMPORARY: MOCK_LLM=1 short-circuits every LLM call with canned replies. */
+const MOCK_LLM = Boolean(env.MOCK_LLM);
 const storage = createStorage(rootDir);
 const WHISPER_MODEL = env.WHISPER_MODEL ?? "small.en";
 
@@ -52,8 +54,11 @@ const WHISPER_MODEL = env.WHISPER_MODEL ?? "small.en";
 function candidates(providerRequested?: string): Candidate[] {
   const primary = (providerRequested ?? primaryProviderId) as ProviderId;
   const viaId = providerById(providers, primary);
-  const rest = providers.filter((p) => p.id !== primary);
-  return [...(viaId ? [viaId] : []), ...rest];
+  // Mock LLM (MOCK_LLM=1) always leads the chain so every practice call
+  // short-circuits instantly, regardless of any requested provider.
+  const mock = providers.filter((p) => p.id === "mock");
+  if (mock.length > 0) return [...mock, ...providers.filter((p) => p.id !== "mock")];
+  return [...(viaId ? [viaId] : []), ...providers.filter((p) => p.id !== primary)];
 }
 
 const app = express();
@@ -328,7 +333,6 @@ app.get("/api/session/:id", (req, res) => {
     explainLine: buildExplainLine(),
     fullLine: buildFullLine(),
     passThreshold: readPassThreshold(session.config.settingsSnapshot),
-    prepTime: readPrepTime(session.config.settingsSnapshot),
     autoAdvance: readAutoAdvance(session.config.settingsSnapshot),
     question: question
       ? { q: question.q, answer: question.answer, fragments: question.fragments }
@@ -480,7 +484,7 @@ app.get("/api/profile", async (_req, res) => {
 
 /**
  * POST /api/profile/settings — persist the profile-persisted settings
- * (feature 108): rigor, fillers, adaptive, prepTime, provider, personaName,
+ * (feature 108): rigor, fillers, adaptive, provider, personaName,
  * targetLevel, bio, prompt, focusPhonemes. Device prefs stay in localStorage
  * and never reach this endpoint. Idempotent: missing fields keep their
  * previous profile values. Returns the updated profile.
@@ -887,5 +891,6 @@ const port = Number(env.PORT ?? 3000);
 const server = app.listen(port, () => {
   console.log(`English AI Coach running at http://localhost:${port}`);
   console.log(`LLM primary: ${primaryProviderId} · provider count: ${providers.length}`);
+  if (MOCK_LLM) console.log("⚠ MOCK_LLM=1 — LLM calls return canned replies (provider 'mock'). Remove it for real practice.");
   console.log(`Whisper: ${checkWhisper(WHISPER_MODEL, rootDir).hint}`);
 });

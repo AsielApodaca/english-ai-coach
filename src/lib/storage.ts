@@ -81,7 +81,6 @@ export interface ProfileSettings {
   rigor?: string;
   fillers?: string;
   adaptive?: { enabled?: boolean; up?: number; down?: number };
-  prepTime?: number;
   provider?: string;
   personaName?: string;
   targetLevel?: string;

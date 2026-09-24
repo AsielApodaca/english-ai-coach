@@ -2,7 +2,7 @@
  * Settings sub-tab: Entrenamiento & Pronunciación (feature 108, spec §2).
  *
  * STT engine + tempo are device prefs (localStorage `engcoach.*`); rigor,
- * fillers, adaptive and prepTime persist in `profile.json` via
+ * fillers and adaptive persist in `profile.json` via
  * `saveProfileSettings` and feed the session snapshot at creation time.
  */
 
@@ -27,12 +27,6 @@ const TEMPO_OPTIONS = [
   { value: 0.75, label: "0.75×" },
   { value: 1, label: "1×" },
   { value: 1.25, label: "1.25×" },
-];
-
-const PREP_OPTIONS = [
-  { value: 0, label: "0 s" },
-  { value: 3, label: "3 s" },
-  { value: 5, label: "5 s" },
 ];
 
 /**
@@ -124,16 +118,6 @@ export function renderTraining(root, ctx) {
             max: 100,
             onChange: (v) =>
               ctx.saveProfileSettings({ adaptive: { ...(settings.adaptive ?? {}), down: v } }),
-          }),
-        }),
-        settingRow({
-          label: "Tiempo de preparación",
-          hint: "Pausa con beeps antes de que el coach lea el modelo.",
-          control: segmentedControl({
-            label: "Tiempo de preparación",
-            value: settings.prepTime ?? 3,
-            options: PREP_OPTIONS,
-            onChange: (v) => ctx.saveProfileSettings({ prepTime: Number(v) }),
           }),
         }),
       ]),
