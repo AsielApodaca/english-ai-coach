@@ -115,6 +115,9 @@ let lastAttemptLineIndex = -2;
 /** Pending karaoke read; the dock's retry pill can cut it short. */
 let stopKaraokeRead = null;
 
+/** Pending user-WAV replay; the retry pill and `cancelFlow()` can cut it. */
+let stopReplay = null;
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -168,6 +171,7 @@ function cancelFlow() {
   clearTimeout(autoAdvanceTimer);
   tts?.stop();
   stopKaraokeRead?.();
+  stopReplay?.();
   if (dock) {
     dock.stopVisualizer();
     dock.destroy();
@@ -220,6 +224,7 @@ async function startFlow(sessionId) {
       {
         onRetry: () => {
           stopKaraokeRead?.();
+          stopReplay?.();
           tts.stop();
         },
         onFinish: () => finishSession(),
@@ -348,7 +353,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     attemptCount++;
     renderFeedback(outcome, fi);
     if (!outcome.passed && lastWavBlob) {
-      await replayUserWav(lastWavBlob, outcome.words, token);
+      await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
     await speak(outcome.coachLine, token);
@@ -383,7 +388,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     fullPassed = fullOutcome.passed || fullPassed;
     renderFeedback(fullOutcome, -1);
     if (!fullOutcome.passed && lastWavBlob) {
-      await replayUserWav(lastWavBlob, fullOutcome.words, token);
+      await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
     await speak(fullOutcome.coachLine, token);
@@ -1238,53 +1243,35 @@ function practiceAgain() {
 }
 
 // ---------------------------------------------------------------------------
-// User WAV replay (retry: hear yourself with the lyrics lit)
+// User WAV replay (retry: hear yourself while the colors stay on screen)
 // ---------------------------------------------------------------------------
 
 /**
- * Replay the user's last recording with word-sync highlighting.
+ * Replay the user's last recording while the traffic-light colors of the
+ * attempt stay visible.
  *
- * The lit range is scoped to the line the attempt was scored against (the
- * whole book for the full answer), so a fragment replay never walks past its
- * own spans.
+ * There is no lyric animation here on purpose: the line was already scored
+ * with green/amber/red, and lighting it blue would hide the feedback the
+ * colors exist to give.
  */
-function replayUserWav(blob, words, token) {
+function replayUserWav(blob) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    const spans = spansForLine(lastAttemptLineIndex);
-    const timed =
-      spans.length > 0 &&
-      Boolean(words?.length) &&
-      words.slice(0, spans.length).every((w) => typeof w.startMs === "number");
-    audio.onended = () => {
-      URL.revokeObjectURL(url);
-      spans.forEach((s) => s.classList.remove("kw-spoken"));
-      resolve();
-    };
-    audio.onerror = () => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      stopReplay = null;
+      audio.pause();
       URL.revokeObjectURL(url);
       resolve();
     };
-    audio.play().catch(() => {
-      URL.revokeObjectURL(url);
-      resolve();
-    });
-    if (timed) {
-      const tick = () => {
-        if (token !== flowToken) return;
-        const t = audio.currentTime * 1000;
-        const limit = Math.min(words.length, spans.length);
-        let count = 0;
-        for (let i = 0; i < limit; i++) {
-          if (t >= (words[i].startMs ?? 0)) count++;
-          else break;
-        }
-        spans.forEach((s, i) => s.classList.toggle("kw-spoken", i < count));
-        if (!audio.paused && !audio.ended) requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    }
+    // Exposed so the dock's retry pill and `cancelFlow()` can cut it short.
+    stopReplay = finish;
+    audio.onended = finish;
+    audio.onerror = finish;
+    audio.play().catch(finish);
   });
 }
 

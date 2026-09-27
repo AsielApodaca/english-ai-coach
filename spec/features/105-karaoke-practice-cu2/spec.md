@@ -41,6 +41,8 @@ LOOP      por fragmento k:
             → cuando el usuario termina de hablar → SOLO esa línea se pinta con
               semáforo (green/amber/red); los fragmentos ya aprobados conservan
               su semáforo; el resto de la respuesta no se toca
+            → si falla, su grabación se repite CON el semáforo visible
+              (sin superponer azul) y luego el coach relee en blanco
 FULL      al terminar todos los fragmentos se DESPINTA el semáforo de todos y
           la respuesta queda en BLANCO → el usuario lee la respuesta entera
           → al final se pinta toda la respuesta con semáforo
@@ -59,7 +61,7 @@ Garantías:
 - [x] **Coloreado acotado por línea:** `colorWords(outcome, lineIndex)` sólo toca los spans de esa línea y conserva el semáforo de las líneas anteriores.
 - [x] **Reintento en blanco:** antes de que el coach (re)lea un fragmento se limpia su semáforo.
 - [x] **Reintento de respuesta completa:** la vista repite `fullAnswer → feedback` hasta que apruebe, como ya hacía el reducer.
-- [x] **Replay del WAV del usuario** acotado a la línea del intento (antes comparaba `words.length === spans.length` sobre todo el book y quedaba siempre desactivado).
+- [x] **Replay del WAV sin animación azul:** al fallar, la grabación del usuario se repite con el semáforo ya pintado y **visible**; `kw-spoken` no se superpone jamás sobre los colores de la evaluación. El replay se corta con la píldora "Reintentar fragmento" y al salir de la ruta (`stopReplay`).
 - [x] **Helpers puros** en `public/ui/karaoke-color.js` con tests (`tests/karaoke-color.test.ts`).
 
 ## Contexto
@@ -101,7 +103,7 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 - [x] **INTRO:** texto de apertura generado por LLM (topic + dinámica), hablado con pausas medias (007); transcript IA se muestra como subtítulo (diseño: "columna del coach").
 - [x] **QUESTION:** `POST /api/session/start` (103) genera `{ question }` y la respuesta modelo `{ answer, fragments[] }` (fragmentos = cortes por cláusula/pausa natural, no >18 palabras); `GET /api/session/:id` los sirve a la vista.
 - [x] **Karaoke:** línea activa grande (`40px`), líneas adyacentes atenuadas, blur, scroll con mask-gradient; al reproducir audio del coach el texto se subraya palabra a palabra (fallback: progreso lineal por duración).
-- [x] **LOOP fragmentos:** en fases de repetición el micrófono **escucha automáticamente** (beep de preparación → VAD por silencio, orb como indicador no clickeable) y graba WAV (recorder-wave) → llama `/api/attempt` (transcribe + evalúa + alinea + persiste). Resultado: `words[]` con estados green/amber/red sobre la línea activa + animación sincronizada con audio propio del usuario (nuevo intento reproduce su WAV con la letra iluminada).
+- [x] **LOOP fragmentos:** en fases de repetición el micrófono **escucha automáticamente** (beep de preparación → VAD por silencio, orb como indicador no clickeable) y graba WAV (recorder-wave) → llama `/api/attempt` (transcribe + evalúa + alinea + persiste). Resultado: `words[]` con estados green/amber/red sobre la línea activa; al fallar, la grabación del usuario se repite con esos colores ya visibles (sin animación azul superpuesta).
 - [x] **Feedback del coach:** `buildFeedbackText` genera el feedback hablado (score + foco en missing); se habla; la chip de feedback del diseño ("Buen flujo · N%") se muestra en el header.
 - [x] **Reintento:** si `score < passThreshold` (settings 108; default 70), coach reclama el fragmento y loop interno de reintento (CU2 alt).
 - [x] **FULL / cierre:** fase de respuesta entera con el mismo pipeline; consolidación del feedback final y guardado del `eval` de la pregunta en la sesión (102).
