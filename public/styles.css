@@ -1866,6 +1866,14 @@ body.overlay-open {
   filter: blur(1px);
 }
 
+/* While the coach reads the whole model answer every line stays white and
+   legible (beats .current/.past/.future on specificity). */
+.karaoke-book.reading .karaoke-line {
+  color: var(--text);
+  opacity: 1;
+  filter: none;
+}
+
 /* Word-level states */
 .kw {
   transition: color 0.15s ease;

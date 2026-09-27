@@ -30,6 +30,7 @@ import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
 import { respellFor } from "./ipa.js";
+import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { getLocal } from "./settings/local.js";
 
 /** No speech heard this whole turn → failed attempt + retry. */
@@ -105,6 +106,15 @@ let navigate = null;
 /** Last recorded WAV blob (replayed on retry with word highlighting). */
 let lastWavBlob = null;
 
+/**
+ * Line the last attempt was scored against: `>= 0` fragment index, `-1` the
+ * full answer, `-2` no attempt yet (colors must not be restored from it).
+ */
+let lastAttemptLineIndex = -2;
+
+/** Pending karaoke read; the dock's retry pill can cut it short. */
+let stopKaraokeRead = null;
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -143,22 +153,8 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
   window.addEventListener("engcoach:settings-changed", () => {
     if (store.state.route?.view !== "practice") return;
     applyLiveSettings();
-    if (els?.book && question) {
-      // Re-render the book preserving the current line + last colors.
-      const isFull = phase === "fullAnswer";
-      els.book.innerHTML = "";
-      if (isFull) {
-        const line = buildLine(0, question.answer);
-        line.classList.add("current", "full");
-        els.book.appendChild(line);
-      } else {
-        for (let i = 0; i < fragmentCount; i++) {
-          els.book.appendChild(buildLine(i, question.fragments[i].text));
-        }
-        setCurrentLine(fragmentIndex);
-      }
-      if (lastAttempt) colorWords(lastAttempt);
-    }
+    // Re-render the book preserving the phase, the active line + colors.
+    rebuildBook();
   });
 }
 
@@ -171,6 +167,7 @@ function cancelFlow() {
   flowToken++;
   clearTimeout(autoAdvanceTimer);
   tts?.stop();
+  stopKaraokeRead?.();
   if (dock) {
     dock.stopVisualizer();
     dock.destroy();
@@ -191,6 +188,7 @@ async function startFlow(sessionId) {
   passedFragments = [];
   fragmentScores = [];
   lastAttempt = null;
+  lastAttemptLineIndex = -2;
   fullAttemptCount = 0;
   fullPassed = false;
   session = null;
@@ -220,7 +218,10 @@ async function startFlow(sessionId) {
     dock = createAudioDock(
       root,
       {
-        onRetry: () => tts.stop(),
+        onRetry: () => {
+          stopKaraokeRead?.();
+          tts.stop();
+        },
         onFinish: () => finishSession(),
       },
       { rate: Number(getLocal("tempo", 1)) },
@@ -291,6 +292,10 @@ function isResume() {
  * fragment loop starts at the first unpassed fragment instead of fragment 0.
  */
 async function runQuestionLoop(token, { resume = false } = {}) {
+  // A new question starts without a scorable attempt to re-color.
+  lastAttempt = null;
+  lastAttemptLineIndex = -2;
+
   // A question whose eval is already checkpointed is done: resumed sessions
   // land directly on the done panel (offer the next question).
   if (question.eval) {
@@ -309,7 +314,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   // MODEL — the strong answer as karaoke lyrics, read with word progress.
   setPhase("model");
   renderKaraokeBook();
-  await speakModelWithProgress(question.answer, token);
+  await speakWithKaraoke(question.answer, token);
   if (token !== flowToken) return;
 
   // EXPLAIN — coach explains the fragment dynamics.
@@ -328,8 +333,11 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     fragmentIndex = fi;
     attemptCount = 0;
     setPhase("repeatingFragment");
+    // Entering (or retrying) a fragment: legible book, active line, white line.
+    els.book.classList.remove("reading");
     setCurrentLine(fi);
-    await speak(question.fragments[fi].text, token);
+    clearLineColors(fi);
+    await speakWithKaraoke(question.fragments[fi].text, token, { spans: lineWordSpans(fi) });
     if (token !== flowToken) return;
 
     const outcome = await captureAttempt(question.fragments[fi].text, "fragment", token);
@@ -354,27 +362,33 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     // else: retry the same fragment (CU2 alt flow).
   }
 
-  // FULL — read the whole answer.
+  // FULL — the user reads the whole answer until it passes (same loop as the
+  // cu2.ts reducer: fullAnswer → feedback → fullAnswer on failure). Every
+  // round repaints the book from scratch, so the answer starts white.
   fullAttemptCount = 0;
-  setPhase("fullAnswer");
-  renderFull();
-  await speak(fullLine, token);
-  if (token !== flowToken) return;
-
-  const fullOutcome = await captureAttempt(question.answer, "full", token);
-  if (token !== flowToken) return;
-
-  setPhase("feedback");
-  lastAttempt = fullOutcome;
-  fullAttemptCount++;
-  fullPassed = fullOutcome.passed;
-  renderFeedback(fullOutcome, -1);
-  if (!fullOutcome.passed && lastWavBlob) {
-    await replayUserWav(lastWavBlob, fullOutcome.words, token);
+  fullPassed = false;
+  let fullOutcome;
+  do {
+    setPhase("fullAnswer");
+    renderFull();
+    await speak(fullLine, token);
     if (token !== flowToken) return;
-  }
-  await speak(fullOutcome.coachLine, token);
-  if (token !== flowToken) return;
+
+    fullOutcome = await captureAttempt(question.answer, "full", token);
+    if (token !== flowToken) return;
+
+    setPhase("feedback");
+    lastAttempt = fullOutcome;
+    fullAttemptCount++;
+    fullPassed = fullOutcome.passed || fullPassed;
+    renderFeedback(fullOutcome, -1);
+    if (!fullOutcome.passed && lastWavBlob) {
+      await replayUserWav(lastWavBlob, fullOutcome.words, token);
+      if (token !== flowToken) return;
+    }
+    await speak(fullOutcome.coachLine, token);
+    if (token !== flowToken) return;
+  } while (!fullOutcome.passed);
 
   // DONE — continuous session: keep it active and offer the next question.
   setPhase("done");
@@ -482,26 +496,37 @@ async function speak(text, token) {
 }
 
 /**
- * Speak the model answer with karaoke word progress.
+ * Speak a line through the server TTS and light the karaoke words live.
  *
- * Fetches the server TTS audio directly so we can decode its duration and
- * highlight the lyrics linearly (Piper emits no word timestamps). Falls back
- * to plain `speak()` when the server engine is unavailable.
+ * Fetches the TTS audio directly so we can decode its duration and highlight
+ * the spans linearly (Piper emits no word timestamps). `spans` defaults to
+ * every word of the book (the full model answer); pass a single line's spans
+ * to light only that fragment. Whatever path the read takes — finished, error
+ * or fallback to plain `tts.speak()` — the spans return to white at the end.
+ *
+ * @param {string} text - what the coach reads
+ * @param {number} token - flow cancellation token
+ * @param {{ spans?: Element[] | null }} [opts] - spans to light while reading
  */
-async function speakModelWithProgress(text, token) {
+async function speakWithKaraoke(text, token, { spans = null } = {}) {
   dock?.setMode("ai");
+  const activeSpans = spans ?? allWordSpans();
   const params = new URLSearchParams({ text });
   const rate = dock?.getRate() ?? 1;
   if (rate !== 1) params.set("rate", String(rate));
 
   let audio = null;
-  let durationMs = 0;
+  let stopProgress = () => {};
   try {
     const res = await fetch(`/api/tts?${params.toString()}`);
+    // The flow may have been cancelled while the audio was being fetched.
+    if (token !== flowToken) return;
     if (!res.ok) throw new Error("tts-unavailable");
     const blob = await res.blob();
+    if (token !== flowToken) return;
     const url = URL.createObjectURL(blob);
     audio = new Audio(url);
+    let durationMs = 0;
     try {
       const buf = await blob.arrayBuffer();
       const ac = new AudioContext();
@@ -512,34 +537,61 @@ async function speakModelWithProgress(text, token) {
       durationMs = 0; // no progress highlight
     }
     await new Promise((resolve) => {
-      audio.onended = resolve;
-      audio.onerror = resolve;
-      audio.play().catch(resolve);
-      if (durationMs > 0) animateWordProgress(durationMs, token);
+      const done = () => {
+        stopKaraokeRead = null;
+        resolve();
+      };
+      // Exposed so the dock's retry pill and `cancelFlow()` can end the read.
+      stopKaraokeRead = () => {
+        audio.pause();
+        done();
+      };
+      audio.onended = done;
+      audio.onerror = done;
+      if (token !== flowToken) {
+        done();
+        return;
+      }
+      audio.play().catch(done);
+      if (durationMs > 0) stopProgress = animateWordProgress(durationMs, token, activeSpans);
     });
   } catch {
     // Server TTS unavailable → plain browser speech, no progress.
+    if (token !== flowToken) return;
     await tts.speak(text, { rate, volume: volumeSetting() });
   } finally {
+    stopKaraokeRead = null;
+    stopProgress();
+    activeSpans.forEach((s) => s.classList.remove("kw-spoken"));
     if (audio) URL.revokeObjectURL(audio.src);
   }
   if (token !== flowToken) return;
   dock?.setMode("idle");
 }
 
-/** Highlight the karaoke words linearly over `durationMs` (rAF loop). */
-function animateWordProgress(durationMs, token) {
-  const spans = allWordSpans();
-  if (!spans.length) return;
+/**
+ * Highlight the given karaoke spans linearly over `durationMs` (rAF loop).
+ *
+ * @param {number} durationMs - duration of the read
+ * @param {number} token - flow cancellation token
+ * @param {Element[]} spans - spans to light, in reading order
+ * @returns {() => void} `stop()` — cancels the loop (safe to call twice)
+ */
+function animateWordProgress(durationMs, token, spans) {
+  if (!spans.length) return () => {};
   const start = performance.now();
+  let cancelled = false;
   const tick = () => {
-    if (token !== flowToken) return;
+    if (cancelled || token !== flowToken) return;
     const t = Math.min(1, (performance.now() - start) / durationMs);
     const count = Math.floor(t * spans.length);
     spans.forEach((s, i) => s.classList.toggle("kw-spoken", i < count));
     if (t < 1) requestAnimationFrame(tick);
   };
   requestAnimationFrame(tick);
+  return () => {
+    cancelled = true;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -557,6 +609,9 @@ function animateWordProgress(durationMs, token) {
  * fails mid-flight, fall back to BrowserSTT + text mode.
  */
 async function captureAttempt(target, kind, token) {
+  // The replay must always belong to THIS attempt: a browser-STT turn records
+  // no WAV, so it must not fall back to the previous fragment's recording.
+  lastWavBlob = null;
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
   if (stt === "whisper") {
@@ -833,19 +888,62 @@ function renderQuestion() {
   );
 }
 
-/** MODEL phase: build the karaoke book (one line per fragment). */
+/**
+ * MODEL phase: build the karaoke book (one line per fragment).
+ *
+ * The book enters `reading` mode: no line is active yet and every line stays
+ * white and legible while the coach reads the whole model answer.
+ */
 function renderKaraokeBook() {
   els.book.hidden = false;
   els.book.innerHTML = "";
   for (let i = 0; i < fragmentCount; i++) {
     els.book.appendChild(buildLine(i, question.fragments[i].text));
   }
-  setCurrentLine(0);
+  els.book.classList.add("reading");
+}
+
+/**
+ * Rebuild the book from the current phase + last attempt (settings listener,
+ * `renderFull()`):
+ *   - full answer in flight → a single `current full` line, white;
+ *   - model/explaining → one line per fragment with the book in `reading`
+ *     mode (every line legible while the coach reads the whole answer);
+ *   - any other phase → one line per fragment, active line highlighted.
+ *
+ * Traffic-light colors are restored only during FEEDBACK, for the exact line
+ * the last attempt was scored against (the line stays white while the coach
+ * reads and while the user speaks).
+ */
+function rebuildBook() {
+  if (!els?.book || !question) return;
+  const scored = phase === "feedback" && Boolean(lastAttempt);
+  const isFull = phase === "fullAnswer" || (scored && lastAttemptLineIndex === -1);
+  const reading = phase === "model" || phase === "explaining";
+  els.book.innerHTML = "";
+  if (isFull) {
+    const line = buildLine(0, question.answer);
+    line.classList.add("current", "full");
+    els.book.appendChild(line);
+    els.book.classList.remove("reading");
+    if (scored) colorWords(lastAttempt, -1);
+    return;
+  }
+  for (let i = 0; i < fragmentCount; i++) {
+    els.book.appendChild(buildLine(i, question.fragments[i].text));
+  }
+  if (reading) {
+    els.book.classList.add("reading");
+    return;
+  }
+  els.book.classList.remove("reading");
+  setCurrentLine(fragmentIndex);
+  if (scored && lastAttemptLineIndex >= 0) colorWords(lastAttempt, lastAttemptLineIndex);
 }
 
 /** Build one karaoke line of word spans (+ optional pronunciation annotation). */
 function buildLine(index, text) {
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const words = tokenizeWords(text);
   const line = h("div", { class: "karaoke-line", dataset: { index: String(index) } });
   for (const w of words) {
     const pron = respellFor(w);
@@ -860,7 +958,7 @@ function buildLine(index, text) {
   return line;
 }
 
-/** Mark line `index` as current; others past/future. */
+/** Mark line `index` as current; others past/future, and keep it in view. */
 function setCurrentLine(index) {
   const lines = els.book.querySelectorAll(".karaoke-line");
   lines.forEach((line, i) => {
@@ -868,30 +966,60 @@ function setCurrentLine(index) {
     line.classList.toggle("current", i === index);
     line.classList.toggle("future", i > index);
   });
+  try {
+    lines[index]?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  } catch {
+    // scrollIntoView unavailable → the line stays where it is
+  }
 }
 
-/** All word spans in the book, in order (for coloring/progress). */
+/** All word spans in the book, in order (full-answer coloring/progress). */
 function allWordSpans() {
   return [...els.book.querySelectorAll(".kw")];
 }
 
-/** Apply green/amber/red to the word spans of the active line (or all for full). */
-function colorWords(outcome) {
-  const spans = allWordSpans();
-  const words = outcome.words ?? [];
+/** Word spans of one karaoke line (empty when that line is not rendered). */
+function lineWordSpans(index) {
+  return [...els.book.querySelectorAll(`.karaoke-line[data-index="${index}"] .kw`)];
+}
+
+/** Spans an attempt colors: one line, or the whole book for the full answer. */
+function spansForLine(index) {
+  return index === -1 ? allWordSpans() : lineWordSpans(index);
+}
+
+/** Clear every color class from one line's spans (back to white). */
+function clearLineColors(index) {
+  for (const span of lineWordSpans(index)) {
+    span.classList.remove("kw-green", "kw-amber", "kw-red", "kw-spoken");
+  }
+}
+
+/**
+ * Paint the traffic-light colors of `outcome` on ONE line's spans.
+ *
+ * `outcome.words` is local to the evaluated target (fragment or full answer),
+ * so it is paired against the spans of `lineIndex` only: spans of other lines
+ * keep the colors they already have.
+ *
+ * @param {{ words?: Array<{ status?: string }> }} outcome - scored attempt
+ * @param {number} lineIndex - fragment index, or `-1` for the full answer
+ */
+function colorWords(outcome, lineIndex) {
+  const spans = spansForLine(lineIndex);
+  const statuses = lineColorStatuses(outcome.words ?? [], spans.length);
   spans.forEach((s, i) => {
     s.classList.remove("kw-green", "kw-amber", "kw-red", "kw-spoken");
-    if (!liveHighlight) return;
-    const w = words[i];
-    if (w?.status === "green") s.classList.add("kw-green");
-    else if (w?.status === "amber") s.classList.add("kw-amber");
-    else if (w?.status === "red") s.classList.add("kw-red");
+    const status = statuses[i];
+    if (!liveHighlight || !status) return;
+    s.classList.add(`kw-${status}`);
   });
 }
 
-/** FEEDBACK phase: color the words + show the feedback chip. */
+/** FEEDBACK phase: color the evaluated line + show the feedback chip. */
 function renderFeedback(outcome, lineIndex) {
-  colorWords(outcome);
+  lastAttemptLineIndex = lineIndex;
+  colorWords(outcome, lineIndex);
   const passed = outcome.passed;
   const focus = (outcome.missing ?? []).slice(0, 2).join(", ");
   const chipText = passed
@@ -908,12 +1036,10 @@ function renderFeedback(outcome, lineIndex) {
   els.feedbackChip.classList.toggle("bad", !passed);
 }
 
-/** FULL phase: whole answer as one active block (colors cleared). */
+/** FULL phase: whole answer as one active block (colors cleared → white). */
 function renderFull() {
-  els.book.innerHTML = "";
-  const line = buildLine(0, question.answer);
-  line.classList.add("current", "full");
-  els.book.appendChild(line);
+  els.book.classList.remove("reading");
+  rebuildBook();
   els.feedbackChip.hidden = true;
 }
 
@@ -1115,13 +1241,22 @@ function practiceAgain() {
 // User WAV replay (retry: hear yourself with the lyrics lit)
 // ---------------------------------------------------------------------------
 
-/** Replay the user's last recording with word-sync highlighting. */
+/**
+ * Replay the user's last recording with word-sync highlighting.
+ *
+ * The lit range is scoped to the line the attempt was scored against (the
+ * whole book for the full answer), so a fragment replay never walks past its
+ * own spans.
+ */
 function replayUserWav(blob, words, token) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
-    const spans = allWordSpans();
-    const timed = words?.length === spans.length && words.every((w) => typeof w.startMs === "number");
+    const spans = spansForLine(lastAttemptLineIndex);
+    const timed =
+      spans.length > 0 &&
+      Boolean(words?.length) &&
+      words.slice(0, spans.length).every((w) => typeof w.startMs === "number");
     audio.onended = () => {
       URL.revokeObjectURL(url);
       spans.forEach((s) => s.classList.remove("kw-spoken"));
@@ -1135,13 +1270,14 @@ function replayUserWav(blob, words, token) {
       URL.revokeObjectURL(url);
       resolve();
     });
-    if (timed && spans.length) {
+    if (timed) {
       const tick = () => {
         if (token !== flowToken) return;
         const t = audio.currentTime * 1000;
+        const limit = Math.min(words.length, spans.length);
         let count = 0;
-        for (const w of words) {
-          if (t >= (w.startMs ?? 0)) count++;
+        for (let i = 0; i < limit; i++) {
+          if (t >= (words[i].startMs ?? 0)) count++;
           else break;
         }
         spans.forEach((s, i) => s.classList.toggle("kw-spoken", i < count));

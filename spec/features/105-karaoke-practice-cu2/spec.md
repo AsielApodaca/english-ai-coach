@@ -17,6 +17,51 @@
 - `acquireStream()` en `recorder-wave.js` degrada al input por defecto cuando el `deviceId` guardado (`engcoach.mic`) quedó obsoleto (evita fallo silencioso).
 - Browser STT no pierde captura en interacciones cortas (flag `started` en `browser-stt.js`).
 
+## Coloreado del karaoke — flujo corregido (2026-09)
+
+Dos bugs de coloreado reportados tras la ola 4 y corregidos en la rama `fix/karaoke-live-coloring`:
+
+**Bug A — resaltado prematuro.** El book fijaba la línea 0 como `current` (y el resto `future` con `opacity .35 + blur`) **antes** de que el coach leyera la respuesta modelo completa; además `kw-spoken` (azul) no se limpiaba al terminar la lectura y el coach leía cada fragmento con TTS plano (sin progreso). Resultado: no se podía seguir la lectura en vivo ni del modelo ni de los fragmentos.
+
+**Bug B — pintado fuera del fragmento.** `colorWords()` emparejaba `outcome.words` (índices **locales al fragmento/target**, ver `align.ts`) contra `allWordSpans()` (índice **global** de todo el book) ⇒ al evaluar el fragmento *k* se pintaban las **primeras N palabras de la respuesta**, y los *extras* anexados al final de `words[]` (`align.ts`, siempre `red`) caían sobre spans de otros fragmentos. `renderFeedback(outcome, lineIndex)` recibía el índice correcto pero era un parámetro muerto.
+
+### Flujo de coloreado normativo
+
+```
+MODEL     el coach lee TODA la respuesta modelo
+          → todas las líneas blancas y legibles (book en estado `reading`,
+            sin atenuación ni blur) y se pintan de azul EN VIVO palabra a palabra
+          → al terminar, la respuesta vuelve COMPLETAMENTE a blanco
+EXPLAIN   la respuesta permanece en blanco
+LOOP      por fragmento k:
+            se resalta la línea k (`current`) y se opaca el resto
+            → reintento: el fragmento vuelve a BLANCO antes de que el coach relea
+            → el coach lee el fragmento → se pinta de azul EN VIVO SOBRE esa línea
+            → al terminar el coach, el fragmento queda en BLANCO (turno del usuario)
+            → cuando el usuario termina de hablar → SOLO esa línea se pinta con
+              semáforo (green/amber/red); los fragmentos ya aprobados conservan
+              su semáforo; el resto de la respuesta no se toca
+FULL      al terminar todos los fragmentos se DESPINTA el semáforo de todos y
+          la respuesta queda en BLANCO → el usuario lee la respuesta entera
+          → al final se pinta toda la respuesta con semáforo
+          → si no aprueba → vuelve a BLANCO y se reintenta (hasta aprobar)
+```
+
+Garantías:
+- El semáforo solo se aplica al **rango de spans de la línea en evaluación**; los *extras* del alineador (índices ≥ número de palabras de la línea) se descartan y nunca pintan spans ajenos.
+- El auto-scroll (`scrollIntoView({ block: "nearest" })`) mantiene la línea activa visible dentro del `karaoke-book` (`max-height: 46vh`).
+- `src/lib/cu2.ts` no cambia: el reducer ya modelaba el reintento de fragmento y el de respuesta completa; la vista se alinea con él.
+
+### Requerimientos de coloreado
+
+- [x] **Estado `reading` del book** (`.karaoke-book.reading`): todas las líneas en `--text`, opacidad 1 y sin blur mientras el coach lee la respuesta modelo/explica.
+- [x] **Azul en vivo parametrizado:** `speakWithKaraoke(text, token, { spans })` pinta `kw-spoken` sobre un subconjunto de spans (todo el book en MODEL, una sola línea en LOOP) y lo limpia al terminar la lectura.
+- [x] **Coloreado acotado por línea:** `colorWords(outcome, lineIndex)` sólo toca los spans de esa línea y conserva el semáforo de las líneas anteriores.
+- [x] **Reintento en blanco:** antes de que el coach (re)lea un fragmento se limpia su semáforo.
+- [x] **Reintento de respuesta completa:** la vista repite `fullAnswer → feedback` hasta que apruebe, como ya hacía el reducer.
+- [x] **Replay del WAV del usuario** acotado a la línea del intento (antes comparaba `words.length === spans.length` sobre todo el book y quedaba siempre desactivado).
+- [x] **Helpers puros** en `public/ui/karaoke-color.js` con tests (`tests/karaoke-color.test.ts`).
+
 ## Contexto
 
 - Caso de uso: **CU2** (`spec/use-cases/CU2.md`) — el corazón del producto.
