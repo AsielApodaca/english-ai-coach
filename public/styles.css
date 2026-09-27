@@ -563,8 +563,6 @@ body:not(.sidebar-open) .stage {
   max-width: 840px;
   margin: 0 auto;
   padding-top: 28px;
-  mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
 }
 
 .stage-view {

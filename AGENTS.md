@@ -33,7 +33,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - Errores de red LLM: envolver en `ProviderError` y dejar que la cadena de fallback pruebe el siguiente proveedor.
 - La llave de Cloudflare se auto-descubre desde `~/.local/share/opencode/auth.json` (fallback: `CLOUDFLARE_API_TOKEN` env) y la de Gemini desde `GEMINI_API_KEY`. Nunca hardcodear llaves.
 - Peticiones a `/api/*` con body JSON; errores como `{ error: string }` con status HTTP coherente.
-
+- UI: la región central de la pantalla (toda la vista sin sidebar ni top bar) se llama **`main-area`**; es el contenedor de las vistas de CU (config y práctica). Sinónimo obsoleto: "central stage". Ver `spec/design/screens.md`.
 ## No hagas
 - No subir `.env*` ni `data/` al repositorio (secreto + datos personales de práctica). Están en `.gitignore`.
 - No instalar dependencias npm sin avisar. Objetivo: mínimo absoluto (Express únicamente).
