@@ -3,6 +3,8 @@
 > Inventario de las pantallas del proyecto "english ai coach" (Stitch, project `projects/4993823217893855946`). Cada pantalla describe, en lenguaje de implementación, la estructura de UI que el frontend nuevo debe reproducir. La marca que aparece en los diseños ("Vocalis AI", "TechEnglish") es **no oficial**; el nombre del producto es **English AI Coach**.
 >
 > Fuente visual: descargable de Stitch. Para los agentes, la fuente normativa de texto/estructura es **este documento** más `ui-flow.md` y `design-system.md`.
+>
+> **Glosario de layout:** la región central de la pantalla —toda la vista **restando sidebar y top bar**— se llama **`main-area`** (nombre canónico). Es el contenedor que aloja las vistas de los casos de uso (config CU1 y práctica CU2/CU3). Aparece también como "central stage" en `styles.css`, `index.html` y otros specs: mismo concepto, usar `main-area` en documentación y código nuevo.
 
 ## Índice de pantallas y recursos Stitch
 
@@ -28,7 +30,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 **Estructura de layout:**
 - **Sidebar izquierda full-height (280px):** brand "English AI Coach" (logo `graphic_eq` + título) + botón colapso en el header; botón **New Session** (⌘K); historial agrupado Today / Previous 7 Days (cada item: título, score, level badge, anillo de progreso); footer con pill "Speech Engine · READY" arriba y fila de usuario (avatar, **Guest**, engranaje ⚙ settings) debajo.
 - **Top bar (derecha de la sidebar, ancho adaptativo):** toggle de apertura de la sidebar + breadcrumb "Studio / Config|Practice": logo/brand no vive aquí.
-- **Central stage (config):**
+- **`main-area` (config):**
   - Header "Iniciar nueva práctica" + breadcrumb.
   - **Instrucción de Rol para el AI Coach** (textarea de 2000 chars, contador `156/2000`): ejemplo del diseño — "Simula ser un Engineering Manager senior de Google realizando una entrevista técnica. Mi rol es el candidato. Hazme preguntas técnicas desafiantes…".
   - **Dropzone de archivos** (PDF/DOCX/TXT/MD): estado mínimo (drag), entrada con waveform + "Dead simple. Pick a file. Drop your PDF, docx, Txt, MD, or any other file. We handle the heavy lifting to turn it into context."
@@ -52,7 +54,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 **Estructura de layout:**
 - **Top bar** resumida: "Junior SWE First Interview" (nombre actual) + pill "Speech Engine · READY"; botón "Finalizar Sesión".
 - **Sidebar historial:** compacto; la sesión actual con badge **"ACTIVA (Q1)"** (número de pregunta en curso).
-- **Central stage (karaoke):**
+- **`main-area` (karaoke):**
   - Chip de feedback del encabezado: "Buen flujo · Foco en /tʃ/ · 92%".
   - **Líneas de letra estilo Spotify:** la línea activa es la más grande y brillante; líneas siguiente/anterior más bajas y atenuadas; **anotación de pronunciación legible palabra por palabra** sobre la línea activa (ej. `[WUR·king] working`, `[PRAH·jekt] project`; aproximaciones con `~`).
   - Subestrofa "Coach:" resaltada cuando el coach está hablando.

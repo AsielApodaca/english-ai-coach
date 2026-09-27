@@ -563,8 +563,6 @@ body:not(.sidebar-open) .stage {
   max-width: 840px;
   margin: 0 auto;
   padding-top: 28px;
-  mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
-  -webkit-mask-image: linear-gradient(to right, transparent, black 6%, black 94%, transparent);
 }
 
 .stage-view {
@@ -1866,6 +1864,14 @@ body.overlay-open {
   color: var(--muted);
   opacity: 0.35;
   filter: blur(1px);
+}
+
+/* While the coach reads the whole model answer every line stays white and
+   legible (beats .current/.past/.future on specificity). */
+.karaoke-book.reading .karaoke-line {
+  color: var(--text);
+  opacity: 1;
+  filter: none;
 }
 
 /* Word-level states */
