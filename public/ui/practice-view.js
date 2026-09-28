@@ -118,6 +118,13 @@ let stopKaraokeRead = null;
 /** Pending user-WAV replay; the retry pill and `cancelFlow()` can cut it. */
 let stopReplay = null;
 
+/**
+ * Canceller of the STT turn in flight (whisper prewarm/beep/mic or browser
+ * recognition). `cancelFlow()` invokes it so no beep, mic or timer survives
+ * the session that armed it.
+ */
+let cancelPendingTurn = null;
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -147,7 +154,10 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
       return;
     }
     if (state.sessionId && state.sessionId !== currentSessionId) {
+      // Switching sessions in place: tear the old flow down first, otherwise
+      // its TTS/STT keeps running over the new one.
       currentSessionId = state.sessionId;
+      cancelFlow();
       startFlow(state.sessionId);
     }
   });
@@ -169,6 +179,11 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
 function cancelFlow() {
   flowToken++;
   clearTimeout(autoAdvanceTimer);
+  clearTimeout(adjustmentTimer);
+  // Settle an in-flight STT turn first (while `dock` is still alive): its
+  // prewarm/beep/mic timers would otherwise fire after the session is gone.
+  cancelPendingTurn?.();
+  cancelPendingTurn = null;
   tts?.stop();
   stopKaraokeRead?.();
   stopReplay?.();
@@ -661,6 +676,7 @@ function waitForUserRecording(token) {
     const settle = (value, { cancel = true } = {}) => {
       if (settled) return;
       settled = true;
+      cancelPendingTurn = null;
       clearTimeout(noSpeechGuard);
       clearTimeout(maxTurn);
       if (cancel) recorder?.cancel();
@@ -674,6 +690,10 @@ function waitForUserRecording(token) {
       const blob = recorder?.stop();
       settle({ blob, timedOut: false }, { cancel: false });
     };
+
+    // Let `cancelFlow()` cut the turn short: prewarm, beep, mic start and
+    // both guards all hang off `settled`.
+    cancelPendingTurn = () => settle({ blob: null, timedOut: true });
 
     // Nothing heard for the whole turn → "didn't hear you".
     const noSpeechGuard = setTimeout(() => {
@@ -712,7 +732,12 @@ function waitForUserRecording(token) {
         settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
         return;
       }
-      if (settled) return;
+      // The turn may have been cancelled while getUserMedia was in flight:
+      // `settle()` ran before the stream existed, so release it now.
+      if (settled) {
+        recorder.cancel();
+        return;
+      }
       playBeep();
       await sleep(BEEP_READY_MS);
       if (settled) return;
@@ -741,6 +766,7 @@ function captureBrowserSpeech(token) {
     const finish = (value) => {
       if (done) return;
       done = true;
+      cancelPendingTurn = null;
       clearTimeout(guard);
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
@@ -760,6 +786,13 @@ function captureBrowserSpeech(token) {
       stt.abort();
       finish(null);
     }, GUARD_TIMEOUT_MS);
+
+    // `cancelFlow()` aborts recognition and settles the turn so the pending
+    // promise (and its guard timer) cannot outlive the session.
+    cancelPendingTurn = () => {
+      stt.abort();
+      finish(null);
+    };
 
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
