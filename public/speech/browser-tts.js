@@ -6,9 +6,10 @@
  *                   (online fallback) as chosen by the server.
  *   2. speechSynthesis — browser Web Speech API (last resort, always available).
  *
- * The public API (`speak`, `stop`, `supported`, `refresh`, `allVoices`,
- * `setHealth`) is unchanged so existing callers (`autoplayFragment`,
- * `speakCoachFeedback`, chat read-aloud) keep working without modification.
+ * The public API (`speak`, `stop`, `setVolume`, `supported`, `refresh`,
+ * `allVoices`, `setHealth`) — the previous surface plus `setVolume` — keeps
+ * existing callers (`autoplayFragment`, `speakCoachFeedback`, chat read-aloud)
+ * working without modification.
  */
 export class BrowserTTS {
   /** @type {SpeechSynthesisVoice[]} */
@@ -35,6 +36,9 @@ export class BrowserTTS {
 
   /** Id of the newest `speak()` call; superseded calls must not keep playing. */
   _callId = 0;
+
+  /** @type {SpeechSynthesisUtterance|null} utterance currently being spoken. */
+  _utt = null;
 
   constructor() {
     if ("speechSynthesis" in window) {
@@ -200,11 +204,39 @@ export class BrowserTTS {
       if (v) utt.voice = v;
     }
     return new Promise((resolve) => {
-      utt.onend = () => resolve(true);
-      utt.onerror = () => resolve(false);
+      // Keep the reference so `setVolume()` can adjust a read already running.
+      this._utt = utt;
+      const done = (ok) => {
+        if (this._utt === utt) this._utt = null;
+        resolve(ok);
+      };
+      utt.onend = () => done(true);
+      utt.onerror = () => done(false);
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(utt);
     });
+  }
+
+  /**
+   * Apply a volume (0–1) to whatever the engine is playing right now, so the
+   * settings slider can move a read that has already started.
+   *
+   * Live adjustment is native to `HTMLAudioElement` (server TTS: Piper /
+   * edge-tts — the default path). For `speechSynthesis` the value is written
+   * onto the live utterance too: engines that sample the property during
+   * playback honour it, Chrome samples it when `speak()` starts and only
+   * applies the new volume on the next utterance. Restarting the utterance
+   * would be the only way to change it mid-line, and that would replay from
+   * the beginning.
+   *
+   * @param {number} volume - 0–1
+   */
+  setVolume(volume) {
+    const v = Number(volume);
+    if (!Number.isFinite(v)) return;
+    const vol = Math.max(0, Math.min(1, v));
+    if (this._audio) this._audio.volume = vol;
+    if (this._utt) this._utt.volume = vol;
   }
 
   // -----------------------------------------------------------------------
@@ -221,6 +253,7 @@ export class BrowserTTS {
     this._stopCurrentAudio();
     // Stop browser speechSynthesis.
     if (this.supported()) window.speechSynthesis.cancel();
+    this._utt = null;
   }
 
   /**

@@ -229,3 +229,57 @@ test("a newer speak() supersedes the previous one instead of playing over it", a
   FakeAudio.instances[1].onended?.();
   assert.equal(await second, true, "the newest read still finishes normally");
 });
+
+// ---------------------------------------------------------------------------
+// Volume: the setting must apply on start and while the coach is speaking
+// ---------------------------------------------------------------------------
+
+test("a read honours the configured volume instead of defaulting to 100%", async () => {
+  immediateFetch(true);
+  const tts = serverTts();
+
+  const pending = tts.speak("quiet line", { volume: 0.2 });
+  await tick();
+
+  assert.equal(FakeAudio.instances[0].volume, 0.2, "server audio starts at 20%");
+
+  FakeAudio.instances[0].onended?.();
+  await pending;
+});
+
+test("setVolume() retunes a server read that is already playing", async () => {
+  immediateFetch(true);
+  const tts = serverTts();
+
+  const pending = tts.speak("line", { volume: 0.2 });
+  await tick();
+  assert.equal(FakeAudio.instances[0].volume, 0.2);
+
+  tts.setVolume(0.7); // ← slider moved mid-sentence
+  assert.equal(FakeAudio.instances[0].volume, 0.7, "applied live, no restart");
+
+  FakeAudio.instances[0].onended?.();
+  await pending;
+});
+
+test("setVolume() retunes the live utterance and clamps what it is given", async () => {
+  const tts = new BrowserTTS(); // no server engine → speechSynthesis layer
+  void tts.speak("browser line", { volume: 0.3 });
+  assert.equal(synthesis.spoken[0].volume, 0.3, "utterance starts at the setting");
+
+  tts.setVolume(0.8);
+  assert.equal(synthesis.spoken[0].volume, 0.8, "applied to the utterance in flight");
+
+  tts.setVolume(5);
+  assert.equal(synthesis.spoken[0].volume, 1, "values above 1 clamp to 1");
+
+  tts.setVolume(Number.NaN);
+  assert.equal(synthesis.spoken[0].volume, 1, "non-numeric input is ignored");
+});
+
+test("setVolume() with nothing playing is a safe no-op", () => {
+  const tts = new BrowserTTS();
+  tts.setVolume(0.4);
+  assert.equal(tts._audio, null);
+  assert.equal(tts._utt, null);
+});

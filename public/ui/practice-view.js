@@ -32,6 +32,7 @@ import { pickStt } from "../speech/stt-pick.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { getLocal } from "./settings/local.js";
+import { volumeFactor } from "./settings/volume.js";
 
 /** No speech heard this whole turn → failed attempt + retry. */
 const GUARD_TIMEOUT_MS = 20_000;
@@ -115,6 +116,14 @@ let lastAttemptLineIndex = -2;
 /** Pending karaoke read; the dock's retry pill can cut it short. */
 let stopKaraokeRead = null;
 
+/**
+ * The `<audio>` element of the read in flight (karaoke reads build their own
+ * element instead of going through `BrowserTTS`), so a settings change can
+ * re-apply the volume while it plays.
+ * @type {HTMLAudioElement|null}
+ */
+let readAudio = null;
+
 /** Pending user-WAV replay; the retry pill and `cancelFlow()` can cut it. */
 let stopReplay = null;
 
@@ -165,9 +174,12 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
   // Live device prefs (feature 108): IPA + live highlight apply immediately.
   window.addEventListener("engcoach:settings-changed", () => {
     if (store.state.route?.view !== "practice") return;
+    const prev = { showIpa, liveHighlight };
     applyLiveSettings();
-    // Re-render the book preserving the phase, the active line + colors.
-    rebuildBook();
+    // Only re-render for prefs that change the book itself: a volume drag
+    // fires on every step and a rebuild would wipe the highlights of the read
+    // in progress.
+    if (prev.showIpa !== showIpa || prev.liveHighlight !== liveHighlight) rebuildBook();
   });
 }
 
@@ -546,6 +558,10 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     if (token !== flowToken) return;
     const url = URL.createObjectURL(blob);
     audio = new Audio(url);
+    // The engine defaults to 1.0: without this the model answer and every
+    // fragment re-read played at 100% regardless of the user's setting.
+    audio.volume = volumeSetting();
+    readAudio = audio;
     let durationMs = 0;
     try {
       const buf = await blob.arrayBuffer();
@@ -581,6 +597,7 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     await tts.speak(text, { rate, volume: volumeSetting() });
   } finally {
     stopKaraokeRead = null;
+    if (readAudio === audio) readAudio = null;
     stopProgress();
     activeSpans.forEach((s) => s.classList.remove("kw-spoken"));
     if (audio) URL.revokeObjectURL(audio.src);
@@ -1341,10 +1358,27 @@ function applyLiveSettings() {
   showIpa = Boolean(getLocal("showIpa", true));
   liveHighlight = Boolean(getLocal("liveHighlight", true));
   if (els?.book) els.book.classList.toggle("no-ipa", !showIpa);
+  applyLiveVolume();
 }
 
-/** Coach volume (0–1) from the device prefs (spec 108). */
+/**
+ * Re-apply the coach volume to whatever is speaking right now, so moving the
+ * settings slider mid-sentence takes effect immediately instead of only on
+ * the next read.
+ */
+function applyLiveVolume() {
+  const v = volumeSetting();
+  tts?.setVolume(v);
+  if (readAudio) readAudio.volume = v;
+}
+
+/**
+ * Coach volume (0.1–1) from the device prefs (spec 108).
+ *
+ * `volumeFactor` enforces the 10% floor, so a legacy `0` in localStorage can
+ * never mute the coach.
+ * @returns {number}
+ */
 function volumeSetting() {
-  const v = Number(getLocal("volume", 100));
-  return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) / 100 : 1;
+  return volumeFactor(getLocal("volume", 100));
 }
