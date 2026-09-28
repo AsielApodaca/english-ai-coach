@@ -104,8 +104,12 @@ function volumeSlider() {
     "aria-label": "Volumen",
   });
   const valueEl = h("span", { class: "settings-range-value" }, `${current}%`);
+  // Drives the fill of the custom track (see `.settings-range` in styles.css).
+  const setFill = (pct) => input.style.setProperty("--range-pct", String(pct));
+  setFill(current);
   input.addEventListener("input", () => {
     const pct = clampVolumePct(input.value);
+    setFill(pct);
     valueEl.textContent = `${pct}%`;
     setLocal("volume", pct);
   });

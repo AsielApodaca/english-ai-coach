@@ -821,6 +821,82 @@ body.overlay-open {
   text-align: right;
 }
 
+/*
+ * Volume slider (feature 108).
+ *
+ * The range input is drawn from scratch instead of using the native control:
+ * Chrome/Safari inset the native track by the input's padding, so at 100% the
+ * filled portion stopped short of the right edge and read as ~90%. The fill
+ * comes from a gradient pinned to `--range-pct` (set by the control), which
+ * always matches the value exactly.
+ */
+.settings-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 160px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.settings-range:focus {
+  outline: none;
+}
+
+.settings-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--accent) 0%,
+    var(--accent) calc(var(--range-pct, 100) * 1%),
+    var(--panel-3) calc(var(--range-pct, 100) * 1%),
+    var(--panel-3) 100%
+  );
+}
+
+.settings-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.settings-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel-3);
+}
+
+.settings-range::-moz-range-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.settings-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.settings-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.settings-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
 .settings-readonly {
   font-family: var(--font-mono);
   font-size: 12px;
