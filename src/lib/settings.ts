@@ -110,6 +110,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   focusPhonemes: [],
 };
 
+/** Lowest coach volume (percent) the UI allows — a silent coach is useless. */
+export const MIN_VOLUME = 10;
+
+/** Highest coach volume (percent). */
+export const MAX_VOLUME = 100;
+
 /** localStorage keys for the device prefs (documented in spec 108). */
 export const LOCAL_SETTINGS_KEYS: Record<string, string> = {
   mic: "engcoach.mic",
@@ -176,7 +182,9 @@ export function parseLocalSettings(raw: Record<string, unknown>): Partial<AppSet
   const out: Partial<AppSettings> = {};
   if (typeof raw.mic === "string") out.mic = raw.mic;
   const volume = toFiniteNumber(raw.volume);
-  if (volume !== null) out.volume = Math.max(0, Math.min(100, volume));
+  // The slider bottoms out at MIN_VOLUME: a stored 0 means "legacy value", not
+  // "mute the coach".
+  if (volume !== null) out.volume = Math.max(MIN_VOLUME, Math.min(MAX_VOLUME, volume));
   const showIpa = toBool(raw.showIpa);
   if (showIpa !== null) out.showIpa = showIpa;
   const autoAdvance = toBool(raw.autoAdvance);

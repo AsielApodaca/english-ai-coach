@@ -8,6 +8,7 @@
 import { h } from "../dom.js";
 import { settingsSection, settingRow, toggleControl } from "./ui.js";
 import { getLocal, setLocal } from "./local.js";
+import { clampVolumePct, MIN_VOLUME_PCT, MAX_VOLUME_PCT } from "./volume.js";
 
 /**
  * Render the General & Audio tab into `root`.
@@ -26,7 +27,7 @@ export function renderGeneralAudio(root, ctx) {
         }),
         settingRow({
           label: "Volumen",
-          hint: "Volumen del coach (TTS).",
+          hint: "Volumen del coach (TTS). Mínimo 10%.",
           control: volumeSlider(),
         }),
       ]),
@@ -85,21 +86,28 @@ function micSelect() {
   return select;
 }
 
-/** Volume slider (0–100) with a live % readout. */
+/**
+ * Volume slider (10–100) with a live % readout.
+ *
+ * The floor is `MIN_VOLUME_PCT`: a silent coach defeats the point of the
+ * practice session, so the control cannot go below it and a legacy `0` stored
+ * by older builds reads back as 10%.
+ */
 function volumeSlider() {
-  const current = Number(getLocal("volume", 100));
+  const current = clampVolumePct(getLocal("volume", 100));
   const input = h("input", {
     type: "range",
     class: "settings-range",
-    min: "0",
-    max: "100",
+    min: String(MIN_VOLUME_PCT),
+    max: String(MAX_VOLUME_PCT),
     value: String(current),
     "aria-label": "Volumen",
   });
   const valueEl = h("span", { class: "settings-range-value" }, `${current}%`);
   input.addEventListener("input", () => {
-    valueEl.textContent = `${input.value}%`;
-    setLocal("volume", Number(input.value));
+    const pct = clampVolumePct(input.value);
+    valueEl.textContent = `${pct}%`;
+    setLocal("volume", pct);
   });
   return h("div", { class: "settings-range-wrap" }, [input, valueEl]);
 }

@@ -73,9 +73,10 @@ test("settings: parseLocalSettings ignores invalid values", () => {
   assert.equal(parsed.whisperModel, undefined);
 });
 
-test("settings: parseLocalSettings clamps volume to 0-100", () => {
+test("settings: parseLocalSettings clamps volume to the 10-100% range", () => {
   assert.equal(parseLocalSettings({ volume: "150" }).volume, 100);
-  assert.equal(parseLocalSettings({ volume: "-5" }).volume, 0);
+  assert.equal(parseLocalSettings({ volume: "-5" }).volume, 10, "below the slider floor");
+  assert.equal(parseLocalSettings({ volume: "0" }).volume, 10, "a stored 0 is not silent");
 });
 
 // ---------------------------------------------------------------------------
