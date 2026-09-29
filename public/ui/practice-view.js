@@ -875,6 +875,8 @@ function outcomeFromJson(json, target, kind) {
     words: Array.isArray(json.words) ? json.words : [],
     target,
     heard: typeof json.text === "string" ? json.text : "",
+    missing: Array.isArray(json.missing) ? json.missing : [],
+    added: Array.isArray(json.addedWords) ? json.addedWords : [],
     coachLine: json.coachLine ?? "",
   };
 }
@@ -889,6 +891,8 @@ function timedOutOutcome(target, kind) {
     words: [],
     target,
     timedOut: true,
+    missing: [],
+    added: [],
     coachLine: "I didn't hear you. Let's try that again.",
   };
 }
@@ -1076,7 +1080,9 @@ function renderFeedback(outcome, lineIndex) {
   lastAttemptLineIndex = lineIndex;
   colorWords(outcome, lineIndex);
   const passed = outcome.passed;
-  const focus = (outcome.missing ?? []).slice(0, 2).join(", ");
+  const missingFocus = (outcome.missing ?? []).slice(0, 2).join(", ");
+  const addedFocus = (outcome.added ?? []).slice(0, 2).join(", ");
+  const focus = missingFocus || (addedFocus ? `palabras de más: ${addedFocus}` : "") || "pronunciación";
   const chipText = passed
     ? `Buen flujo · ${outcome.score}%`
     : `Foco en ${focus || "pronunciación"} · ${outcome.score}%`;

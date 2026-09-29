@@ -307,6 +307,13 @@ test("buildFeedbackText: passed → positive with tip; failed → focus on missi
   assert.match(fail, /try that again/);
 });
 
+test("buildFeedbackText: failed with nothing missing but added words → tells the user to drop them", () => {
+  const line = buildFeedbackText({ score: 55, passed: false, missing: [], extra: ["i", "like", "chocolate"], tips: [] });
+  assert.match(line, /55 percent/);
+  assert.match(line, /Drop the extra words: i, like, chocolate/);
+  assert.match(line, /try that again/);
+});
+
 // --- Pass threshold ---------------------------------------------------------
 
 test("DEFAULT_PASS_THRESHOLD is 70", () => {

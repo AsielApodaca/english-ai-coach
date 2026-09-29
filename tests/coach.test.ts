@@ -129,3 +129,23 @@ test("evaluateFragment: still returns deterministic feedback when LLM fails", as
   assert.ok(evaluation.score < 100);
   assert.ok(["retry", "almost", "great"].includes(evaluation.verdict));
 });
+
+test("evaluateFragment: invented words are reported as an issue and lower the score", async () => {
+  const target = "I handled the situation well.";
+  const user = "I like chocolate, I handled the situation well.";
+  const { evaluation } = await evaluateFragment([failing("amber"), failing("gemini")], {
+    target,
+    userText: user,
+    question: "q",
+    level: "B2",
+  });
+  assert.deepEqual(evaluation.missing, []);
+  const issue = evaluation.issues.find((i) => i.category === "other");
+  assert.ok(issue, `issues=${JSON.stringify(evaluation.issues)}`);
+  assert.ok(issue.message.includes("like") && issue.message.includes("chocolate"));
+  // 3 spoken words outside the fragment subtract from the 5 matched → 40.
+  assert.deepEqual(evaluation.extra, ["i", "like", "chocolate"]);
+  assert.equal(evaluation.score, 40);
+  assert.equal(evaluation.verdict, "retry");
+  assert.equal(evaluation.next, false);
+});

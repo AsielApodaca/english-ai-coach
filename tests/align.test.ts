@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { alignWords, alignTextWords, levenshtein } from "../src/lib/align.ts";
+import { countExtraWords, penalizedScore } from "../src/lib/practice.ts";
 import type { WhisperWord } from "../src/lib/whisper.ts";
 
 /**
@@ -132,7 +133,7 @@ test("alignWords: extra filler tokens appended at the END as red with their own 
   assert.deepEqual(r.words[2], { word: "uh", status: "red", startMs: 0, endMs: 400 });
   assert.deepEqual(r.words[3], { word: "hmm", status: "red", startMs: 1500, endMs: 1900 });
   assert.deepEqual(r.extra, ["uh", "hmm"]);
-  // Extras do not lower the score (denominator = target words only).
+  // Fillers never lower the score: they are not real extra content.
   assert.equal(r.score, 100);
 });
 
@@ -179,32 +180,88 @@ test("alignWords: empty target with spoken speech → every spoken word appended
 
 // --- Score ↔ words coherence (property) ------------------------------------
 
-test("alignWords: score == round(100 * (green+amber target words) / target words)", () => {
-  // Rule: the denominator is the number of TARGET display words (extras
-  // appended at the end are red and excluded); numerator counts target
-  // positions (first n entries of words[]) that are green or amber.
+test("alignWords: score == penalizedScore(target words, green+amber, non-filler extras)", () => {
+  // Rule: the denominator is the number of TARGET display words; the numerator
+  // is the green/amber target positions MINUS every spoken word that matched
+  // nothing (natural fillers excluded) — padding the fragment with content the
+  // user made up must not score 100.
   const cases: Array<[spoken: string, target: string]> = [
     ["I handled it well", "I handled it well"], // 100
     ["I handled the well", "I handled the situation well"], // 80
-    ["uh difficult situation hmm", "difficult situation"], // 100 (extras don't weigh)
+    ["uh difficult situation hmm", "difficult situation"], // 100 (fillers don't weigh)
     ["I worked have", "I have worked"], // 100 (reconciled counts as matched)
     ["the problem", "the the problem"], // 67
     ["handel", "handled with care"], // 33 (only "handel"→"handled" partial)
     ["", "one two three"], // 0
     ["the system handel the request uh", "the system handled the request"], // 100
     ["I", "I've done it"], // 33 (half contraction amber counts as matched)
+    ["Well I handled it", "I handled it"], // 67 (one real extra word)
+    [
+      "I like chocolate Im currently working on making chocolates a project that improves our test coverage",
+      "Im currently working on a project that improves our test coverage",
+    ], // 55 (five invented words subtract from the 11 matched)
   ];
   for (const [sp, tg] of cases) {
     const r = alignWords(spoken(sp), tg);
     const n = targetCount(tg);
     const targetWords = r.words.slice(0, n);
     const good = targetWords.filter((w) => w.status === "green" || w.status === "amber").length;
-    const expected = n === 0 ? 0 : Math.round((100 * good) / n);
+    const expected = penalizedScore(n, good, countExtraWords(r.extra));
     assert.equal(r.score, expected, `spoken="${sp}" target="${tg}"`);
     // Appended extras live after the target positions and are always red.
     assert.ok(r.words.slice(n).every((w) => w.status === "red"), `spoken="${sp}"`);
     assert.equal(r.words.length, n + r.extra.length, `spoken="${sp}" target="${tg}"`);
   }
+});
+
+// --- Added content outside the fragment (regression) ------------------------
+
+/** Fragment the coach asked to repeat (11 words). */
+const BUG_TARGET = "Im currently working on a project that improves our test coverage";
+/** The same fragment buried inside 5 invented words (16 words total). */
+const BUG_SPOKEN =
+  "I like chocolate Im currently working on making chocolates a project that improves our test coverage";
+
+test("alignWords: padding the fragment with invented words cannot score 100", () => {
+  const r = alignWords(spoken(BUG_SPOKEN), BUG_TARGET);
+  assert.deepEqual(r.missing, []); // every target word WAS said…
+  assert.deepEqual(r.extra, ["I", "like", "chocolate", "making", "chocolates"]);
+  // …but the 5 invented words subtract from the 11 matched → 55, not 100.
+  assert.equal(r.score, 55);
+  assert.ok(r.score < 70);
+});
+
+test("alignTextWords: padding the fragment with invented words cannot score 100", () => {
+  const r = alignTextWords(BUG_SPOKEN, BUG_TARGET);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, ["i", "like", "chocolate", "making", "chocolates"]);
+  assert.equal(r.score, 55);
+  assert.ok(r.score < 70);
+});
+
+test("alignWords: a single invented word lowers the score but still passes", () => {
+  const r = alignWords(spoken("Well I handled the situation well"), "I handled the situation well");
+  assert.deepEqual(r.extra, ["Well"]);
+  assert.equal(r.score, 80);
+});
+
+test("alignWords: only natural fillers → score stays 100", () => {
+  const r = alignWords(spoken("uh I handled the situation well hmm"), "I handled the situation well");
+  assert.deepEqual(r.extra, ["uh", "hmm"]);
+  assert.equal(r.score, 100);
+});
+
+test("alignWords: trailing punctuation-only whisper token does not cap a perfect repetition", () => {
+  // Real regression: whisper emitted "coverage ." as two words, so the stray
+  // "." was counted as an insertion → 11/12 = 92, below the Estricto
+  // threshold (93) → the user looped forever on an all-green fragment.
+  const target = "I am currently working on a project that improves our test coverage.";
+  const r = alignWords(spoken("I am currently working on a project that improves our test coverage ."), target);
+  assert.deepEqual(targetStatuses(r.words, 12), Array(12).fill("green"));
+  assert.deepEqual(r.extra, []);
+  assert.equal(r.score, 100);
+  // Same input through the text path (tokenize drops punctuation) → 100.
+  assert.equal(alignTextWords("I am currently working on a project that improves our test coverage .", target).score, 100);
 });
 
 // --- Levenshtein ------------------------------------------------------------
@@ -235,7 +292,7 @@ test("alignWords: transposition + filler — out-of-place word amber, filler sta
   assert.deepEqual(r.extra, ["uh"]);
   assert.equal(r.words[3].status, "red"); // appended filler keeps its own ts
   assert.deepEqual({ startMs: r.words[3].startMs, endMs: r.words[3].endMs }, { startMs: 1500, endMs: 1900 });
-  assert.equal(r.score, 100); // score counts green + amber target words
+  assert.equal(r.score, 100); // green+amber target words; "uh" is a filler
 });
 
 // ---------------------------------------------------------------------------
@@ -301,13 +358,14 @@ test("alignTextWords: word-order transposition — out-of-place word is red, nev
   assert.equal(r.score, 67);
 });
 
-test("alignTextWords: repeated filler duplicate still surfaces once in extra", () => {
+test("alignTextWords: repeated word beyond the target counts as an extra", () => {
   const r = alignTextWords("bye bye", "bye");
   assert.equal(r.words.length, 1);
   assert.equal(r.words[0].status, "green");
-  assert.equal(r.score, 100);
   assert.deepEqual(r.missing, []);
   assert.deepEqual(r.extra, ["bye"]);
+  // The duplicate is real content (not a filler): it subtracts from the score.
+  assert.equal(r.score, 0);
 });
 
 test("alignTextWords: empty spoken → all target words red, score 0", () => {
@@ -324,20 +382,25 @@ test("alignTextWords: empty target → words [], score 0", () => {
   assert.deepEqual(r.extra, ["hello", "world"]);
 });
 
-test("alignTextWords: score == round(100 * green target words / target words)", () => {
+test("alignTextWords: score == penalizedScore(target words, greens, non-filler extras)", () => {
   const cases: Array<[spoken: string, target: string]> = [
     ["I handled it well", "I handled it well"], // 100
     ["I handled the well", "I handled the situation well"], // 80
-    ["uh difficult situation hmm", "difficult situation"], // 100 (extras don't weigh)
+    ["uh difficult situation hmm", "difficult situation"], // 100 (fillers don't weigh)
     ["I worked have", "I have worked"], // 67 (out-of-place word is red textually)
     ["", "one two three"], // 0
     ["I", "I've done it"], // 0 (half contraction is red textually)
+    ["Well I handled it", "I handled it"], // 67 (one real extra word)
+    [
+      "I like chocolate Im currently working on making chocolates a project that improves our test coverage",
+      "Im currently working on a project that improves our test coverage",
+    ], // 55 (five invented words subtract from the 11 matched)
   ];
   for (const [sp, tg] of cases) {
     const r = alignTextWords(sp, tg);
     const n = targetCount(tg);
     const good = r.words.filter((w) => w.status === "green").length;
-    const expected = n === 0 ? 0 : Math.round((100 * good) / n);
+    const expected = penalizedScore(n, good, countExtraWords(r.extra));
     assert.equal(r.score, expected, `spoken="${sp}" target="${tg}"`);
     assert.equal(r.words.length, n, `spoken="${sp}" target="${tg}"`);
   }

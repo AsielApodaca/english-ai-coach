@@ -367,16 +367,19 @@ export function buildFeedbackText(outcome: {
   score: number;
   passed: boolean;
   missing: string[];
+  /** Words said outside the fragment (natural fillers already removed). */
+  extra?: string[];
   tips: string[];
 }): string {
   if (outcome.passed) {
     const tip = outcome.tips[0] ? ` ${outcome.tips[0]}` : "";
     return `Great job! That was ${outcome.score} percent accurate.${tip}`;
   }
-  const focus = outcome.missing.length
-    ? ` Focus on: ${outcome.missing.slice(0, 3).join(", ")}.`
-    : "";
-  return `Almost there. That was ${outcome.score} percent. Let's try that again.${focus}`;
+  const focus: string[] = [];
+  if (outcome.missing.length) focus.push(`Focus on: ${outcome.missing.slice(0, 3).join(", ")}`);
+  if (outcome.extra?.length) focus.push(`Drop the extra words: ${outcome.extra.slice(0, 3).join(", ")}`);
+  const hint = focus.length ? ` ${focus.join(". ")}.` : "";
+  return `Almost there. That was ${outcome.score} percent. Let's try that again.${hint}`;
 }
 
 /** Default pass threshold when the session/config carries no override. */
