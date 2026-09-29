@@ -1,4 +1,4 @@
-import { normalize, tokenize } from "./practice.ts";
+import { countExtraWords, isFiller, normalize, penalizedScore, tokenize } from "./practice.ts";
 import type { WhisperWord } from "./whisper.ts";
 
 /** One colored word of the karaoke line (target words + trailing extras). */
@@ -157,8 +157,10 @@ function alignTokens(
  * Spoken tokens with no target position (extras, fillers) are appended at the
  * END of `words` as red, keeping their own timestamps. Missing target words
  * inherit the timestamps of the last matched target word before them (0 if
- * none). `score` is `round(100 * matchedTargetWords / targetWords)` where
- * matched counts green + amber.
+ * none). `score` is `penalizedScore(targetWords, matchedTargetWords, extras)`
+ * — matched counts green + amber, and every spoken word that matched nothing
+ * subtracts one from the numerator (natural fillers like uh/um never do), so
+ * padding the fragment with extra content can no longer score 100.
  *
  * @param spoken word-timestamped transcription of the user's attempt
  * @param target the fragment the user had to repeat
@@ -184,8 +186,16 @@ export function alignWords(
   }
 
   const spokenTokens: SpokenToken[] = [];
+  // Whisper sometimes emits punctuation-only tokens ("." , ","). They yield no
+  // normalized tokens, so they are not words at all: they never take part in
+  // the alignment (nor render as extras) and must not count as insertions,
+  // otherwise a perfect repetition is capped at (n-1)/n by a stray ".".
+  const spokenIsWord = new Array<boolean>(spoken.length).fill(false);
   for (let i = 0; i < spoken.length; i++) {
-    for (const tok of tokenize(spoken[i].word)) spokenTokens.push({ token: tok, wordIdx: i });
+    const tokens = tokenize(spoken[i].word);
+    if (tokens.length === 0) continue;
+    spokenIsWord[i] = true;
+    for (const tok of tokens) spokenTokens.push({ token: tok, wordIdx: i });
   }
 
   const { targetMatch, spokenMatch, targetQuality } = alignTokens(targetNorms, spokenTokens);
@@ -257,7 +267,20 @@ export function alignWords(
 
   const matched = targetTokens.filter((_, i) => matchedCount[i] > 0).map((t) => t.raw);
   const missing = targetTokens.filter((_, i) => matchedCount[i] === 0).map((t) => t.raw);
-  const score = targetTokens.length === 0 ? 0 : Math.round((100 * matched.length) / targetTokens.length);
+  // Insertions: spoken words that matched no target position at all (a word is
+  // matched when ANY of its sub-tokens matched), minus natural fillers and
+  // non-word tokens (punctuation) which carry no tokens at all.
+  const wordMatched = new Array<boolean>(spoken.length).fill(false);
+  for (let si = 0; si < spokenTokens.length; si++) {
+    if (spokenMatch[si] !== null) wordMatched[spokenTokens[si].wordIdx] = true;
+  }
+  let insertions = 0;
+  for (let i = 0; i < spoken.length; i++) {
+    if (!spokenIsWord[i] || wordMatched[i]) continue;
+    if (isFiller(normalize(spoken[i].word))) continue;
+    insertions++;
+  }
+  const score = penalizedScore(targetTokens.length, matched.length, insertions);
 
   return { words, score, matched, missing, extra };
 }
@@ -291,7 +314,9 @@ export interface TextAlignResult {
  * Coloring per target word: green when every normalized sub-token of the word
  * is matched by the LCS; red otherwise. Spoken tokens with no target position
  * (extras) are returned in `extra` (not rendered on the line). `score` is
- * `round(100 * matchedTargetWords / targetWords)`.
+ * `penalizedScore(targetWords, greenWords, nonFillerExtras)` — words added
+ * outside the fragment subtract from the numerator, so repeating the fragment
+ * plus unrelated content cannot score 100.
  */
 export function alignTextWords(spokenText: string, target: string): TextAlignResult {
   const rawTarget = target.trim().split(/\s+/).filter(Boolean);
@@ -376,7 +401,7 @@ export function alignTextWords(spokenText: string, target: string): TextAlignRes
     .filter((_, idx) => matchedCount[idx] < targetTokens[idx].norm.length && !anyReconciled[idx])
     .map((t) => t.raw);
   const extra = spokenNorms.filter((_, idx) => !usedSpoken.has(idx));
-  const score = targetTokens.length === 0 ? 0 : Math.round((100 * matched.length) / targetTokens.length);
+  const score = penalizedScore(targetTokens.length, matched.length, countExtraWords(extra));
 
   return { words, score, matched, missing, extra };
 }

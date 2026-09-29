@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { buildProviders, completeWithFallback, providerById, providerStatus } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
-import { evaluateFragment, generatePracticeSet, tokenize } from "./lib/practice.ts";
+import { evaluateFragment, generatePracticeSet, isFiller, normalize, tokenize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, transcribeWords, downloadModel, type WhisperWord } from "./lib/whisper.ts";
 import { alignWords, alignTextWords } from "./lib/align.ts";
@@ -677,6 +677,10 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
     const forcedAmberWords = evaluation.provider === "none" ? [] : forcedAmberWordsFromIssues(evaluation.issues, target);
     const align = words.length > 0 ? alignWords(words, target, { forcedAmberWords }) : alignTextWords(text, target);
     const passed = align.score >= passThreshold;
+    // Real words said outside the fragment (natural fillers excluded): they
+    // lower align.score and are what the coach asks the user to drop. Display
+    // form is normalized so "chocolate," reads as "chocolate".
+    const addedWords = [...new Set(align.extra.map((w) => normalize(w)).filter((w) => w.length > 0 && !isFiller(w)))];
     persistAttempt({
       evaluation,
       sessionId,
@@ -695,6 +699,7 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       matched: align.matched,
       missing: align.missing,
       extra: align.extra,
+      addedWords,
       issues: evaluation.issues,
       verdict: evaluation.verdict,
       next: evaluation.next,
@@ -705,6 +710,7 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
         score: align.score,
         passed,
         missing: align.missing,
+        extra: addedWords,
         tips: evaluation.tips,
       }),
     });

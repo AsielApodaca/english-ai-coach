@@ -153,7 +153,40 @@ export function tokenize(text: string): string[] {
   return normalize(text).split(" ").filter(Boolean);
 }
 
+/** Hesitation/filler tokens that never penalize an attempt score. */
+const FILLER_WORDS = new Set(["uh", "uhh", "um", "umm", "er", "erm", "ah", "eh", "hm", "hmm", "mmm", "mhm"]);
+
+/** True when a normalized token is a pure hesitation/filler word. */
+export function isFiller(token: string): boolean {
+  return FILLER_WORDS.has(token);
+}
+
+/** Number of spoken tokens that count against the score (fillers excluded). */
+export function countExtraWords(extras: string[]): number {
+  return extras.filter((w) => !isFiller(w)).length;
+}
+
+/**
+ * Score an attempt against its target fragment (0-100).
+ *
+ * Missing target words and words added outside the fragment both lower the
+ * score: every counted extra subtracts one matched word, so merely containing
+ * the target never yields 100 (a user padding the fragment with their own
+ * content is not a correct repetition). Natural fillers (uh/um/...) are
+ * excluded from `extras` by the caller and never penalize.
+ *
+ * @param targetCount number of words in the target fragment
+ * @param matched target words the user actually said
+ * @param extras spoken words outside the target (fillers already removed)
+ */
+export function penalizedScore(targetCount: number, matched: number, extras: number): number {
+  if (targetCount === 0) return 0;
+  const value = Math.round((100 * (matched - extras)) / targetCount);
+  return Math.max(0, Math.min(100, value));
+}
+
 export interface WordMatch {
+  /** 0-100: (target words said − non-filler added words) over the target length. */
   score: number;
   matched: string[];
   missing: string[];
@@ -178,13 +211,15 @@ export function wordMatch(target: string, user: string): WordMatch {
       else set(i, j, Math.max(at(i - 1, j), at(i, j - 1)));
     }
   }
-  // backtrack to find matched positions
+  // backtrack to find matched positions (target index + the spoken index it consumed)
   const matchedIdxs: number[] = [];
+  const usedSpoken = new Set<number>();
   let i = n;
   let j = m;
   while (i > 0 && j > 0) {
     if (t[i - 1] === u[j - 1]) {
       matchedIdxs.push(i - 1);
+      usedSpoken.add(j - 1);
       i--;
       j--;
     } else if (at(i - 1, j) >= at(i, j - 1)) {
@@ -196,14 +231,12 @@ export function wordMatch(target: string, user: string): WordMatch {
   const matchedSet = new Set(matchedIdxs);
   const matched = t.filter((_, idx) => matchedSet.has(idx));
   const missing = t.filter((_, idx) => !matchedSet.has(idx));
-  const used = new Set<string>();
-  for (const idx of matchedIdxs) used.add(t[idx]);
-  const extra = u.filter((w) => !used.has(w));
+  // Extras are the spoken tokens the LCS did not consume (by index, so a
+  // repeated target word still surfaces as an extra instead of vanishing
+  // because its value matches a consumed one).
+  const extra = u.filter((_, idx) => !usedSpoken.has(idx));
   const lcs = matched.length;
-  const recall = n === 0 ? 1 : lcs / n;
-  const precision = m === 0 ? 0 : lcs / m;
-  const fScore = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
-  return { score: Math.round(fScore * 100), matched, missing, extra };
+  return { score: penalizedScore(n, lcs, countExtraWords(extra)), matched, missing, extra };
 }
 
 const SYSTEM_EVALUATE = `You are an experienced English pronunciation/fluency coach for a Spanish-speaking software engineer.
@@ -246,13 +279,27 @@ export async function evaluateFragment(
   }
   const score = Math.round(0.75 * lexical.score + 0.25 * feedback.naturalness);
   const issues: FeedbackIssue[] = [...feedback.issues];
+  // Deterministic issues derived from the lexical match, listed first. Messages
+  // deliberately avoid double quotes: forcedAmberWordsFromIssues() reads quoted
+  // spans as target words to downgrade, and added words are not target words.
+  const derived: FeedbackIssue[] = [];
+  const added = lexical.extra.filter((w) => !isFiller(w));
+  if (added.length > 0) {
+    const listed = added.slice(0, 6).join(", ");
+    derived.push({
+      category: "other",
+      message: `You added words outside the fragment: ${listed}. Repeat only the fragment, word for word.`,
+      fix: `Drop the extra words (${listed}) and repeat the fragment exactly as given.`,
+    });
+  }
   if (lexical.missing.length > 0) {
-    issues.unshift({
+    derived.push({
       category: "pronunciation",
       message: `Missing word${lexical.missing.length > 1 ? "s" : ""}: "${lexical.missing.join(", ")}". Try to say these clearly.`,
       fix: `Listen again and pronounce: ${lexical.missing.join(", ")}`,
     });
   }
+  issues.unshift(...derived);
   const verdict: Evaluation["verdict"] = score >= 70 ? "great" : score >= 50 ? "almost" : "retry";
   return {
     provider,

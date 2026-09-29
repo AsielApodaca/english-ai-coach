@@ -6,7 +6,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 
 - **Práctica guiada** — elige categoría (Entrevistas, Método STAR, Daily standup, Tema libre) y nivel (B1–C1); la IA genera pregunta + respuesta modelo fragmentada.
 - **Conversación hablada** — subtítulos en vivo etiquetados Coach/You, palabras faltantes resaltadas en la frase del coach, extras resaltadas en lo que dijiste, y feedback hablado (voz mejorable; roadmap → feature 007).
-- **Evaluación híbrida** — score 0-100 por word-match determinista + correcciones del LLM (grammar, word-choice, fluency, pronunciation).
+- **Evaluación híbrida** — score 0-100 por word-match determinista: las palabras añadidas fuera del fragmento restan del score (los fillers uh/um no penalizan) + correcciones del LLM (grammar, word-choice, fluency, pronunciation, other).
 - **Memoria** — el perfil del aprendiz (nivel, debilidades, temas recientes, next step) se inyecta en cada generación/evaluación.
 - **Multi-proveedor LLM con fallback** — Gemini, Cloudflare Workers AI y Ollama local.
 - **STT** — whisper.cpp local por defecto cuando está instalado (100% offline/privado); Chrome Web Speech como fallback automático.
