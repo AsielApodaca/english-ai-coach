@@ -61,6 +61,21 @@ test("alignWords: lone hyphen tokens from a legacy transcript are not extra word
   assert.equal(r.score, 100);
 });
 
+test("alignWords: [BLANK_AUDIO] word is never an extra word (silent attempt)", () => {
+  const r = alignWords(spoken("[BLANK_AUDIO]"), "I am currently working on a project");
+  assert.deepEqual(r.extra, []);
+  assert.equal(r.score, 0);
+  assert.equal(r.missing.length, 7);
+  assert.ok(r.words.every((w) => w.status === "red"));
+});
+
+test("alignTextWords: [BLANK_AUDIO] transcript → no extras, everything missing", () => {
+  const r = alignTextWords("[BLANK_AUDIO]", "I am currently working on a project");
+  assert.deepEqual(r.extra, []);
+  assert.equal(r.score, 0);
+  assert.equal(r.missing.length, 7);
+});
+
 test("alignWords: near miss 'handel' → amber, not green, not red", () => {
   const r = alignWords(spoken("The system handel the request"), "The system handled the request");
   assert.equal(r.words[2].status, "amber");

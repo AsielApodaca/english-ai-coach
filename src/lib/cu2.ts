@@ -382,6 +382,13 @@ export function buildFeedbackText(outcome: {
   return `Almost there. That was ${outcome.score} percent. Let's try that again.${hint}`;
 }
 
+/** Spoken feedback when the attempt captured no intelligible speech (silence
+ * or whisper's [BLANK_AUDIO]): plain retry, no score talk, no phantom words.
+ * Same line the client uses for its VAD no-speech timeout. */
+export function buildNoSpeechText(): string {
+  return "I didn't hear you. Let's try that again.";
+}
+
 /** Default pass threshold when the session/config carries no override. */
 export const DEFAULT_PASS_THRESHOLD = 70;
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseWhisperWordsJSON } from "../src/lib/whisper.ts";
+import { parseWhisperJSON, parseWhisperWordsJSON } from "../src/lib/whisper.ts";
 
 test("parseWhisperWordsJSON: segments with seconds floats → rounded ms", () => {
   const raw = JSON.stringify({
@@ -118,4 +118,40 @@ test("parseWhisperWordsJSON: invalid or non-object JSON yields no words", () => 
   assert.deepEqual(parseWhisperWordsJSON("not json"), []);
   assert.deepEqual(parseWhisperWordsJSON("42"), []);
   assert.deepEqual(parseWhisperWordsJSON("{}"), []);
+});
+
+// --- [BLANK_AUDIO] (silent recording) ---------------------------------------
+
+test("parseWhisperJSON: silent recording → no words, no text (annotations stripped)", () => {
+  const raw = JSON.stringify({
+    transcription: [
+      { timestamps: { from: "00:00:00,000", to: "00:00:30,000" }, offsets: { from: 0, to: 30000 }, text: "[BLANK_AUDIO]" },
+      { timestamps: { from: "00:00:30,000", to: "00:00:30,000" }, offsets: { from: 30000, to: 30000 }, text: "[BLANK_AUDIO]" },
+    ],
+    text: "[BLANK_AUDIO]",
+  });
+  assert.deepEqual(parseWhisperJSON(raw), { words: [], text: "" });
+});
+
+test("parseWhisperJSON: annotations mixed with speech → dropped from words and text", () => {
+  const raw = JSON.stringify({
+    text: "[BLANK_AUDIO] My main task.",
+    transcription: [
+      { offsets: { from: 0, to: 500 }, text: "[BLANK_AUDIO]" },
+      { offsets: { from: 500, to: 1000 }, text: " My" },
+      { offsets: { from: 1000, to: 1500 }, text: " main" },
+      { offsets: { from: 1500, to: 2000 }, text: " task." },
+    ],
+  });
+  const { words, text } = parseWhisperJSON(raw);
+  assert.deepEqual(
+    words.map((w) => w.word),
+    ["My", "main", "task."],
+  );
+  assert.equal(text, "My main task.");
+});
+
+test("parseWhisperJSON: annotation-only top-level text falls back to no words", () => {
+  const raw = JSON.stringify({ text: "[BLANK_AUDIO]", segments: [{ text: "[BLANK_AUDIO]", start: 0, end: 30 }] });
+  assert.deepEqual(parseWhisperJSON(raw), { words: [], text: "" });
 });

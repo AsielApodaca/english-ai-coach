@@ -153,8 +153,18 @@ function offsetsToMs(value: unknown): number {
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
+/** Whisper non-speech annotations it emits for silence/noise ([BLANK_AUDIO]). */
+const ANNOTATION_RE = /\[[^\]]*\]/g;
+
+/** Drop whisper annotations; an empty result means the segment has no speech. */
+function stripAnnotations(text: string): string {
+  return text.replace(ANNOTATION_RE, " ").replace(/\s+/g, " ").trim();
+}
+
 /**
  * Extract a single word from a whisper segment object (any timestamp shape).
+ * Annotation-only segments ([BLANK_AUDIO] on a silent recording) return null
+ * so they never reach word matching as phantom words.
  * Timestamp resolution order:
  *   1. numeric `start`/`end` (seconds) — used by the old v1 JSON layouts
  *   2. `timestamps` (HH:MM:SS,mmm or bare-second strings) — unambiguous, preferred over `offsets`
@@ -163,7 +173,7 @@ function offsetsToMs(value: unknown): number {
 function segmentToWord(seg: unknown): WhisperWord | null {
   if (!seg || typeof seg !== "object") return null;
   const s = seg as Record<string, unknown>;
-  const word = typeof s.text === "string" ? s.text.trim() : "";
+  const word = stripAnnotations(typeof s.text === "string" ? s.text : "");
   if (!word) return null;
   let startMs = 0;
   let endMs = 0;
@@ -195,8 +205,10 @@ function findWordArray(obj: Record<string, unknown>): unknown[] | null {
  * Parse a whisper-cli JSON transcript into word-level entries plus the full
  * text. Robust to the output shape variants of whisper.cpp (`segments` with
  * `start`/`end` in seconds, `transcription` with `offsets`/`timestamps`, etc.).
+ * Whisper annotations ([BLANK_AUDIO], [MUSIC], …) are stripped from both the
+ * words and the text: a silent recording transcribes to `{ words: [], text: "" }`.
  */
-function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: string } {
+export function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: string } {
   let data: unknown;
   try {
     data = JSON.parse(raw);
@@ -210,8 +222,9 @@ function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: string } {
   if (arr) {
     words = arr.map(segmentToWord).filter((w): w is WhisperWord => w !== null);
   }
-  let text = typeof obj.text === "string" ? obj.text.trim() : "";
-  if (!text && typeof obj.transcription === "string") text = obj.transcription.trim();
+  let text = typeof obj.text === "string" ? obj.text : "";
+  if (!text && typeof obj.transcription === "string") text = obj.transcription;
+  text = stripAnnotations(text);
   if (words.length === 0) {
     // Keep at least the full transcript as a single token so callers always
     // have something to align against.
@@ -223,7 +236,7 @@ function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: string } {
             : "",
         )
         .filter(Boolean);
-      if (parts.length) text = parts.join(" ");
+      if (parts.length) text = stripAnnotations(parts.join(" "));
     }
     if (text) words = [{ word: text, startMs: 0, endMs: 0 }];
   }

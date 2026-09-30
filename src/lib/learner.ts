@@ -1,6 +1,6 @@
 import type { CompleteOptions } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
-import type { Candidate } from "./practice.ts";
+import { tokenize, type Candidate } from "./practice.ts";
 import { fallbackTitle, LEVELS, type CategoryStats, type Level, type NextStep, type Profile, type SessionV2 } from "./storage.ts";
 
 export interface LearnerStats {
@@ -25,10 +25,10 @@ export function computeStats(profile: Profile, sessions: SessionV2[]): LearnerSt
     const scores = attempts.filter((a) => a.score >= 50).map((a) => a.score);
     for (const a of attempts) {
       for (const w of a.words) {
-        if (w.status === "red") {
-          const key = w.word.toLowerCase();
-          vocabCount[key] = (vocabCount[key] ?? 0) + 1;
-        }
+        if (w.status !== "red") continue;
+        // Normalize so annotations ([BLANK_AUDIO]) and punctuation ("coverage.")
+        // never land in vocabGaps; contraction sub-tokens count separately.
+        for (const key of tokenize(w.word)) vocabCount[key] = (vocabCount[key] ?? 0) + 1;
       }
     }
     for (const q of s.questions) {

@@ -8,7 +8,7 @@ import { dirname } from "node:path";
 import { buildProviders, completeWithFallback, providerById, providerStatus } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
-import { evaluateFragment, generatePracticeSet, isFiller, normalize, tokenize } from "./lib/practice.ts";
+import { evaluateFragment, generatePracticeSet, isBlankTranscript, isFiller, normalize, tokenize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, transcribeWords, downloadModel, type WhisperWord } from "./lib/whisper.ts";
 import { alignWords, alignTextWords } from "./lib/align.ts";
@@ -17,6 +17,7 @@ import {
   buildFeedbackText,
   buildFullLine,
   buildIntroText,
+  buildNoSpeechText,
   DEFAULT_PASS_THRESHOLD,
   readPassThreshold,
 } from "./lib/cu2.ts";
@@ -665,6 +666,30 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
     } finally {
       rmSync(wavPath, { force: true });
     }
+  }
+
+  // No intelligible speech (silent recording → whisper's [BLANK_AUDIO], or a
+  // text attempt with no real words): retry without scoring, LLM feedback or
+  // persistence — mirrors the client-side VAD no-speech timeout, so the coach
+  // never reports phantom words like "blank_audio".
+  if (isBlankTranscript(text)) {
+    res.json({
+      text: "",
+      words: [],
+      score: 0,
+      matched: [],
+      missing: [],
+      extra: [],
+      addedWords: [],
+      issues: [{ category: "other", message: "No speech detected.", fix: "Check your microphone and try again." }],
+      verdict: "retry",
+      next: false,
+      tips: [],
+      provider: "none",
+      durationMs,
+      coachLine: buildNoSpeechText(),
+    });
+    return;
   }
 
   try {
