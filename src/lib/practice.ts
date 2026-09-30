@@ -133,9 +133,14 @@ export async function generateFirstQuestion(
   };
 }
 
-/** Normalize text for word-level comparison. */
+/** Normalize text for word-level comparison.
+ * Hyphens become separators so "end-to-end" ≡ "end to end" ≡ "end - to - end"
+ * (whisper and the LLM disagree on hyphenation), and lone "-" tokens drop out.
+ * Bracketed whisper annotations ([BLANK_AUDIO], [MUSIC], …) are not speech
+ * and are removed entirely. */
 export function normalize(text: string): string {
   return text
+    .replace(/\[[^\]]*\]/g, " ")
     .toLowerCase()
     .replace(/\bwon't\b/g, "will not")
     .replace(/\bcan't\b/g, "cannot")
@@ -144,13 +149,19 @@ export function normalize(text: string): string {
     .replace(/\b[a-z]+'ll\b/g, (m) => m.replace("'ll", " will"))
     .replace(/\b[a-z]+'d\b/g, (m) => m.replace("'d", " would"))
     .replace(/\b[a-z]+'m\b/g, (m) => m.replace("'m", " am"))
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 export function tokenize(text: string): string[] {
   return normalize(text).split(" ").filter(Boolean);
+}
+
+/** True when a transcription carries no intelligible speech: empty text or
+ * only whisper annotations such as [BLANK_AUDIO] (silence submitted as audio). */
+export function isBlankTranscript(text: string): boolean {
+  return tokenize(text).length === 0;
 }
 
 /** Hesitation/filler tokens that never penalize an attempt score. */

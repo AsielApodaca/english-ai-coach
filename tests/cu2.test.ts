@@ -9,6 +9,7 @@ import {
   buildExplainLine,
   buildFullLine,
   buildFeedbackText,
+  buildNoSpeechText,
   DEFAULT_PASS_THRESHOLD,
   readPassThreshold,
   type AttemptOutcome,
@@ -312,6 +313,12 @@ test("buildFeedbackText: failed with nothing missing but added words → tells t
   assert.match(line, /55 percent/);
   assert.match(line, /Drop the extra words: i, like, chocolate/);
   assert.match(line, /try that again/);
+});
+
+test("buildNoSpeechText: plain retry, no score or phantom words", () => {
+  const line = buildNoSpeechText();
+  assert.match(line, /didn't hear you/);
+  assert.doesNotMatch(line, /percent|blank_audio|extra/i);
 });
 
 // --- Pass threshold ---------------------------------------------------------

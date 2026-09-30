@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalize, tokenize, wordMatch } from "../src/lib/practice.ts";
+import { isBlankTranscript, normalize, tokenize, wordMatch } from "../src/lib/practice.ts";
 
 test("normalize: lowercases, strips punctuation, keeps letters/numbers", () => {
   assert.equal(normalize("Once in this company, I had this situation!"), "once in this company i had this situation");
@@ -52,6 +52,54 @@ test("wordMatch: repeated target word is reported (and scored) as an extra", () 
   assert.deepEqual(m.missing, []);
   assert.deepEqual(m.extra, ["bye"]);
   assert.equal(m.score, 0);
+});
+
+test("normalize: hyphens act as separators (end-to-end ≡ end to end)", () => {
+  assert.equal(normalize("the end-to-end tests"), "the end to end tests");
+  assert.equal(normalize("the end - to - end tests"), "the end to end tests");
+  assert.deepEqual(tokenize("end-to-end"), ["end", "to", "end"]);
+  // A lone "-" token (whisper punctuation artifact) disappears entirely.
+  assert.deepEqual(tokenize("end - to - end"), ["end", "to", "end"]);
+});
+
+test("wordMatch: hyphenated target matches spaced speech (no missing/extra)", () => {
+  const m = wordMatch("My main task is automating the end-to-end tests.", "My main task is automating the end to end tests.");
+  assert.equal(m.score, 100);
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, []);
+});
+
+test("wordMatch: full -sow transcript of the reported bug scores 100", () => {
+  // Real `whisper-cli -oj -ml 1 -sow` output for "My main task is automating
+  // the end to end tests." — before -sow this arrived as "autom ating … end - to - end".
+  const m = wordMatch(
+    "My main task is automating the end-to-end tests.",
+    "My main task is automating the end-to-end tests.",
+  );
+  assert.equal(m.score, 100);
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, []);
+});
+
+test("normalize: whisper annotations ([BLANK_AUDIO]) are not speech", () => {
+  assert.equal(normalize("[BLANK_AUDIO]"), "");
+  assert.deepEqual(tokenize("[BLANK_AUDIO]"), []);
+  assert.deepEqual(tokenize("My main task is [BLANK_AUDIO]"), ["my", "main", "task", "is"]);
+});
+
+test("isBlankTranscript: silence/annotations vs real speech", () => {
+  assert.equal(isBlankTranscript("[BLANK_AUDIO]"), true);
+  assert.equal(isBlankTranscript(""), true);
+  assert.equal(isBlankTranscript("   "), true);
+  assert.equal(isBlankTranscript("..."), true);
+  assert.equal(isBlankTranscript("automating the tests"), false);
+});
+
+test("wordMatch: blank transcript ([BLANK_AUDIO]) → 0 with no phantom extras", () => {
+  const m = wordMatch("I am currently working on a project", "[BLANK_AUDIO]");
+  assert.equal(m.score, 0);
+  assert.deepEqual(m.extra, []);
+  assert.equal(m.missing.length, 7);
 });
 
 test("tokenize: handles empty string", () => {
