@@ -54,6 +54,33 @@ test("wordMatch: repeated target word is reported (and scored) as an extra", () 
   assert.equal(m.score, 0);
 });
 
+test("normalize: hyphens act as separators (end-to-end ≡ end to end)", () => {
+  assert.equal(normalize("the end-to-end tests"), "the end to end tests");
+  assert.equal(normalize("the end - to - end tests"), "the end to end tests");
+  assert.deepEqual(tokenize("end-to-end"), ["end", "to", "end"]);
+  // A lone "-" token (whisper punctuation artifact) disappears entirely.
+  assert.deepEqual(tokenize("end - to - end"), ["end", "to", "end"]);
+});
+
+test("wordMatch: hyphenated target matches spaced speech (no missing/extra)", () => {
+  const m = wordMatch("My main task is automating the end-to-end tests.", "My main task is automating the end to end tests.");
+  assert.equal(m.score, 100);
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, []);
+});
+
+test("wordMatch: full -sow transcript of the reported bug scores 100", () => {
+  // Real `whisper-cli -oj -ml 1 -sow` output for "My main task is automating
+  // the end to end tests." — before -sow this arrived as "autom ating … end - to - end".
+  const m = wordMatch(
+    "My main task is automating the end-to-end tests.",
+    "My main task is automating the end-to-end tests.",
+  );
+  assert.equal(m.score, 100);
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, []);
+});
+
 test("tokenize: handles empty string", () => {
   assert.deepEqual(tokenize("   "), []);
 });

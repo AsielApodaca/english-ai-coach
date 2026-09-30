@@ -40,6 +40,27 @@ test("alignWords: perfect match → every target word green, score 100", () => {
 
 // --- Amber -----------------------------------------------------------------
 
+test("alignWords: hyphenated target vs spaced speech → all green, no extras", () => {
+  // Whisper -sow emits "end-to-end" as one word; the LLM target may write
+  // "end to end" (or the reverse). Hyphens normalize to separators on both sides.
+  const r = alignWords(spoken("automating the end to end tests"), "automating the end-to-end tests");
+  assert.equal(r.score, 100);
+  assert.deepEqual(targetStatuses(r.words, 4), ["green", "green", "green", "green"]);
+  assert.deepEqual(r.extra, []);
+  const r2 = alignWords(spoken("automating the end-to-end tests"), "automating the end to end tests");
+  assert.equal(r2.score, 100);
+  assert.deepEqual(r2.extra, []);
+});
+
+test("alignWords: lone hyphen tokens from a legacy transcript are not extra words", () => {
+  // Pre -sow transcripts split as "end - to - end": the stray "-" must not be
+  // reported as an extra word (it used to feed vocabGaps and coach tips).
+  const r = alignWords(spoken("My main task is automating the end - to - end tests ."), "My main task is automating the end to end tests");
+  assert.deepEqual(r.extra, []);
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.score, 100);
+});
+
 test("alignWords: near miss 'handel' → amber, not green, not red", () => {
   const r = alignWords(spoken("The system handel the request"), "The system handled the request");
   assert.equal(r.words[2].status, "amber");

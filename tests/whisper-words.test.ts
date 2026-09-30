@@ -51,6 +51,33 @@ test("parseWhisperWordsJSON: real whisper.cpp -oj -ml 1 output → offsets as ms
   },
 );
 
+// Ground truth captured from a real `whisper-cli -oj -ml 1 -sow` run (the flag
+// passed by transcribeWords since the sub-word split regression: " autom"+"ating"
+// arrived as two words and the coach treated "autom" as a word to discard).
+// `-sow` emits whole words, punctuation attached to the preceding word.
+test("parseWhisperWordsJSON: real -oj -ml 1 -sow output → whole words, no sub-word splits", () => {
+    const raw = JSON.stringify({
+      transcription: [
+        { timestamps: { from: "00:00:00,000", to: "00:00:01,390" }, offsets: { from: 0, to: 1390 }, text: " My" },
+        { timestamps: { from: "00:00:01,390", to: "00:00:02,960" }, offsets: { from: 1390, to: 2960 }, text: " main" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:02,960" }, offsets: { from: 2960, to: 2960 }, text: " task" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:02,960" }, offsets: { from: 2960, to: 2960 }, text: " is" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:02,960" }, offsets: { from: 2960, to: 2960 }, text: " automating" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:02,960" }, offsets: { from: 2960, to: 2960 }, text: " the" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:02,960" }, offsets: { from: 2960, to: 2960 }, text: " end-to-end" },
+        { timestamps: { from: "00:00:02,960", to: "00:00:30,000" }, offsets: { from: 2960, to: 30000 }, text: " tests." },
+      ],
+    });
+    const words = parseWhisperWordsJSON(raw);
+    assert.deepEqual(
+      words.map((w) => w.word),
+      ["My", "main", "task", "is", "automating", "the", "end-to-end", "tests."],
+    );
+    assert.deepEqual(words[0], { word: "My", startMs: 0, endMs: 1390 });
+    assert.deepEqual(words[7], { word: "tests.", startMs: 2960, endMs: 30000 });
+  },
+);
+
 test("parseWhisperWordsJSON: timestamps strings (HH:MM:SS,mmm) without offsets → ms", () => {
   const raw = JSON.stringify({
     transcription: [{ timestamps: { from: "00:00:00,000", to: "00:00:01,120" }, text: "I" }],

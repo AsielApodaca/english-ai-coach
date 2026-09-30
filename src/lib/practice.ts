@@ -133,7 +133,9 @@ export async function generateFirstQuestion(
   };
 }
 
-/** Normalize text for word-level comparison. */
+/** Normalize text for word-level comparison.
+ * Hyphens become separators so "end-to-end" ≡ "end to end" ≡ "end - to - end"
+ * (whisper and the LLM disagree on hyphenation), and lone "-" tokens drop out. */
 export function normalize(text: string): string {
   return text
     .toLowerCase()
@@ -144,7 +146,7 @@ export function normalize(text: string): string {
     .replace(/\b[a-z]+'ll\b/g, (m) => m.replace("'ll", " will"))
     .replace(/\b[a-z]+'d\b/g, (m) => m.replace("'d", " would"))
     .replace(/\b[a-z]+'m\b/g, (m) => m.replace("'m", " am"))
-    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }

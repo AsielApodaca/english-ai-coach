@@ -254,7 +254,12 @@ export async function transcribeWords(
   const outDir = join(baseDir, "data", "tmp");
   mkdirSync(outDir, { recursive: true });
   const outPrefix = join(outDir, `whisper-${Date.now()}`);
-  const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-oj", "-ml", "1", "-of", outPrefix, "-nt", "-np"];
+  // -ml 1: one entry per segment; -sow (--split-on-word): split at word
+  // boundaries instead of tokenizer (BPE) token boundaries. Without -sow,
+  // whisper emits sub-word tokens (" autom" + " ating", " fl" + "aky",
+  // " end" + "-" + "to"), which downstream word matching reports as
+  // missing/extra words.
+  const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-oj", "-ml", "1", "-sow", "-of", outPrefix, "-nt", "-np"];
   const res = spawnSync(binary, args, { encoding: "utf8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
   if (res.error) throw new Error(`whisper-cli failed to start: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${res.stderr.slice(0, 500)}`);
