@@ -23,6 +23,17 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 > Nota: **003 · Conversación hablada natural** queda **absorbida/superada** por 105 + 107 (el CU2 rediseñado es la conversación hablada del producto). Su texto histórico se conserva en `../features/003-spoken-conversation/` como referencia sin desarrollo activo.
 
+## Pendiente de implementar 📋 (ola 7 — UX de sesión, especificada)
+
+Features especificadas en detalle (con checklists de verificación) en `../features/110-115/`; todas en estado `especificado`, ninguna implementada. Pueden implementarse como PRs independientes sobre la base previa:
+
+1. **110 · Chime de acierto y avance directo** — al aprobar un fragmento o la respuesta completa, un chime sintetizado (Web Audio, sin assets) reemplaza la locución de enhorabuena; después el coach lee el siguiente fragmento verbatim, sin frases de relleno ("repeat after me", "Great job"). Fallo intacto (feedback hablado con tips); invariante `inputAlTts === fragment.text` testeado. *(Toca `cu2.ts` y el loop de 105.)*
+2. **111 · Captura manual push-to-talk** — fin del apagado/encendido automático del micrófono: el usuario inicia manteniendo presionado el botón o la tecla espacio y **suelta para evaluar**; espera infinita para iniciar + techo de 3 s por palabra; micrófono resaltado claramente al presionar; sin beep (señal solo visual). El VAD del corte de turno se retira — el bug del abanico (turno que nunca termina) queda resuelto por diseño; se fijan constraints de ruido del micrófono. *(Camino no elegido documentado: VAD adaptativo por suelo de ruido.)*
+3. **112 · Popover léxico** — hover en palabra → recuadro con significado (EN), ejemplo y traducción (ES); arrastrar varias palabras → recuadro del conjunto (phrasals tipo "shut up"). Pipeline `dictionaryapi.dev + MyMemory + fallback LLM` con endpoint `GET /api/lookup` y caché cliente+servidor (presupuesto $0).
+4. **113 · Click en palabra → pronunciación** — click simple reproduce la palabra vía TTS existente (tempo/volumen actuales); gate: sin efecto mientras el coach habla o graba; umbral click-vs-arrastre para convivir con 112.
+5. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
+6. **115 · Quitar la introducción de sesión** — se eliminan las fases `intro` y `explaining` (y sus builders `buildIntroText`/`buildExplainLine`); la sesión arranca directo en la pregunta y del modelo pasa al primer fragmento sin explicar la dinámica. Se conserva `fullLine`. Actualiza la interpretación de `../use-cases/CU2.md`.
+
 ## Backlog 💡
 
 - **004 · Evaluación fonética por audio** — sidecar Python (parselmouth/librosa) que analiza fonemas, estrés, ritmo y entonación del audio. Feeds la precisión del ámbar/rojo de 106 y añade métricas reales de pronunciación; degrada a transcripción. *(Depende de 106; refina la feature, no la bloquea.)*
