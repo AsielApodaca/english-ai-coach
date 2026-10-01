@@ -19,6 +19,11 @@
  * passThreshold) retries the same fragment; after the last fragment passes,
  * the user reads the whole answer and the session is done.
  *
+ * A PASSING attempt (fragment or full answer — feature 110) plays the
+ * synthesized chime of `speech/chime.js` instead of the congratulation line
+ * and advances straight to the next read, whose text is exactly the fragment
+ * (the verbatim invariant: no congratulation or instruction prefix, ever).
+ *
  * The view is a browser module: it cannot import `src/lib/*.ts` (no build
  * step), so the phase transitions are ported inline and kept in sync with the
  * reducer by hand.
@@ -31,6 +36,7 @@ import { PushToTalk, maxCaptureMs, wordInteractionAllowed } from "../speech/ptt.
 import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
+import { playChime, stopChime } from "../speech/chime.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { getLocal } from "./settings/local.js";
@@ -46,6 +52,9 @@ const MIC_IDLE_LABEL = "Micrófono";
 
 /** Shown when the mic stream cannot be acquired (permissions / no device). */
 const MIC_UNAVAILABLE = "Micrófono no disponible. Revisa los permisos del navegador.";
+
+/** Defensive cap on the success chime so phase `feedback` can never hang. */
+const CHIME_MAX_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Module state (mirrors PracticeState in cu2.ts)
@@ -280,6 +289,7 @@ function cancelFlow() {
     activePtt = null;
   }
   tts?.stop();
+  stopChime();
   stopKaraokeRead?.();
   stopReplay?.();
   if (dock) {
@@ -466,19 +476,27 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     lastAttempt = outcome;
     attemptCount++;
     renderFeedback(outcome, fi);
-    if (!outcome.passed && lastWavBlob) {
+
+    if (outcome.passed) {
+      // Feature 110: pass → synthesized chime (no spoken congratulation),
+      // then advance straight to the next fragment — its read is verbatim
+      // `fragment.text`, no intro phrase (the loop reads it below).
+      passedFragments.push(fi);
+      fragmentScores.push(outcome.score);
+      await playSuccessChime();
+      if (token !== flowToken) return;
+      fi++;
+      continue;
+    }
+
+    // Fail (CU2 alt flow): replay the user's take, speak the coach tips and
+    // re-read the SAME fragment.
+    if (lastWavBlob) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
     await speak(outcome.coachLine, token);
     if (token !== flowToken) return;
-
-    if (outcome.passed) {
-      passedFragments.push(fi);
-      fragmentScores.push(outcome.score);
-      fi++;
-    }
-    // else: retry the same fragment (CU2 alt flow).
   }
 
   // FULL — the user reads the whole answer until it passes (same loop as the
@@ -501,7 +519,16 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     fullAttemptCount++;
     fullPassed = fullOutcome.passed || fullPassed;
     renderFeedback(fullOutcome, -1);
-    if (!fullOutcome.passed && lastWavBlob) {
+
+    if (fullOutcome.passed) {
+      // Feature 110: pass → chime, then close the session without the spoken
+      // congratulation (the DONE panel is the reward).
+      await playSuccessChime();
+      if (token !== flowToken) return;
+      break;
+    }
+
+    if (lastWavBlob) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
@@ -567,6 +594,22 @@ function setPhase(p) {
 // Adaptive-difficulty pill (feature 107)
 // ---------------------------------------------------------------------------
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Play the success chime of a passed attempt at the coach volume (feature
+ * 110), time-boxed: the race settles even if the chime never resolves, so
+ * phase `feedback` cannot hang on a sound that will not play. If the cap wins,
+ * the chime is silenced so it can never start under the next read (chime and
+ * TTS must not overlap). Callers must re-check `flowToken` after awaiting.
+ */
+async function playSuccessChime() {
+  const ended = playChime({ kind: "pass", volume: volumeSetting() }).then(() => "ended");
+  const winner = await Promise.race([ended, sleep(CHIME_MAX_MS).then(() => "capped")]);
+  if (winner === "capped") stopChime();
+}
 /** Show the adaptive-difficulty pill (spec 107) and auto-hide it. */
 function showAdjustment(message) {
   if (!els?.adjustment) return;
