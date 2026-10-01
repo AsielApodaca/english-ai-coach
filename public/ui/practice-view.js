@@ -8,14 +8,16 @@
  *   intro → question → model → explaining → repeatingFragment → feedback
  *        → fullAnswer → done
  *
- * The coach speaks each line via the server TTS (BrowserTTS), the user repeats
- * fragments hands-free (the mic listens automatically on their turn — VAD
- * timing via `VadTracker`; no press required), attempts go to POST
- * /api/attempt (whisper with word timestamps; text fallback via BrowserSTT
- * when whisper is unavailable), and the karaoke book colors each word
- * green/amber/red. A failed attempt (score < passThreshold) retries the same
- * fragment; after the last fragment passes, the user reads the whole answer
- * and the session is done.
+ * The coach speaks each line via the server TTS (BrowserTTS) and the user
+ * repeats fragments under their own control: capture is PUSH-TO-TALK (feature
+ * 111) — the mic never starts by itself, it starts while the dock mic button
+ * or the SPACE key is held down and is cut the moment the last of them is
+ * released (or at the 3 s/word ceiling). Silence detection plays no part in
+ * ending the turn anymore. Attempts go to POST /api/attempt (whisper with word
+ * timestamps; text fallback via BrowserSTT when whisper is unavailable), and
+ * the karaoke book colors each word green/amber/red. A failed attempt (score <
+ * passThreshold) retries the same fragment; after the last fragment passes,
+ * the user reads the whole answer and the session is done.
  *
  * The view is a browser module: it cannot import `src/lib/*.ts` (no build
  * step), so the phase transitions are ported inline and kept in sync with the
@@ -25,7 +27,7 @@
 import { h, escapeHtml } from "./dom.js";
 import { createAudioDock } from "./audio-dock.js";
 import { WaveRecorder } from "../speech/recorder-wave.js";
-import { VadTracker } from "../speech/vad.js";
+import { PushToTalk, maxCaptureMs, wordInteractionAllowed } from "../speech/ptt.js";
 import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
@@ -34,20 +36,16 @@ import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
-/** No speech heard this whole turn → failed attempt + retry. */
-const GUARD_TIMEOUT_MS = 20_000;
+/**
+ * Push-to-talk labels (feature 111): the three visual states of the turn are
+ * signalled with the mic label + orb/dock styling only — there is no beep.
+ */
+const PTT_WAIT_LABEL = "Tu turno · mantén presionado espacio o el micrófono";
+const PTT_RECORD_LABEL = "Grabando… suelta para terminar";
+const MIC_IDLE_LABEL = "Micrófono";
 
-/** Hard cap on a turn once speech was heard (fits long full-answer reads). */
-const MAX_TURN_MS = 60_000;
-
-/** RMS threshold (dBFS) above which a frame counts as speech. */
-const SPEECH_DB = -55;
-
-/** Sustained silence after speech that ends the turn automatically (VAD). */
-const SILENCE_MS = 1200;
-
-/** Gap between the ready beep and the mic starting to listen. */
-const BEEP_READY_MS = 500;
+/** Shown when the mic stream cannot be acquired (permissions / no device). */
+const MIC_UNAVAILABLE = "Micrófono no disponible. Revisa los permisos del navegador.";
 
 // ---------------------------------------------------------------------------
 // Module state (mirrors PracticeState in cu2.ts)
@@ -128,11 +126,22 @@ let readAudio = null;
 let stopReplay = null;
 
 /**
- * Canceller of the STT turn in flight (whisper prewarm/beep/mic or browser
- * recognition). `cancelFlow()` invokes it so no beep, mic or timer survives
- * the session that armed it.
+ * Canceller of the STT turn in flight (whisper prewarm / browser
+ * recognition). `cancelFlow()` invokes it so no mic, timer or recognition
+ * survives the session that armed it.
  */
 let cancelPendingTurn = null;
+
+/**
+ * Push-to-talk controller of the capture turn in flight (feature 111), or
+ * null outside a capture. The dock button and the SPACE key route their
+ * presses through it; it is what makes the mic never start by itself.
+ * @type {import("../speech/ptt.js").PushToTalk|null}
+ */
+let activePtt = null;
+
+/** True while the coach is reading a line (blocks karaoke interaction). */
+let coachSpeaking = false;
 
 // ---------------------------------------------------------------------------
 // Init
@@ -181,6 +190,75 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
     // in progress.
     if (prev.showIpa !== showIpa || prev.liveHighlight !== liveHighlight) rebuildBook();
   });
+
+  // Push-to-talk keyboard trigger (feature 111): SPACE starts/cuts the capture
+  // of the turn in flight. Registered once; both handlers no-op when no
+  // capture is armed, so SPACE keeps its normal meaning everywhere else.
+  window.addEventListener("keydown", onPttKeyDown);
+  window.addEventListener("keyup", onPttKeyUp);
+}
+
+// ---------------------------------------------------------------------------
+// Push-to-talk triggers (feature 111): dock button + SPACE key
+// ---------------------------------------------------------------------------
+
+/** True when a key event targets a text-entry surface (input/textarea/CE). */
+function isTextEntryTarget(target) {
+  if (!target || typeof target !== "object") return false;
+  const el = /** @type {Element|null} */ (target);
+  if (el.isContentEditable) return true;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA";
+}
+
+/** True for the space key in any of its browser spellings. */
+function isSpaceKey(event) {
+  return event.code === "Space" || event.key === " " || event.key === "Spacebar";
+}
+
+/**
+ * SPACE pressed → start the capture of the turn in flight.
+ *
+ * Guards: auto-repeat never starts a second capture (`event.repeat`), text
+ * entry keeps typing spaces, and outside a capture SPACE keeps its default
+ * meaning (scrolling / button activation). Inside one it is fully consumed:
+ * `preventDefault()` stops the page from scrolling and stops a focused
+ * button from being activated by the very key that drives the turn.
+ *
+ * @param {KeyboardEvent} event
+ */
+function onPttKeyDown(event) {
+  if (!isSpaceKey(event) || event.repeat) return;
+  if (isTextEntryTarget(event.target)) return;
+  if (!activePtt) return;
+  event.preventDefault();
+  activePtt.press("space");
+}
+
+/**
+ * SPACE released → cut the capture (unless the pointer is still holding it).
+ *
+ * @param {KeyboardEvent} event
+ */
+function onPttKeyUp(event) {
+  if (!isSpaceKey(event) || !activePtt) return;
+  // Released from a text field mid-press: still let go, otherwise the capture
+  // would stay armed forever. Returns null when SPACE was not held.
+  if (activePtt.release("space") !== null) event.preventDefault();
+}
+
+/**
+ * Whether the karaoke words may react to hover/click right now (features
+ * 112/113): allowed while the turn waits for the user's press and in review
+ * mode, blocked while the coach reads and while a capture is held down.
+ *
+ * @returns {boolean}
+ */
+export function canInteractWithWords() {
+  return wordInteractionAllowed({
+    coachSpeaking,
+    recording: activePtt?.isRecording ?? false,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -193,9 +271,14 @@ function cancelFlow() {
   clearTimeout(autoAdvanceTimer);
   clearTimeout(adjustmentTimer);
   // Settle an in-flight STT turn first (while `dock` is still alive): its
-  // prewarm/beep/mic timers would otherwise fire after the session is gone.
+  // prewarm/ceiling timers would otherwise fire after the session is gone.
   cancelPendingTurn?.();
   cancelPendingTurn = null;
+  // A held capture is cut here: its audio is discarded and never evaluated.
+  if (activePtt) {
+    activePtt.cancel();
+    activePtt = null;
+  }
   tts?.stop();
   stopKaraokeRead?.();
   stopReplay?.();
@@ -255,6 +338,10 @@ async function startFlow(sessionId) {
           tts.stop();
         },
         onFinish: () => finishSession(),
+        // Push-to-talk (feature 111): the mic button routes its press/release
+        // to the capture turn in flight (no-op outside one).
+        onPttPress: () => activePtt?.press("pointer") ?? false,
+        onPttRelease: () => activePtt?.release("pointer") ?? null,
       },
       { rate: Number(getLocal("tempo", 1)) },
     );
@@ -477,31 +564,8 @@ function setPhase(p) {
 }
 
 // ---------------------------------------------------------------------------
-// Beep + timing helpers
+// Adaptive-difficulty pill (feature 107)
 // ---------------------------------------------------------------------------
-
-/** Play a short 880 Hz beep (WebAudio oscillator) — the hands-free "ready" cue. */
-function playBeep() {
-  try {
-    const ctx = new AudioContext();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.value = 880;
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.15);
-    osc.onended = () => ctx.close().catch(() => {});
-  } catch {
-    // audio unavailable — the pause still happens
-  }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /** Show the adaptive-difficulty pill (spec 107) and auto-hide it. */
 function showAdjustment(message) {
@@ -521,10 +585,16 @@ function showAdjustment(message) {
 /** Speak a line through the best TTS engine; returns false when stopped. */
 async function speak(text, token) {
   dock?.setMode("ai");
-  const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
-  if (token !== flowToken) return false;
-  dock?.setMode("idle");
-  return ok;
+  coachSpeaking = true;
+  try {
+    const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+    if (token !== flowToken) return false;
+    dock?.setMode("idle");
+    return ok;
+  } finally {
+    // Karaoke interaction (112/113) re-opens the moment the coach stops.
+    coachSpeaking = false;
+  }
 }
 
 /**
@@ -542,6 +612,7 @@ async function speak(text, token) {
  */
 async function speakWithKaraoke(text, token, { spans = null } = {}) {
   dock?.setMode("ai");
+  coachSpeaking = true;
   const activeSpans = spans ?? allWordSpans();
   const params = new URLSearchParams({ text });
   const rate = dock?.getRate() ?? 1;
@@ -597,6 +668,7 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     await tts.speak(text, { rate, volume: volumeSetting() });
   } finally {
     stopKaraokeRead = null;
+    coachSpeaking = false; // karaoke interaction (112/113) re-opens here
     if (readAudio === audio) readAudio = null;
     stopProgress();
     activeSpans.forEach((s) => s.classList.remove("kw-spoken"));
@@ -632,18 +704,23 @@ function animateWordProgress(durationMs, token, spans) {
 }
 
 // ---------------------------------------------------------------------------
-// Attempt capture (hands-free auto-listen → whisper / browser STT → /api/attempt)
+// Attempt capture (push-to-talk → whisper / browser STT → /api/attempt)
 // ---------------------------------------------------------------------------
 
 /**
  * Capture one attempt (fragment or full answer) and return its outcome.
  *
- * Both engines are hands-free: the mic starts listening automatically when the
- * turn begins (feature 105 auto-listen) and ends itself — via silence
- * detection (whisper/VAD) or the Web Speech API's own end-of-speech
- * (BrowserSTT). Engine selection: whisper (record WAV → audio attempt) when
- * ready, else BrowserSTT (live speech → text attempt). If the whisper attempt
- * fails mid-flight, fall back to BrowserSTT + text mode.
+ * Both engines are push-to-talk (feature 111): the mic never starts by
+ * itself — the capture starts while the user holds the dock button or the
+ * SPACE key and is cut the moment the last of them is released (or at the
+ * 3 s/word ceiling). Engine selection: whisper (record WAV → audio attempt)
+ * when ready, else BrowserSTT (live speech → text attempt). If the whisper
+ * attempt fails mid-flight, fall back to BrowserSTT + text mode.
+ *
+ * @param {string} target - text being captured (ceiling = 3000 ms × words)
+ * @param {"fragment"|"full"} kind - which line the attempt is scored against
+ * @param {number} token - flow cancellation token
+ * @returns {Promise<object|null>} the attempt outcome, or null when cancelled
  */
 async function captureAttempt(target, kind, token) {
   // The replay must always belong to THIS attempt: a browser-STT turn records
@@ -652,7 +729,7 @@ async function captureAttempt(target, kind, token) {
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
   if (stt === "whisper") {
-    const { blob, timedOut, error } = await waitForUserRecording(token);
+    const { blob, timedOut, error } = await waitForUserRecording(target, token);
     if (token !== flowToken) return null;
     if (error) throw new Error(error);
     if (timedOut) return timedOutOutcome(target, kind);
@@ -661,163 +738,257 @@ async function captureAttempt(target, kind, token) {
       return await submitAudio(blob, target, kind);
     } catch (err) {
       // whisper failed → browser STT fallback (text mode).
-      const text = await captureBrowserSpeech(token);
+      const text = await captureBrowserSpeech(target, token);
       if (token !== flowToken) return null;
       if (!text) return timedOutOutcome(target, kind);
       return await submitText(text, target, kind);
     }
   }
-  const text = await captureBrowserSpeech(token);
+  const text = await captureBrowserSpeech(target, token);
   if (token !== flowToken) return null;
   if (!text) return timedOutOutcome(target, kind);
   return await submitText(text, target, kind);
 }
 
 /**
- * Arms a hands-free whisper turn: ready beep, then the mic listens by itself.
+ * Arm one push-to-talk whisper turn (feature 111): the mic waits for the user
+ * to hold the dock button or the SPACE key and never listens by itself.
  *
  * The turn ends when:
- *   - VAD hears sustained silence (SILENCE_MS) after speech → capture,
- *   - the no-speech guard expires (nothing said this turn) → timed out,
- *   - MAX_TURN_MS elapses after speech began (long full-answer reads) → capture.
+ *   - the last held trigger is released → capture + evaluate,
+ *   - `maxCaptureMs(target)` (3000 ms per word of the target) elapses →
+ *     capture + evaluate, exactly like a release,
+ *   - `cancelFlow()` cuts it → the audio is discarded and never evaluated.
  *
- * The orb is a status indicator only (dock.setMode/setOrbEnabled); it is not
- * clickable — the recording cannot be stuck "on" by a missed release.
+ * A press shorter than `MIN_PRESS_MS` that captured no usable audio is an
+ * accidental tap: it is discarded and the turn keeps waiting — no penalty,
+ * no evaluation, no "I didn't hear you". Every other press is evaluated on
+ * release. There is no silence/no-speech guard anymore: the turn waits as
+ * long as the user needs before pressing.
+ *
+ * The orb is a status indicator driven through `dock.setMode`/
+ * `setOrbEnabled`: armed (green pulse) while the turn waits, amber with rings
+ * and the live VU meter while the capture is held.
+ *
+ * @param {string} target - text being captured (ceiling = 3000 ms × words)
+ * @param {number} token - flow cancellation token
+ * @returns {Promise<{blob: Blob|null, timedOut: boolean, error?: string}>}
  */
-function waitForUserRecording(token) {
+function waitForUserRecording(target, token) {
   return new Promise((resolve) => {
+    /** @type {WaveRecorder|null} */
     let recorder = null;
     let settled = false;
-    const vad = new VadTracker({ speechDb: SPEECH_DB, silenceMs: SILENCE_MS, now: () => performance.now() });
+    /** Promise of the in-flight `recorder.start()` (null until first press). */
+    let startPromise = null;
+    /** Timer that auto-cuts the capture at the per-word ceiling. */
+    let ceilingTimer = null;
+    /** @type {PushToTalk|null} */
+    let ptt = null;
 
+    const clearCeiling = () => {
+      clearTimeout(ceilingTimer);
+      ceilingTimer = null;
+    };
+
+    /** End the turn: release mic/timers/counters and hand `value` back. */
     const settle = (value, { cancel = true } = {}) => {
       if (settled) return;
       settled = true;
+      clearCeiling();
+      if (activePtt) {
+        activePtt.cancel();
+        activePtt = null;
+      }
       cancelPendingTurn = null;
-      clearTimeout(noSpeechGuard);
-      clearTimeout(maxTurn);
       if (cancel) recorder?.cancel();
       dock?.setMode("idle");
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
+      dock?.setMicLabel(MIC_IDLE_LABEL);
       resolve(value);
     };
 
-    const settleWithBlob = () => {
-      const blob = recorder?.stop();
+    /** Cut the capture and resolve with its WAV (release or ceiling). */
+    const settleWithBlob = async () => {
+      try {
+        if (startPromise) await startPromise;
+      } catch {
+        // start() failed: settle() already reported the mic error.
+      }
+      if (settled) return;
+      const blob = recorder ? recorder.stop() : null;
       settle({ blob, timedOut: false }, { cancel: false });
     };
 
-    // Let `cancelFlow()` cut the turn short: prewarm, beep, mic start and
-    // both guards all hang off `settled`.
+    const ceilingMs = maxCaptureMs(target);
+    recorder = new WaveRecorder({ deviceId: getLocal("mic", "") || undefined });
+    // Live VU meter while the capture is held (informative, fan included).
+    recorder.onLevel = (db) => dock?.setVU(db);
+
+    ptt = new PushToTalk({
+      maxCaptureMs: ceilingMs,
+      now: () => performance.now(),
+      // "Usable audio" for the accidental-tap guard: at least one frame was
+      // buffered (`WaveRecorder.stop()` will report the same count).
+      hasAudio: () => (recorder?.samples.length ?? 0) > 0,
+      onStart: () => {
+        dock?.setMode("recording");
+        dock?.setMicLabel(PTT_RECORD_LABEL);
+        // The capture cuts itself at the ceiling, like a release would.
+        ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
+        startPromise = recorder.start().catch(() =>
+          settle({ blob: null, timedOut: false, error: MIC_UNAVAILABLE }),
+        );
+      },
+      onCut: () => {
+        void settleWithBlob();
+      },
+      onDiscard: () => {
+        // Accidental tap: drop the frames and go back to waiting. An
+        // in-flight start() is awaited first so the graph is never torn down
+        // from under it, and a press that took over meanwhile keeps its audio.
+        clearCeiling();
+        dock?.setMode("idle");
+        dock?.setMicLabel(PTT_WAIT_LABEL);
+        void (async () => {
+          try {
+            if (startPromise) await startPromise;
+          } catch {
+            return; // start() failed → settle() already reported it
+          }
+          if (settled || ptt.state !== "idle") return;
+          recorder?.discard();
+        })();
+      },
+    });
+
+    // `cancelFlow()` cuts the turn short: mic, timers and the press counter
+    // all hang off `settled`.
     cancelPendingTurn = () => settle({ blob: null, timedOut: true });
-
-    // Nothing heard for the whole turn → "didn't hear you".
-    const noSpeechGuard = setTimeout(() => {
-      if (!vad.speechSeen) settle({ blob: null, timedOut: true });
-    }, GUARD_TIMEOUT_MS);
-
-    // Heard speech but the silence sniper never fired (e.g. loud ambient):
-    // cap the turn and keep everything captured so far.
-    const maxTurn = setTimeout(() => {
-      if (vad.speechSeen) settleWithBlob();
-    }, MAX_TURN_MS);
+    activePtt = ptt;
 
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
-    dock?.setMicLabel("Te toca a ti…");
+    dock?.setMicLabel(PTT_WAIT_LABEL);
 
-    // Prewarm the mic + WebAudio graph NOW so capture is instant once the
-    // beep plays (getUserMedia takes ~200-500ms).
-    recorder = new WaveRecorder({ deviceId: getLocal("mic", "") || undefined });
-
-    recorder.onLevel = (db) => {
-      dock?.setVU(db);
-      const signal = vad.feed(db);
-      if (signal === "start") {
-        dock?.setMode("recording");
-        dock?.setMicLabel("Escuchando…");
-      } else if (signal === "silence") {
-        settleWithBlob();
-      }
-    };
-
-    (async () => {
-      try {
-        await recorder.prewarm();
-      } catch {
-        settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
-        return;
-      }
-      // The turn may have been cancelled while getUserMedia was in flight:
-      // `settle()` ran before the stream existed, so release it now.
-      if (settled) {
-        recorder.cancel();
-        return;
-      }
-      playBeep();
-      await sleep(BEEP_READY_MS);
-      if (settled) return;
-      try {
-        await recorder.start();
-        dock?.setMode("recording");
-        dock?.setMicLabel("Te toca a ti · habla…");
-      } catch {
-        settle({ blob: null, timedOut: false, error: "Micrófono no disponible. Revisa los permisos del navegador." });
-      }
-    })();
+    // Prewarm the mic NOW (feature 111 non-functional req): getUserMedia
+    // costs ~200-500 ms and would otherwise eat the beginning of the press.
+    recorder.prewarm().then(
+      () => {
+        // The turn was cancelled while getUserMedia was in flight: the stream
+        // appeared after settle(), so release it here.
+        if (settled) recorder?.cancel();
+      },
+      () => settle({ blob: null, timedOut: false, error: MIC_UNAVAILABLE }),
+    );
   });
 }
 
 /**
- * Capture speech via the browser Web Speech API (hands-free fallback).
+ * Capture speech via the browser Web Speech API (push-to-talk fallback).
  *
- * The recognition starts automatically after the ready beep and ends on its
- * own when the user stops talking (Web Speech end-of-speech), so the orb
- * requires no press either.
+ * Same contract as the whisper turn (feature 111): recognition starts on the
+ * press and stops on the release (`recognition.stop()`), with the same
+ * per-word ceiling and the same accidental-tap guard. There is no auto-start,
+ * no beep and no no-speech guard: the turn waits for the press. The existing
+ * `onend`/error handling is kept — if the browser ends the recognition on its
+ * own, the turn resolves with whatever was heard.
+ *
+ * @param {string} target - text being captured (ceiling = 3000 ms × words)
+ * @param {number} token - flow cancellation token
+ * @returns {Promise<string|null>} transcription, or null when nothing was heard
  */
-function captureBrowserSpeech(token) {
+function captureBrowserSpeech(target, token) {
   return new Promise((resolve) => {
     let done = false;
-    let guard = null;
+    /** True while the `onend` of a discarded accidental tap must be ignored. */
+    let discarding = false;
+    /** True once `stt.start()` ran for this turn. */
+    let started = false;
+    let ceilingTimer = null;
+
+    const clearCeiling = () => {
+      clearTimeout(ceilingTimer);
+      ceilingTimer = null;
+    };
+
     const finish = (value) => {
       if (done) return;
       done = true;
+      clearCeiling();
+      if (activePtt) {
+        activePtt.cancel();
+        activePtt = null;
+      }
       cancelPendingTurn = null;
-      clearTimeout(guard);
+      dock?.setMode("idle");
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
+      dock?.setMicLabel(MIC_IDLE_LABEL);
       resolve(value);
     };
 
     const stt = new BrowserSTT({
       onFinal: () => {},
-      onEnd: () => finish(stt.result() || null),
-      onError: () => finish(null),
+      onEnd: () => {
+        if (discarding) return;
+        finish(stt.result() || null);
+      },
+      onError: () => {
+        if (discarding) return;
+        finish(null);
+      },
     });
     if (!stt.isSupported() || token !== flowToken) {
       finish(null);
       return;
     }
-    guard = setTimeout(() => {
-      stt.abort();
-      finish(null);
-    }, GUARD_TIMEOUT_MS);
 
     // `cancelFlow()` aborts recognition and settles the turn so the pending
-    // promise (and its guard timer) cannot outlive the session.
+    // promise cannot outlive the session.
     cancelPendingTurn = () => {
       stt.abort();
       finish(null);
     };
 
+    const ceilingMs = maxCaptureMs(target);
+    const ptt = new PushToTalk({
+      maxCaptureMs: ceilingMs,
+      now: () => performance.now(),
+      // "Usable audio" for the accidental-tap guard: the recognizer already
+      // returned something (it only settles once the recognition stops).
+      hasAudio: () => started && Boolean(stt.result()),
+      onStart: () => {
+        started = true;
+        ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
+        dock?.setMode("recording");
+        dock?.setMicLabel(PTT_RECORD_LABEL);
+        stt.start();
+      },
+      onCut: () => {
+        // Release/ceiling: stop now; `onend` resolves the turn with the text.
+        stt.stop();
+      },
+      onDiscard: () => {
+        // Accidental tap: abort the recognition and keep waiting. `abort()`
+        // fires `onend` synchronously while `discarding` is set, so the tap
+        // can never settle the turn; when nothing was listening the flag is
+        // simply cleared here.
+        clearCeiling();
+        dock?.setMode("idle");
+        dock?.setMicLabel(PTT_WAIT_LABEL);
+        discarding = true;
+        stt.abort();
+        discarding = false;
+        started = false;
+      },
+    });
+
+    activePtt = ptt;
     dock?.setOrbEnabled(true);
     dock?.setRetryEnabled(true);
-    dock?.setMicLabel("Te toca a ti…");
-    playBeep();
-    sleep(BEEP_READY_MS).then(() => {
-      if (token === flowToken && !done) stt.start();
-    });
+    dock?.setMicLabel(PTT_WAIT_LABEL);
   });
 }
 
@@ -881,7 +1052,10 @@ function outcomeFromJson(json, target, kind) {
   };
 }
 
-/** Outcome for a guard timeout (no speech captured). */
+/**
+ * Outcome for a turn that ended without usable input (cancelled turn, or the
+ * browser recognizer returned nothing after a real — non-accidental — press).
+ */
 function timedOutOutcome(target, kind) {
   return {
     kind,

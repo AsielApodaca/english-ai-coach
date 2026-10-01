@@ -1,19 +1,24 @@
 /**
- * Audio dock for the karaoke practice view (feature 105 / CU2).
+ * Audio dock for the karaoke practice view (feature 105 / CU2, feature 111).
  *
  * Bottom dock with:
  *   - 32-bar canvas waveform: idle slate pulse, cyan sine while the AI speaks,
  *     lime→amber VU meter while the user records.
- *   - 64px mic orb (green / amber) as a pure STATUS indicator: hands-free
- *     turns start and stop listening on their own (VAD), so the orb is NOT
- *     clickable — it just shows "your turn" (green pulse) and "listening"
- *     (amber ring + live VU).
+ *   - 64px mic orb = the PUSH-TO-TALK button (feature 111): pressing it (or
+ *     holding SPACE anywhere) starts the capture of the turn in flight and
+ *     releasing it cuts the capture. It only accepts presses while the turn
+ *     is armed (`setOrbEnabled(true)`), i.e. never on its own. Three visual
+ *     states: armed/"your turn" (green pulse), recording (amber + expanding
+ *     rings + VU), coach speaking (idle, orb dimmed).
  *   - Tempo segmented control (0.75× / 1× / 1.25×) applied to coach TTS.
  *   - Mic label + live dB monitor.
  *   - Assistance pills: "Reintentar fragmento" (retry) and "Finalizar Sesión".
  *
- * The dock is effectful UI only: it wires the two assistance pills up and
- * exposes a small imperative API for the practice view to drive its state.
+ * The dock is effectful UI only: it wires the two assistance pills and the
+ * PTT button up and exposes a small imperative API for the practice view to
+ * drive its state.
+ *
+ * @typedef {(source?: string) => unknown} PttHandler
  */
 
 import { h } from "./dom.js";
@@ -28,7 +33,11 @@ const ORB_SIZE = 64;
  * @param {{
  *   onRetry: () => void,
  *   onFinish: () => void,
+ *   onPttPress?: PttHandler,
+ *   onPttRelease?: PttHandler,
  * }} handlers
+ *   `onPttPress`/`onPttRelease` (feature 111) route the mic button's
+ *   pointerdown/pointerup to the capture turn in the practice view.
  * @param {{ rate?: number }} [opts] - initial tempo (default 1)
  * @returns {{
  *   setMode: (mode: "idle"|"ai"|"recording") => void,
@@ -47,9 +56,17 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   const canvas = h("canvas", { class: "dock-waveform", width: "640", height: "48", "aria-hidden": "true" });
   const ctx = canvas.getContext("2d");
 
-  const orbBtn = h("button", { type: "button", class: "orb", disabled: true, title: "A la espera", "aria-label": "Estado del micrófono" }, [
-    h("span", { class: "material-symbols-outlined orb-icon", "aria-hidden": "true" }, "mic"),
-  ]);
+  const orbBtn = h(
+    "button",
+    {
+      type: "button",
+      class: "orb",
+      disabled: true,
+      title: "A la espera",
+      "aria-label": "Mantén presionado para grabar",
+    },
+    [h("span", { class: "material-symbols-outlined orb-icon", "aria-hidden": "true" }, "mic")],
+  );
 
   const micLabel = h("span", { class: "dock-mic-label" }, "Micrófono");
   const micDb = h("span", { class: "dock-mic-db" }, "— dB");
@@ -94,6 +111,22 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   root.appendChild(dock);
 
   // -------------------------------------------------------------------------
+  // Push-to-talk triggers on the mic orb (feature 111)
+  // -------------------------------------------------------------------------
+  // pointerdown starts the capture, pointerup/pointercancel/pointerleave cut
+  // it — the practice view owns the turn, so the handlers are no-ops while no
+  // capture is armed (the orb is `disabled` then, and pointer events do not
+  // reach disabled buttons either). `preventDefault()` on pointerdown keeps
+  // the button from stealing focus, so SPACE cannot double-activate it.
+  orbBtn.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    handlers.onPttPress?.("pointer");
+  });
+  orbBtn.addEventListener("pointerup", () => handlers.onPttRelease?.("pointer"));
+  orbBtn.addEventListener("pointercancel", () => handlers.onPttRelease?.("pointer"));
+  orbBtn.addEventListener("pointerleave", () => handlers.onPttRelease?.("pointer"));
+
+  // -------------------------------------------------------------------------
   // State
   // -------------------------------------------------------------------------
 
@@ -106,7 +139,7 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
   let destroyed = false;
 
   // -------------------------------------------------------------------------
-  // Orb (status indicator — NOT clickable; turns are hands-free, feature 105)
+  // Orb (push-to-talk button, feature 111 — enabled only while a turn waits)
   // -------------------------------------------------------------------------
 
   function selectTempo(value) {
@@ -167,9 +200,9 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
     setMode(m) {
       mode = m;
       // Single source of truth for the amber orb: entering "recording" latches
-      // it, ANY other mode (or disable) clears it. Because the orb is not
-      // clickable, every recording is driven through this API — a stale amber
-      // can never survive a phase change.
+      // it, ANY other mode (or disable) clears it — the capture state is
+      // driven through this API (press handler → practice view → here), so a
+      // stale amber can never survive a phase change.
       if (m === "recording") {
         orbBtn.classList.add("recording");
       } else {
@@ -178,19 +211,20 @@ export function createAudioDock(root, handlers, { rate: initialRate = 1 } = {}) 
       dock.dataset.mode = m;
     },
     setOrbEnabled(enabled) {
-      // Mark the turn as active for the indicator; the orb itself is a
-      // disabled (non-clickable) element that just reflects state.
+      // Armed = the turn waits for the user's press (feature 111): the orb is
+      // a live push-to-talk button. Disabled = no turn in flight, so no press
+      // can ever reach it and the mic cannot start by itself.
       orbBtn.disabled = !enabled;
+      // `armed` on the dock root drives the "waiting" visual state in CSS.
+      dock.classList.toggle("armed", enabled);
       if (enabled) {
         orbBtn.classList.add("armed");
       } else {
         orbBtn.classList.remove("armed");
         orbBtn.classList.remove("recording");
       }
-      // Hands-free hint: the turn is being listened to automatically, no press
-      // required (feature 105 — user chose auto-listen over push-to-talk).
-      orbBtn.title = enabled ? "La IA te está escuchando" : "A la espera";
-      if (enabled && mode === "idle") micLabel.textContent = "Te toca a ti…";
+      orbBtn.title = enabled ? "Mantén presionado para grabar (o la tecla espacio)" : "A la espera";
+      if (enabled && mode === "idle") micLabel.textContent = "Tu turno · mantén presionado";
     },
     setMicLabel(label) {
       micLabel.textContent = label;
