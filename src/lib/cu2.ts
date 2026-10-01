@@ -4,8 +4,9 @@
 // Models the karaoke practice flow of use case CU2 as a deterministic state
 // machine driven by TTS/STT events. The view (public/ui/practice-view.js) is
 // the effectful layer: it speaks, records and calls the API, then dispatches
-// events into this reducer. Keeping the reducer pure makes the transitions
-// unit-testable without audio, network or DOM.
+// events into this reducer (TTS/STT events, plus CHIME_END — the success
+// chime of feature 110 — for a passing attempt). Keeping the reducer pure
+// makes the transitions unit-testable without audio, network or DOM.
 //
 // Phases:
 //   intro → question → model → explaining → repeatingFragment → feedback
@@ -88,6 +89,10 @@ export type PracticeEvent =
   | { type: "ENTER" }
   | { type: "TTS_START" }
   | { type: "TTS_END" }
+  // Feature 110: the synthesized success chime ended. An explicit event (the
+  // spec's preferred choice) instead of overloading TTS_END, which keeps its
+  // literal meaning "the coach stopped speaking" for the spoken lines.
+  | { type: "CHIME_END" }
   | { type: "RECORD_START" }
   | { type: "RECORD_END" }
   | { type: "ATTEMPT_RESULT"; outcome: AttemptOutcome }
@@ -134,6 +139,9 @@ export function reducePractice(state: PracticeState, event: PracticeEvent): Prac
 
     case "TTS_END":
       return onTtsEnd(base);
+
+    case "CHIME_END":
+      return onChimeEnd(base);
 
     case "RECORD_START":
       // The orb is only armed while waiting for the user.
@@ -212,6 +220,12 @@ function onTtsEnd(state: PracticeState): PracticeState {
       // Coach finished reading the fragment → hand over to the user.
       return { ...state, ttsSpeaking: false, waitingForUser: true, timeoutCount: 0 };
     case "feedback":
+      // Feature 110: a PASS no longer speaks a coach line — the view plays a
+      // chime and CHIME_END is what advances the flow. TTS_END on a passed
+      // attempt is therefore a deliberate no-op fallback (a stray or legacy
+      // spoken line must not double-advance the flow); only the FAIL path
+      // (spoken feedback → retry) still advances on TTS_END.
+      if (state.lastAttempt?.passed) return state;
       return onFeedbackTtsEnd(state);
     case "fullAnswer":
       // Coach finished the full-answer instruction → user reads it.
@@ -221,7 +235,20 @@ function onTtsEnd(state: PracticeState): PracticeState {
   }
 }
 
-/** After the coach's spoken feedback: advance, retry or finish. */
+/**
+ * CHIME_END (feature 110): the success chime of a PASSED attempt finished →
+ * the same advance/finish transitions the spoken feedback used to drive.
+ */
+function onChimeEnd(state: PracticeState): PracticeState {
+  if (state.phase !== "feedback") return state;
+  return onFeedbackTtsEnd(state);
+}
+
+/**
+ * The feedback transitions: advance on pass, retry on fail, finish after a
+ * passing full answer. Runs on CHIME_END (pass) and on TTS_END (fail: the
+ * coach just spoke the correction).
+ */
 function onFeedbackTtsEnd(state: PracticeState): PracticeState {
   const last = state.lastAttempt;
   if (!last) {
