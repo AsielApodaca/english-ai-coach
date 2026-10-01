@@ -1,6 +1,6 @@
 # 111 · Captura manual push-to-talk (botón / tecla espacio)
 
-**Estado:** implementado 🛠️ (pendiente de review/PR)
+**Estado:** done ✅ (implementado, review aprobado; checklist manual pre-merge pendiente de verificación en browser)
 
 ## Contexto
 
