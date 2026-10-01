@@ -18,6 +18,7 @@ Estado del producto English AI Coach (documento normativo de planificación). Fe
 12. **109 · Historial y reanudación (CU3)** — sidebar de sesiones agrupado (Today / Yesterday / 7 días) con anillo de score (carmesí→esmeralda), badge de nivel y badge "ACTIVA (Q{n})"; reanudar sesión activa en el punto exacto; ver sesiones completadas en modo review con "Practicar de nuevo" (prefill de config); eliminar/exportar por sesión. Implementa `GET /api/sessions?group=recency`, `DELETE /api/sessions/:id`, `GET /api/sessions/:id/export`, `listSessionSummaries`/`deleteSession`/`copyContextText` en `storage.ts`, `contextBucket` en session/start, sidebar real en `public/ui/sidebar.js` y review en `public/ui/practice-view.js`.
 13. **110 · Chime de acierto y avance directo** — al aprobar un fragmento o la respuesta completa, un chime sintetizado (Web Audio, sin assets) reemplaza la locución de enhorabuena; después el coach lee el siguiente fragmento verbatim, sin frases de relleno ("repeat after me", "Great job"). Fallo intacto (feedback hablado con tips); invariante `inputAlTts === fragment.text` testeado. *(Toca `cu2.ts` y el loop de 105; evento `CHIME_END` en el reductor.)*
 14. **111 · Captura manual push-to-talk** — fin del apagado/encendido automático del micrófono: el usuario inicia manteniendo presionado el botón o la tecla espacio y **suelta para evaluar**; espera infinita para iniciar + techo de 3 s por palabra; micrófono resaltado claramente al presionar; sin beep (señal solo visual). El VAD del corte de turno se retira — el bug del abanico (turno que nunca termina) queda resuelto por diseño; se fijan constraints de ruido del micrófono. *(Camino no elegido documentado: VAD adaptativo por suelo de ruido.)*
+15. **112 · Popover léxico** — hover en palabra → recuadro con significado (EN), ejemplo y traducción (ES); arrastrar varias palabras → recuadro del conjunto (phrasals tipo "shut up"). Pipeline `dictionaryapi.dev + MyMemory + fallback LLM` con endpoint `GET /api/lookup` y caché cliente+servidor (presupuesto $0). *(Rama `feature/word-popover-dictionary`; gate anti cross-origin y deadline total en el endpoint.)*
 
 ## Siguiente 🔜 (rediseño v2 — CU1/CU2/CU3)
 
@@ -27,12 +28,11 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 ## Pendiente de implementar 📋 (ola 7 — UX de sesión, especificada)
 
-Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110 y 111 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
+Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111 y 112 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
 
-1. **112 · Popover léxico** — hover en palabra → recuadro con significado (EN), ejemplo y traducción (ES); arrastrar varias palabras → recuadro del conjunto (phrasals tipo "shut up"). Pipeline `dictionaryapi.dev + MyMemory + fallback LLM` con endpoint `GET /api/lookup` y caché cliente+servidor (presupuesto $0).
-2. **113 · Click en palabra → pronunciación** — click simple reproduce la palabra vía TTS existente (tempo/volumen actuales); gate: sin efecto mientras el coach habla o graba; umbral click-vs-arrastre para convivir con 112.
-3. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
-4. **115 · Quitar la introducción de sesión** — se eliminan las fases `intro` y `explaining` (y sus builders `buildIntroText`/`buildExplainLine`); la sesión arranca directo en la pregunta y del modelo pasa al primer fragmento sin explicar la dinámica. Se conserva `fullLine`. Actualiza la interpretación de `../use-cases/CU2.md`.
+1. **113 · Click en palabra → pronunciación** — click simple reproduce la palabra vía TTS existente (tempo/volumen actuales); gate: sin efecto mientras el coach habla o graba; umbral click-vs-arrastre para convivir con 112.
+2. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
+3. **115 · Quitar la introducción de sesión** — se eliminan las fases `intro` y `explaining` (y sus builders `buildIntroText`/`buildExplainLine`); la sesión arranca directo en la pregunta y del modelo pasa al primer fragmento sin explicar la dinámica. Se conserva `fullLine`. Actualiza la interpretación de `../use-cases/CU2.md`.
 
 ## Backlog 💡
 

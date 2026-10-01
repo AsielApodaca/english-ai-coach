@@ -23,6 +23,15 @@ import {
 } from "./lib/cu2.ts";
 import { handleExtractRequest } from "./lib/extract.ts";
 import { handleSessionStartRequest } from "./lib/session-start.ts";
+import {
+  createDictionaryLookup,
+  createLlmLookup,
+  createLookupCache,
+  createTranslationLookup,
+  isSameOriginLookupRequest,
+  resolveLookup,
+  validateLookupText,
+} from "./lib/lookup.ts";
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
 import { applyProfileSettings, parseProfileSettings, readAutoAdvance } from "./lib/settings.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
@@ -886,6 +895,65 @@ app.get("/api/tts", async (req, res) => {
   } catch (err) {
     rmSync(outPath, { force: true });
     res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Lexical lookup popover (feature 112)
+// ---------------------------------------------------------------------------
+
+/** Shared LRU cache for /api/lookup — one entry per normalized text. */
+const lookupCache = createLookupCache();
+
+/** dictionaryapi.dev + MyMemory resolvers (built once, keys never inline). */
+const lookupDictionary = createDictionaryLookup(fetch);
+const lookupTranslate = createTranslationLookup(fetch);
+
+/**
+ * GET /api/lookup?text=<phrase> — word/phrase lookup behind the karaoke
+ * popover (feature 112).
+ *
+ * Response: `{ ok: true, kind: "word"|"phrase", source: "dictionary"|"mymemory"|"llm"|"cache",
+ *             entry: { gloss, example, translationEs } }`
+ *        or `{ ok: false, error }` (400 when the input is not a valid ≤60-char
+ *            karaoke token — rejected with NO external call; 502 when every
+ *            source failed, i.e. the degraded mode the client renders as
+ *            "Significado no disponible"). The practice flow is never blocked.
+ *
+ * The pipeline (cache → dictionaryapi.dev → MyMemory → LLM fallback through
+ * the provider registry) lives in `lib/lookup.ts` and never throws. Learner
+ * memory is provided lazily, so cache hits don't touch storage at all.
+ */
+app.get("/api/lookup", async (req, res) => {
+  // Cheap cross-origin gate (review fix #3): GET is a CORS simple request, so
+  // without this any web page could use the local server as a free
+  // translation/LLM proxy. Same-origin app requests and header-less clients
+  // (curl) keep working.
+  if (!isSameOriginLookupRequest({
+    origin: req.headers.origin,
+    host: req.headers.host,
+    secFetchSite: req.headers["sec-fetch-site"],
+  })) {
+    return res.status(403).json({ ok: false, error: "cross-origin lookup requests are not allowed." });
+  }
+  const text = typeof req.query.text === "string" ? req.query.text : "";
+  const validation = validateLookupText(text);
+  if (!validation.ok) return res.status(400).json({ ok: false, error: validation.error });
+  try {
+    const result = await resolveLookup(validation.text, {
+      dictionary: lookupDictionary,
+      translate: lookupTranslate,
+      // The provider chain is resolved per call so MOCK_LLM/primary selection
+      // keeps working exactly like every other endpoint.
+      llm: (query, kind, memory) => createLlmLookup(candidates())(query, kind, memory),
+      getLearnerMemory: () => buildLearnerMemory(storage.loadProfile(), storage.loadAllSessions()),
+      cache: lookupCache,
+    });
+    if (!result.ok) return res.status(502).json({ ok: false, error: result.error });
+    res.json(result);
+  } catch (err) {
+    // Defensive: resolveLookup is total, but a lookup must never break the flow.
+    res.status(502).json({ ok: false, error: (err as Error).message });
   }
 });
 

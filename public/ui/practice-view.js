@@ -39,6 +39,7 @@ import { pickStt } from "../speech/stt-pick.js";
 import { playChime, stopChime } from "../speech/chime.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
+import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -205,6 +206,11 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
   // capture is armed, so SPACE keeps its normal meaning everywhere else.
   window.addEventListener("keydown", onPttKeyDown);
   window.addEventListener("keyup", onPttKeyUp);
+
+  // Word lookup popover (feature 112): one shared node + delegated listeners
+  // inside the module (survives rebuildBook), gated by the same
+  // coach/capture rule as the word interactions of 111/113.
+  initLookupPopover({ isAllowed: canInteractWithWords });
 }
 
 // ---------------------------------------------------------------------------
@@ -241,6 +247,8 @@ function onPttKeyDown(event) {
   if (isTextEntryTarget(event.target)) return;
   if (!activePtt) return;
   event.preventDefault();
+  // Capture start closes the lookup popover (feature 112).
+  closeLookupPopover();
   activePtt.press("space");
 }
 
@@ -279,6 +287,7 @@ function cancelFlow() {
   flowToken++;
   clearTimeout(autoAdvanceTimer);
   clearTimeout(adjustmentTimer);
+  closeLookupPopover();
   // Settle an in-flight STT turn first (while `dock` is still alive): its
   // prewarm/ceiling timers would otherwise fire after the session is gone.
   cancelPendingTurn?.();
@@ -587,6 +596,8 @@ async function nextQuestion() {
 /** Set the current phase and reflect it on the dock (retry pill only). */
 function setPhase(p) {
   phase = p;
+  // Phase change closes the lookup popover (feature 112).
+  closeLookupPopover();
   dock?.setRetryEnabled(p === "feedback" || p === "repeatingFragment" || p === "fullAnswer");
 }
 
@@ -876,6 +887,7 @@ function waitForUserRecording(target, token) {
       // buffered (`WaveRecorder.stop()` will report the same count).
       hasAudio: () => (recorder?.samples.length ?? 0) > 0,
       onStart: () => {
+        closeLookupPopover(); // capture start closes the lookup card (112)
         dock?.setMode("recording");
         dock?.setMicLabel(PTT_RECORD_LABEL);
         // The capture cuts itself at the ceiling, like a release would.
@@ -1003,6 +1015,7 @@ function captureBrowserSpeech(target, token) {
       // returned something (it only settles once the recognition stops).
       hasAudio: () => started && Boolean(stt.result()),
       onStart: () => {
+        closeLookupPopover(); // capture start closes the lookup card (112)
         started = true;
         ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
         dock?.setMode("recording");
