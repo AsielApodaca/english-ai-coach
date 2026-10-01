@@ -41,13 +41,21 @@ export class BrowserSTT {
       this.lastText = (this.finalText + " " + interim).trim();
       this.handlers.onInterim?.(this.lastText);
     };
+    // Stale-recognition guard (feature 111): `abort()` nulls `this.rec`
+    // immediately, but the browser still dispatches the native `end`/`error`
+    // of the aborted session (and of any replaced one) asynchronously. Those
+    // late events must never settle the CURRENT turn — otherwise an
+    // accidental tap (abort → keep waiting) would kill the turn a few ms
+    // later when the native `end` lands.
     rec.onerror = (e) => {
+      if (this.rec !== rec) return;
       this.handlers.onError?.(e);
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         this.handlers.onEnd?.();
       }
     };
     rec.onend = () => {
+      if (this.rec !== rec) return;
       if (!this.finalText.trim() && this.lastText) this.finalText = this.lastText;
       this.rec = null;
       this.handlers.onEnd?.();
@@ -62,7 +70,10 @@ export class BrowserSTT {
       try {
         this.rec.stop();
       } catch {
+        // stop() threw: the native `end` may never arrive, so settle the
+        // turn here (the stale guard above would ignore it otherwise).
         this.rec = null;
+        this.handlers.onEnd?.();
       }
     }
   }

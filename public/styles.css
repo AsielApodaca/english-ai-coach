@@ -2302,9 +2302,9 @@ body.overlay-open {
   color: var(--subtle);
 }
 
-/* Mic orb — pure status indicator (feature 105: hands-free turns). The orb is
-   never clickable; it reflects "your turn" (green pulse) and "listening"
-   (amber + rings). Disabled = waiting/off turns. */
+/* Mic orb — the push-to-talk button (feature 111). Disabled (no turn in
+   flight) it is a dim status dot; armed (turn waiting for the press) it
+   pulses green; recording it turns amber with expanding rings. */
 .orb {
   position: relative;
   width: 64px;
@@ -2318,8 +2318,21 @@ body.overlay-open {
   align-items: center;
   justify-content: center;
   cursor: default;
-  transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+  transition: transform 0.12s ease, box-shadow 0.2s ease, opacity 0.2s ease, filter 0.15s ease;
   box-shadow: 0 0 24px -6px rgba(16, 185, 129, 0.5);
+}
+
+.orb:not(:disabled) {
+  cursor: pointer;
+}
+
+.orb:not(:disabled):hover {
+  filter: brightness(1.1);
+}
+
+/* Held down: the press itself is visible, before the recording state lands. */
+.orb:not(:disabled):active {
+  transform: scale(0.95);
 }
 
 .orb .orb-icon {
@@ -2337,8 +2350,8 @@ body.overlay-open {
   animation: orb-armed-pulse 1.8s ease-in-out infinite;
 }
 
-/* Glow pulse while armed (feature 105 UX): signals "your turn — the coach is
-   listening to you" without needing the label. Removed while recording. */
+/* Glow pulse while armed (feature 111): "your turn — hold the button or SPACE
+   to record". Removed while actually recording. */
 @keyframes orb-armed-pulse {
   0%,
   100% {
@@ -2380,6 +2393,48 @@ body.overlay-open {
     transform: scale(1.7);
     opacity: 0;
   }
+}
+
+/* ---------- Push-to-talk states (feature 111) ----------
+   The three turn states must read apart at a glance:
+     1. waiting for the turn  → dock.armed + green pulse orb + hint label;
+     2. recording (held)      → data-mode="recording": amber orb, rings, VU
+                                waveform, accent border/glow on the dock and
+                                the mic monitor;
+     3. coach speaking        → data-mode="ai": cyan waveform, orb dimmed.
+   Contrast: #10b981 on --panel #16191f ≈ 6.7:1 (AA) and amber #f59e0b on
+   #1a1204 for the orb icon is far above AA. */
+.audio-dock.armed {
+  border-color: rgba(16, 185, 129, 0.5);
+}
+
+.audio-dock.armed .dock-mic-label {
+  color: var(--text);
+}
+
+.audio-dock[data-mode="recording"] {
+  border-color: rgba(16, 185, 129, 0.85);
+  box-shadow:
+    0 12px 32px -4px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(16, 185, 129, 0.35),
+    0 0 32px -8px rgba(16, 185, 129, 0.65);
+}
+
+.audio-dock[data-mode="recording"] .dock-mic {
+  color: var(--accent);
+}
+
+.audio-dock[data-mode="recording"] .dock-mic-icon {
+  color: var(--accent);
+}
+
+.audio-dock[data-mode="recording"] .dock-mic-db {
+  color: var(--accent);
+}
+
+.audio-dock[data-mode="recording"] .dock-mic-label {
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* Tempo segmented control */

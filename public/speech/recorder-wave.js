@@ -1,4 +1,19 @@
 /** Records microphone audio and exports it as a WAV blob (for local whisper). */
+
+/**
+ * getUserMedia audio constraints (feature 111): explicitly request the noise
+ * suppression / echo cancellation / auto gain pipeline and a mono channel
+ * instead of trusting browser defaults, so background noise (a fan) is
+ * filtered before the capture reaches whisper. Applied to both the saved
+ * device request and the OS-default fallback.
+ */
+const AUDIO_CONSTRAINTS = {
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
+  channelCount: 1,
+};
+
 export class WaveRecorder {
   constructor({ deviceId } = {}) {
     this.deviceId = deviceId || "";
@@ -16,9 +31,9 @@ export class WaveRecorder {
   /**
    * Acquire the mic stream ahead of time.
    *
-   * getUserMedia takes ~200-500ms; fetching it before the turn starts (hands-
-   * free auto-listen, feature 105) means the mic is live the moment the ready
-   * beep plays. The WebAudio graph is NOT
+   * getUserMedia takes ~200-500ms; fetching it as soon as the turn starts
+   * waiting (push-to-talk, feature 111) means the mic is live the moment the
+   * user presses, so no frame of the first press is lost. The WebAudio graph is NOT
    * built here on purpose: an AudioContext created without the page having
    * user activation is created "suspended" by Chrome's autoplay policy, and
    * resuming it later is finicky. In practice the page is always activated
@@ -50,30 +65,37 @@ export class WaveRecorder {
    * OS default input when that exact device is gone (unplugged / renamed).
    * An OverconstrainedError for a stale `deviceId` used to fail the whole
    * capture silently — the tab turned the mic on, the blob was empty.
+   *
+   * Explicit audio constraints (feature 111): noise suppression, echo
+   * cancellation, auto gain and a mono channel are requested instead of
+   * relying on browser defaults, so a noisy room (fan) is cleaned before the
+   * audio ever reaches whisper.
    */
   async acquireStream() {
     if (this.deviceId) {
       try {
         return await navigator.mediaDevices.getUserMedia({
-          audio: { deviceId: { exact: this.deviceId } },
+          audio: { ...AUDIO_CONSTRAINTS, deviceId: { exact: this.deviceId } },
         });
       } catch {
         // Saved device no longer present: fall through to the default input.
       }
     }
-    return navigator.mediaDevices.getUserMedia({ audio: true });
+    return navigator.mediaDevices.getUserMedia({ audio: { ...AUDIO_CONSTRAINTS } });
   }
 
   /**
    * Build the capture graph NOW and start recording.
    *
-   * Hands-free turns (feature 105) call this right after the ready beep — not
-   * inside a press gesture. Chrome's autoplay policy only blocks Web Audio
-   * until the page receives its FIRST user activation, which already happened
-   * when the session was started; if a context still comes out "suspended",
-   * it is explicitly resumed here (onaudioprocess never fires on a suspended
-   * context, which used to fail every recording with a silent WAV while the
-   * tab mic indicator was on).
+   * Push-to-talk turns (feature 111) call this from the press gesture; when
+   * the stream was prewarmed the whole body runs synchronously (no `await` is
+   * reached), so the first frame after the press is buffered immediately.
+   * Chrome's autoplay policy only blocks Web Audio until the page receives its
+   * FIRST user activation, which already happened when the session was
+   * started; if a context still comes out "suspended", it is explicitly
+   * resumed here (onaudioprocess never fires on a suspended context, which
+   * used to fail every recording with a silent WAV while the tab mic
+   * indicator was on).
    */
   async start() {
     if (this.recording) return true;
@@ -153,6 +175,17 @@ export class WaveRecorder {
     this.samples = [];
     this.recording = false;
     this.teardown();
+  }
+
+  /**
+   * Drop the buffered frames of an accidental press (feature 111) WITHOUT
+   * releasing the mic: the stream and the WebAudio graph stay warm, so the
+   * next press records with no re-acquisition delay. `start()` rebuilds the
+   * graph on the next capture anyway.
+   */
+  discard() {
+    this.samples = [];
+    this.recording = false;
   }
 
   teardown() {
