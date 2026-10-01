@@ -1,6 +1,6 @@
 # 110 · Chime de acierto y avance directo al siguiente fragmento
 
-**Estado:** especificado 📋 (ola 7 — pendiente de implementar)
+**Estado:** hecho ✅ (ola 7 — rama `feat/110-success-chime`)
 
 ## Contexto
 
@@ -24,17 +24,17 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 ## Requerimientos funcionales
 
-- [ ] **Módulo de chime:** nuevo módulo `public/speech/chime.js` con API pura/prueba (`playChime({ kind, volume, signal? }) → Promise<void>`). Sintetizado con Web Audio API (`OscillatorNode` o `AudioBuffer` generado): tono/doble-tono tipo "ding" suave, ataque corto, decaimiento con fade-out, duración total ≤ 300 ms, sin archivos `.mp3`/`.wav` en el repo.
-- [ ] **Acierto sin locución:** cuando `outcome.passed === true` (fragmento **o** respuesta completa), el cliente **no** llama `speak(coachLine)`; en su lugar reproduce el chime. El chip visual de feedback (`renderFeedback`: "Buen flujo · N%") **se mantiene sin cambios**.
-- [ ] **Secuencia sin solape:** orden normativo `renderFeedback → await playChime() → speakWithKaraoke(siguiente fragmento)`. El chime nunca se superpone al TTS del coach ni al del usuario.
-- [ ] **Directo al grano (invariante verbatim):** todo texto enviado al TTS para leer un fragmento debe ser **exactamente** `fragment.text` (`inputAlTts === textoDelFragmento`), sin prefijo ni sufijo. Cubre: primer fragmento del loop, fragmento siguiente a un acierto, y reintento tras fallo (ahí sí se permite la locución de feedback **antes** de releer el fragmento, pero la releitura en sí sigue siendo verbatim).
-- [ ] **Fallo intacto:** si `outcome.passed === false`, comportamiento actual sin cambios: se locuta `coachLine` (feedback con tips de `buildFeedbackText` rama fail) y se relee el **mismo** fragmento. El caso no-speech (`buildNoSpeechText`) también conserva su locución.
-- [ ] **Respuesta completa:** pass → chime → cierre de sesión (panel "hacer otra práctica") **sin** locución de enhorabuena; fail → feedback hablado + reintento (sin cambios).
-- [ ] **Cancelación:** el chime obedece al mismo token/generación de flujo que el TTS (`cancelFlow`/token de `speak`); al cancelar la sesión en mitad de un chime, este se detiene y no arranca ninguna lectura posterior.
-- [ ] **Volumen:** el gain del chime aplica el setting de volumen del coach (mismo clamp/floor que `volumeSetting()`), para que bajar la voz del coach baje también el chime.
-- [ ] **Reductor canónico alineado:** `src/lib/cu2.ts` actualiza la regla de avance: en el path de pass, el evento que dispara `onFeedbackTtsEnd` pasa a ser el **fin del chime** (nuevo evento del reducer, p. ej. `CHIME_END`, o bien el cliente sintetiza el mismo efecto emitiendo `TTS_END` tras el chime — elegir uno y mantener reducer y vista consistentes). La fase `feedback` no debe quedarse colgada si el chime no llega a sonar (timeout defensivo).
-- [ ] **Contrato de API intacto:** el server puede seguir devolviendo `coachLine` en el path de pass (compatibilidad con resume/históricos); la decisión de no locutarlo es **del cliente**. Ningún endpoint cambia su shape.
-- [ ] **Sin llamadas de red** para el chime y sin dependencias npm nuevas.
+- [x] **Módulo de chime:** nuevo módulo `public/speech/chime.js` con API pura/prueba (`playChime({ kind, volume, signal? }) → Promise<void>`). Sintetizado con Web Audio API (`OscillatorNode` o `AudioBuffer` generado): tono/doble-tono tipo "ding" suave, ataque corto, decaimiento con fade-out, duración total ≤ 300 ms, sin archivos `.mp3`/`.wav` en el repo.
+- [x] **Acierto sin locución:** cuando `outcome.passed === true` (fragmento **o** respuesta completa), el cliente **no** llama `speak(coachLine)`; en su lugar reproduce el chime. El chip visual de feedback (`renderFeedback`: "Buen flujo · N%") **se mantiene sin cambios**.
+- [x] **Secuencia sin solape:** orden normativo `renderFeedback → await playChime() → speakWithKaraoke(siguiente fragmento)`. El chime nunca se superpone al TTS del coach ni al del usuario.
+- [x] **Directo al grano (invariante verbatim):** todo texto enviado al TTS para leer un fragmento debe ser **exactamente** `fragment.text` (`inputAlTts === textoDelFragmento`), sin prefijo ni sufijo. Cubre: primer fragmento del loop, fragmento siguiente a un acierto, y reintento tras fallo (ahí sí se permite la locución de feedback **antes** de releer el fragmento, pero la releitura en sí sigue siendo verbatim).
+- [x] **Fallo intacto:** si `outcome.passed === false`, comportamiento actual sin cambios: se locuta `coachLine` (feedback con tips de `buildFeedbackText` rama fail) y se relee el **mismo** fragmento. El caso no-speech (`buildNoSpeechText`) también conserva su locución.
+- [x] **Respuesta completa:** pass → chime → cierre de sesión (panel "hacer otra práctica") **sin** locución de enhorabuena; fail → feedback hablado + reintento (sin cambios).
+- [x] **Cancelación:** el chime obedece al mismo token/generación de flujo que el TTS (`cancelFlow`/token de `speak`); al cancelar la sesión en mitad de un chime, este se detiene y no arranca ninguna lectura posterior.
+- [x] **Volumen:** el gain del chime aplica el setting de volumen del coach (mismo clamp/floor que `volumeSetting()`), para que bajar la voz del coach baje también el chime.
+- [x] **Reductor canónico alineado:** `src/lib/cu2.ts` actualiza la regla de avance: en el path de pass, el evento que dispara `onFeedbackTtsEnd` pasa a ser el **fin del chime** (nuevo evento del reducer, p. ej. `CHIME_END`, o bien el cliente sintetiza el mismo efecto emitiendo `TTS_END` tras el chime — elegir uno y mantener reducer y vista consistentes). La fase `feedback` no debe quedarse colgada si el chime no llega a sonar (timeout defensivo).
+- [x] **Contrato de API intacto:** el server puede seguir devolviendo `coachLine` en el path de pass (compatibilidad con resume/históricos); la decisión de no locutarlo es **del cliente**. Ningún endpoint cambia su shape.
+- [x] **Sin llamadas de red** para el chime y sin dependencias npm nuevas.
 
 ## Requerimientos no funcionales
 
@@ -57,10 +57,10 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 ## Criterios de aceptación
 
-- [ ] `tests/chime.test.ts`: parámetros del chime (duración ≤ 300 ms, ramps de ataque/decaimiento, rango de frecuencias, gain clampado por el volumen del coach, kind pass vs fail-quieter si aplica).
-- [ ] `tests/cu2.test.ts` actualizado: pass de fragmento → avanza al siguiente vía fin-del-chime; pass del último fragmento → fase `fullAnswer`; pass de full → `done`; fail → se permanece en `feedback` (reintento); cancelación durante `feedback` no deja la fase colgada.
-- [ ] Test de invariante verbatim: para las ramas "primer fragmento", "avance tras pass" y "reintento", el string entregado a la capa TTS === texto del fragmento (sin prefijos/sufijos). Cubre el string hardcodeado duplicado del timeout en `practice-view.js` (verificar que también obedece la regla).
-- [ ] `npm test` en verde y `npm run check` en verde (los archivos nuevos/afectados listados en `package.json` `check`).
+- [x] `tests/chime.test.ts`: parámetros del chime (duración ≤ 300 ms, ramps de ataque/decaimiento, rango de frecuencias, gain clampado por el volumen del coach, kind pass vs fail-quieter si aplica).
+- [x] `tests/cu2.test.ts` actualizado: pass de fragmento → avanza al siguiente vía fin-del-chime; pass del último fragmento → fase `fullAnswer`; pass de full → `done`; fail → se permanece en `feedback` (reintento); cancelación durante `feedback` no deja la fase colgada.
+- [x] Test de invariante verbatim: para las ramas "primer fragmento", "avance tras pass" y "reintento", el string entregado a la capa TTS === texto del fragmento (sin prefijos/sufijos). Cubre el string hardcodeado duplicado del timeout en `practice-view.js` (verificar que también obedece la regla).
+- [x] `npm test` en verde y `npm run check` en verde (los archivos nuevos/afectados listados en `package.json` `check`).
 
 ## Checklist de verificación (pre-merge)
 
@@ -71,7 +71,7 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 - [ ] Cancelar la sesión (`cancelFlow`) justo cuando suena el chime → silencio, no arranca lectura posterior, orb/dock en reposo.
 - [ ] Cambiar el volumen del coach → el chime respeta el nuevo volumen.
 - [ ] Flujo completo manual de una pregunta: fragmentos → full answer → cierre, sin textos "fantasma" hablados en ningún punto.
-- [ ] Búsqueda de regresión: `grep -rn "Great job" public/ src/` — las únicas apariciones permitidas son la definición en `cu2.ts` (texto no locutado en pass) y su test; ninguna otra ruta lo reproduce.
+- [x] Búsqueda de regresión: `grep -rn "Great job" public/ src/` — las únicas apariciones permitidas son la definición en `cu2.ts` (texto no locutado en pass) y su test; ninguna otra ruta lo reproduce.
 - [ ] Resume de sesión a mitad de pregunta: el comportamiento de pass/fail tras reanudar sigue idéntico al descrito arriba.
 
 ## Fuera de alcance

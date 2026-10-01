@@ -91,10 +91,10 @@ test("TTS_END in repeatingFragment: hands over to the user (orb armed)", () => {
 test("TTS_END in fullAnswer: hands over to the user", () => {
   let s = ttsChain(initialPracticeState(2), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // feedback → next fragment
+  s = reducePractice(s, { type: "CHIME_END" }); // feedback → next fragment
   s = reducePractice(s, { type: "TTS_END" }); // fragment read → user
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // feedback → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // feedback → fullAnswer
   assert.equal(s.phase, "fullAnswer");
   assert.equal(s.waitingForUser, true);
   assert.equal(isOrbEnabled(s), true);
@@ -129,23 +129,34 @@ test("ATTEMPT_RESULT (fragment passed): feedback phase, fragment marked passed",
   assert.equal(r.attemptCount, 1);
   assert.deepEqual(r.passedFragments, [0]);
   assert.equal(r.lastAttempt?.score, 92);
-  assert.equal(r.ttsSpeaking, true); // coach speaks the feedback
+  // Nothing is spoken on pass (feature 110): the flag just marks the feedback
+  // phase until CHIME_END ends it.
+  assert.equal(r.ttsSpeaking, true);
 });
 
-test("feedback TTS_END (passed): advances to the next fragment", () => {
+test("feedback CHIME_END (passed): advances to the next fragment", () => {
   let s = ttsChain(initialPracticeState(3), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" });
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(s.phase, "repeatingFragment");
   assert.equal(s.fragmentIndex, 1);
   assert.equal(s.attemptCount, 0);
   assert.equal(s.waitingForUser, true);
 });
 
-test("feedback TTS_END (passed, last fragment): moves to fullAnswer", () => {
+test("feedback TTS_END (passed): NO-OP — the chime owns the advance (110)", () => {
+  let s = ttsChain(initialPracticeState(3), 4);
+  s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
+  const r = reducePractice(s, { type: "TTS_END" });
+  assert.equal(r.phase, "feedback"); // unchanged: no double advance
+  assert.equal(r.fragmentIndex, 0);
+  assert.equal(r.waitingForUser, false);
+});
+
+test("feedback CHIME_END (passed, last fragment): moves to fullAnswer", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" });
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(s.phase, "fullAnswer");
   assert.equal(s.waitingForUser, true);
 });
@@ -164,12 +175,13 @@ test("feedback TTS_END (failed): retries the SAME fragment (CU2 alt flow)", () =
 test("full answer passed → feedback → done", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome("full") });
   assert.equal(s.phase, "feedback");
   assert.equal(s.fullAttemptCount, 1);
   assert.equal(s.fullPassed, true);
-  s = reducePractice(s, { type: "TTS_END" });
+  assert.equal(reducePractice(s, { type: "TTS_END" }).phase, "feedback"); // pass does not advance on TTS_END
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(s.phase, "done");
   assert.equal(s.waitingForUser, false);
 });
@@ -177,7 +189,7 @@ test("full answer passed → feedback → done", () => {
 test("full answer failed → feedback → retries the full answer (not a fragment)", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: failOutcome("full") });
   s = reducePractice(s, { type: "TTS_END" });
   assert.equal(s.phase, "fullAnswer");
@@ -277,10 +289,10 @@ test("currentTarget: fragment text in repetition/feedback, answer in fullAnswer"
   assert.equal(currentTarget(s, question), "First fragment");
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
   assert.equal(currentTarget(s, question), "First fragment"); // feedback keeps the target
-  s = reducePractice(s, { type: "TTS_END" });
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(currentTarget(s, question), "Second fragment");
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   assert.equal(currentTarget(s, question), "The whole answer");
 });
 
@@ -369,7 +381,7 @@ test("internal retry that passes: attemptCount chains, same fragment then advanc
   assert.equal(s.attemptCount, 2); // both attempts counted on this fragment
   assert.deepEqual(s.passedFragments, [0]);
 
-  s = reducePractice(s, { type: "TTS_END" });
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(s.fragmentIndex, 1);
   assert.equal(s.attemptCount, 0); // counter resets for the next fragment
 });
@@ -377,7 +389,7 @@ test("internal retry that passes: attemptCount chains, same fragment then advanc
 test("full answer chaining: fail → retry → pass → done (fullAttemptCount 2)", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: failOutcome("full") });
   assert.equal(s.fullAttemptCount, 1);
   assert.equal(s.fullPassed, false);
@@ -386,7 +398,7 @@ test("full answer chaining: fail → retry → pass → done (fullAttemptCount 2
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome("full") });
   assert.equal(s.fullAttemptCount, 2);
   assert.equal(s.fullPassed, true);
-  s = reducePractice(s, { type: "TTS_END" });
+  s = reducePractice(s, { type: "CHIME_END" });
   assert.equal(s.phase, "done");
 });
 
@@ -395,7 +407,7 @@ test("full answer chaining: fail → retry → pass → done (fullAttemptCount 2
 test("TIMEOUT in fullAnswer: failed FULL attempt (kind 'full')", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   assert.equal(s.phase, "fullAnswer");
   const r = reducePractice(s, { type: "TIMEOUT", target: "The whole answer" });
   assert.equal(r.phase, "feedback");
@@ -444,7 +456,7 @@ test("RETRY from repeatingFragment: re-arms without changing the fragment", () =
 test("RETRY from fullAnswer: re-arms the full answer", () => {
   let s = ttsChain(initialPracticeState(1), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // → fullAnswer
+  s = reducePractice(s, { type: "CHIME_END" }); // → fullAnswer
   const r = reducePractice(s, { type: "RETRY" });
   assert.equal(r.phase, "fullAnswer");
   assert.equal(r.waitingForUser, true);
@@ -480,7 +492,7 @@ test("SKIP outside repetition phases: no-op (intro and fullAnswer)", () => {
 
   let full = ttsChain(initialPracticeState(1), 4);
   full = reducePractice(full, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  full = reducePractice(full, { type: "TTS_END" }); // → fullAnswer
+  full = reducePractice(full, { type: "CHIME_END" }); // → fullAnswer
   const r = reducePractice(full, { type: "SKIP" });
   assert.equal(r.phase, "fullAnswer"); // the full answer cannot be skipped
 });
@@ -490,13 +502,39 @@ test("SKIP outside repetition phases: no-op (intro and fullAnswer)", () => {
 test("EXIT mid-practice: phase stays open (active, resumable)", () => {
   let s = ttsChain(initialPracticeState(3), 4);
   s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() });
-  s = reducePractice(s, { type: "TTS_END" }); // fragment 1 waiting
+  s = reducePractice(s, { type: "CHIME_END" }); // fragment 1 waiting
   const r = reducePractice(s, { type: "EXIT" });
   assert.equal(r.exited, true);
   assert.equal(r.phase, "repeatingFragment"); // NOT done — the session stays open
   assert.equal(r.waitingForUser, false);
   assert.equal(r.recording, false);
   assert.equal(isOrbEnabled(r), false);
+});
+
+test("EXIT during feedback (chime in flight): leaves cleanly, nothing stuck", () => {
+  let s = ttsChain(initialPracticeState(3), 4);
+  s = reducePractice(s, { type: "ATTEMPT_RESULT", outcome: passOutcome() }); // → feedback
+  const r = reducePractice(s, { type: "EXIT" });
+  assert.equal(r.exited, true);
+  assert.equal(r.phase, "feedback");
+  assert.equal(r.ttsSpeaking, false); // `cancelFlow()` stopped the audio
+  assert.equal(r.waitingForUser, false);
+  assert.equal(r.recording, false);
+  assert.equal(isOrbEnabled(r), false); // orb rests — no stuck arm
+  // The cancelled session is still recoverable (re-entering restarts cleanly).
+  const again = reducePractice(r, { type: "ENTER" });
+  assert.equal(again.phase, "intro");
+  assert.equal(again.waitingForUser, false);
+});
+
+test("CHIME_END outside feedback: no-op (stray chime events are ignored)", () => {
+  const intro = reducePractice(initialPracticeState(2), { type: "CHIME_END" });
+  assert.equal(intro.phase, "intro");
+  assert.equal(intro.fragmentIndex, 0);
+
+  const repeating = reducePractice(ttsChain(initialPracticeState(2), 4), { type: "CHIME_END" });
+  assert.equal(repeating.phase, "repeatingFragment");
+  assert.equal(repeating.waitingForUser, true);
 });
 
 // --- ERROR recovery ---------------------------------------------------------
