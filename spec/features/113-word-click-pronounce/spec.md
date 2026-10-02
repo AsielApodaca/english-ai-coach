@@ -1,6 +1,6 @@
 # 113 · Click en palabra → escuchar su pronunciación
 
-**Estado:** especificado 📋 (ola 7 — pendiente de implementar)
+**Estado:** done ✅ (implementado en rama `feature/113-word-click-pronounce`, review aprobado; checklist manual pre-merge pendiente de verificación en browser)
 
 ## Contexto
 
@@ -24,21 +24,21 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 
 ## Requerimientos funcionales
 
-- [ ] **Disparador:** `click` sobre `.kw` (o sobre su `.kw-wrap`) reproduce `dataset.word` (token de la palabra) vía la cadena TTS.
-- [ ] **Cadena de audio:** usar `GET /api/tts?text=<palabra>&rate=<tempoActual>` con el mismo `rate` del dock (tempo 0.75/1/1.25) y volumen del coach, reproduciéndola con la capa existente (`BrowserTTS` capa server, con fallback `speechSynthesis` si el server devuelve 503). No inventar un tercer canal de audio.
-- [ ] **Palabra sin contexto:** se sintetiza el **token exacto** de la palabra (respetando `data-word`; si el token es una contracción p. ej. `don't`, se sintetiza tal cual).
-- [ ] **Gate de habilitación (decisión registrada):** el click **solo tiene efecto** cuando el coach **no** está hablando y **no** hay captura activa:
+- [x] **Disparador:** `click` sobre `.kw` (o sobre su `.kw-wrap`) reproduce `dataset.word` (token de la palabra) vía la cadena TTS.
+- [x] **Cadena de audio:** usar `GET /api/tts?text=<palabra>&rate=<tempoActual>` con el mismo `rate` del dock (tempo 0.75/1/1.25) y volumen del coach, reproduciéndola con la capa existente (`BrowserTTS` capa server, con fallback `speechSynthesis` si el server devuelve 503). No inventar un tercer canal de audio.
+- [x] **Palabra sin contexto:** se sintetiza el **token exacto** de la palabra (respetando `data-word`; si el token es una contracción p. ej. `don't`, se sintetiza tal cual).
+- [x] **Gate de habilitación (decisión registrada):** el click **solo tiene efecto** cuando el coach **no** está hablando y **no** hay captura activa:
   - Coach leyendo (fragmento/modelo/full): click y hover **sin efecto** (no popover de 112, no audio, no interrupción de la lectura ni del karaoke).
   - Grabando (PTT presionado): click sin efecto.
   - Habilitado: espera de turno, review de sesión completada, panel de cierre.
   - Implementación sugerida: clase/flag de estado en el contenedor del libro (`data-interactive="on|off"`) que gate-ee los listeners de 112 y 113 en un solo punto.
-- [ ] **No desincroniza el flujo:** el click **nunca** emite eventos de la máquina de estados (no `TTS_END`, no avance de fase, no cancelación de turno). Es un side-effect aislado del flujo de práctica.
-- [ ] **Locución del coach en curso:** si el usuario clicka mientras el coach habla… **no puede pasar** por el gate anterior (deshabilitado). Documentar la defensa: el listener verifica el gate **dentro** del handler (no solo CSS `pointer-events`), para que ni un race de timing ni un click programático disparen audio.
-- [ ] **Colisión con selección (drag):** distinguir click de arrastre con umbral de movimiento (p. ej. ≤ 5 px y < 400 ms desde `pointerdown` → click; si supera, es selección → la 112 maneja el popover y **no** se reproduce audio). El `click` nativo ya no dispara si hubo selección de texto arrastrada — verificar el comportamiento y definir el umbral como constante testeable.
-- [ ] **Colisión con popover (112):** el hover abre el popover; el click sobre la palabra reproduce el audio **y mantiene** abierto el popover (el usuario quiere oír mientras lee el significado). Si el click fuera sobre el propio popover, no pronuncia (el popover no es la palabra).
-- [ ] **Un click = una síntesis:** clicks rápidos sucesivos sobre la misma u otra palabra **reemplazan** la reproducción en curso (cancelación por generación, misma semántica que `_gen` de `BrowserTTS`), no se encolan ni se superponen.
-- [ ] **Sin interrupción del resto:** si mientras suena la palabra clickada el coach arranca una lectura por cambio de fase, la lectura del coach tiene prioridad: cancela la palabra aislada (no debe haber dos audios del coach a la vez).
-- [ ] **Degradado:** si `/api/tts` falla (503/sin red), fallback `speechSynthesis` como hoy hace `BrowserTTS`; si tampoco hay motor, silencio sin errores visibles (la UI no muestra modales por esto).
+- [x] **No desincroniza el flujo:** el click **nunca** emite eventos de la máquina de estados (no `TTS_END`, no avance de fase, no cancelación de turno). Es un side-effect aislado del flujo de práctica.
+- [x] **Locución del coach en curso:** si el usuario clicka mientras el coach habla… **no puede pasar** por el gate anterior (deshabilitado). Documentar la defensa: el listener verifica el gate **dentro** del handler (no solo CSS `pointer-events`), para que ni un race de timing ni un click programático disparen audio.
+- [x] **Colisión con selección (drag):** distinguir click de arrastre con umbral de movimiento (p. ej. ≤ 5 px y < 400 ms desde `pointerdown` → click; si supera, es selección → la 112 maneja el popover y **no** se reproduce audio). El `click` nativo ya no dispara si hubo selección de texto arrastrada — verificar el comportamiento y definir el umbral como constante testeable.
+- [x] **Colisión con popover (112):** el hover abre el popover; el click sobre la palabra reproduce el audio **y mantiene** abierto el popover (el usuario quiere oír mientras lee el significado). Si el click fuera sobre el propio popover, no pronuncia (el popover no es la palabra).
+- [x] **Un click = una síntesis:** clicks rápidos sucesivos sobre la misma u otra palabra **reemplazan** la reproducción en curso (cancelación por generación, misma semántica que `_gen` de `BrowserTTS`), no se encolan ni se superponen.
+- [x] **Sin interrupción del resto:** si mientras suena la palabra clickada el coach arranca una lectura por cambio de fase, la lectura del coach tiene prioridad: cancela la palabra aislada (no debe haber dos audios del coach a la vez).
+- [x] **Degradado:** si `/api/tts` falla (503/sin red), fallback `speechSynthesis` como hoy hace `BrowserTTS`; si tampoco hay motor, silencio sin errores visibles (la UI no muestra modales por esto).
 
 ## Requerimientos no funcionales
 
@@ -62,8 +62,8 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 
 ## Criterios de aceptación
 
-- [ ] `tests/word-click.test.ts` (o ampliación del módulo de gate): lógica pura de `isClick vs drag` (umbral px/tiempo), evaluación del gate (coachSpeaking × recording → blocked; idle/review → allowed), y que el handler de click no emite eventos de fase (spy sobre el dispatcher). *La parte DOM se valida manualmente (no hay harness de DOM en el repo).*
-- [ ] `npm test` verde y `npm run check` verde (ficheros nuevos listados).
+- [x] `tests/word-click.test.ts` (o ampliación del módulo de gate): lógica pura de `isClick vs drag` (umbral px/tiempo), evaluación del gate (coachSpeaking × recording → blocked; idle/review → allowed), y que el handler de click no emite eventos de fase (spy sobre el dispatcher). *La parte DOM se valida manualmente (no hay harness de DOM en el repo).*
+- [x] `npm test` verde y `npm run check` verde (ficheros nuevos listados).
 
 ## Checklist de verificación (pre-merge)
 

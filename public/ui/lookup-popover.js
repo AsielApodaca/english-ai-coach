@@ -13,14 +13,15 @@
  *   - selection: `mouseup` with a native selection inside `.karaoke-book` or
  *     `.review-words` — 1 token behaves like a word, ≥ 2 tokens resolve the
  *     whole phrase (idioms like "shut up");
- *   - close: popover `mouseleave` with a ~150 ms grace, press outside,
+ *   - close: popover `mouseleave` with a ~150 ms grace, press outside a word,
  *     Escape, phase change / flow cancel (the practice view calls
  *     `closeLookupPopover()`), or the interaction gate flipping closed
  *     (coach speaking / PTT capture — polled while open).
  *
- * It never intercepts `click` (feature 113 owns click → pronunciation), never
- * touches the `.kw-*` color/animation classes, and never prevents the native
- * selection used to copy text.
+ * It never intercepts `click` (feature 113 owns click → pronunciation; a
+ * press on a word deliberately keeps the card open so audio and meaning
+ * coexist), never touches the `.kw-*` color/animation classes, and never
+ * prevents the native selection used to copy text.
  *
  * Resolution goes through `GET /api/lookup`; results are cached in an
  * in-memory Map + `localStorage` (`engcoach.lookup.<normalized>`, capped at
@@ -59,6 +60,14 @@ const SCOPE_SEL = ".karaoke-book, .review-words";
 
 /** Word spans the selection reconstruction reads, in document order. */
 const WORD_SEL = ".karaoke-book .kw, .review-words .kw";
+
+/**
+ * Word surfaces a press must NOT close the card on: clicking a word
+ * pronounces it (feature 113) and the popover must stay open while the audio
+ * plays — the hover intent timer also has to survive so the card can move to
+ * the word just pressed.
+ */
+const WORD_PRESS_SEL = ".karaoke-book .kw, .karaoke-book .kw-wrap, .review-words .kw";
 
 // --- module state (single popover instance) --------------------------------
 
@@ -584,7 +593,11 @@ function onPointerOut(event) {
 /** Press outside the popover closes it (spec 112: click fuera). */
 function onPointerDown(event) {
   const target = /** @type {Element|null} */ (event.target);
-  if (target && typeof target.closest === "function" && target.closest(POPOVER_SEL)) return;
+  if (target && typeof target.closest === "function") {
+    if (target.closest(POPOVER_SEL)) return; // presses inside the card never close it
+    // Press on a word keeps the card open (113: click → audio + popover stays).
+    if (target.closest(WORD_PRESS_SEL)) return;
+  }
   if (isOpen) closeLookupPopover();
   clearTimeout(hoverTimer);
   hoverTimer = null;

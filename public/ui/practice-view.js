@@ -44,6 +44,7 @@ import { playChime, stopChime } from "../speech/chime.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
+import { createWordClickHandler } from "./word-click.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -155,6 +156,9 @@ let activePtt = null;
 /** True while the coach is reading a line (blocks karaoke interaction). */
 let coachSpeaking = false;
 
+/** Word-click listeners (feature 113) installed once, at document level. */
+let wordClickInstalled = false;
+
 // ---------------------------------------------------------------------------
 // Init
 // ---------------------------------------------------------------------------
@@ -213,6 +217,11 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
   // inside the module (survives rebuildBook), gated by the same
   // coach/capture rule as the word interactions of 111/113.
   initLookupPopover({ isAllowed: canInteractWithWords });
+
+  // Word click → pronunciation (feature 113): document-level delegated
+  // listeners (also survive rebuildBook), fed the SAME gate as 112 and
+  // re-checking it inside the handler.
+  installWordClick();
 }
 
 // ---------------------------------------------------------------------------
@@ -280,6 +289,40 @@ export function canInteractWithWords() {
   });
 }
 
+/**
+ * Mirror the shared gate onto the book's `data-interactive="on|off"` flag
+ * (feature 113): the FIRST line of defense is CSS — no hover affordance and
+ * no pointer hits on the words while the coach reads or a capture is held.
+ * The listeners still re-check `canInteractWithWords()` inside their
+ * handlers, so a stale flag, a programmatic click or a timing race can never
+ * pronounce a word (second line of defense, spec 113).
+ *
+ * Safe to call at any time: it is a pure projection of the current state and
+ * a no-op before the book exists (question phase, review mode).
+ */
+function syncBookInteraction() {
+  if (!els?.book) return;
+  els.book.setAttribute("data-interactive", canInteractWithWords() ? "on" : "off");
+}
+
+/**
+ * Install the document-level word-click listeners (feature 113), once.
+ *
+ * The handler gets the shared gate + the pronunciation side-effect only: it
+ * never touches the flow (no `TTS_END`, no phase advance, no turn cancel).
+ */
+function installWordClick() {
+  if (wordClickInstalled) return;
+  wordClickInstalled = true;
+  const handler = createWordClickHandler({
+    isAllowed: canInteractWithWords,
+    pronounce: pronounceWord,
+    now: () => performance.now(),
+  });
+  document.addEventListener("pointerdown", handler.onPointerDown);
+  document.addEventListener("click", handler.onClick);
+}
+
 // ---------------------------------------------------------------------------
 // Flow lifecycle
 // ---------------------------------------------------------------------------
@@ -303,6 +346,9 @@ function cancelFlow() {
   stopChime();
   stopKaraokeRead?.();
   stopReplay?.();
+  // The flow is gone: no read and no capture can be holding the gate closed.
+  coachSpeaking = false;
+  syncBookInteraction();
   if (dock) {
     dock.stopVisualizer();
     dock.destroy();
@@ -588,6 +634,8 @@ function setPhase(p) {
   phase = p;
   // Phase change closes the lookup popover (feature 112).
   closeLookupPopover();
+  // Phase transitions are where the gate flips most often (112/113 flag).
+  syncBookInteraction();
   dock?.setRetryEnabled(p === "feedback" || p === "repeatingFragment" || p === "fullAnswer");
 }
 
@@ -626,10 +674,35 @@ function showAdjustment(message) {
 // Speech
 // ---------------------------------------------------------------------------
 
+/**
+ * Pronounce ONE karaoke word on click (feature 113) through the EXISTING TTS
+ * chain — BrowserTTS (`GET /api/tts?text=<word>&rate=<dock tempo>`), with the
+ * `speechSynthesis` fallback and silent degradation when no engine exists.
+ * No third audio channel, no re-render, no flow event: a pure side-effect.
+ *
+ * `tts.stop()` runs first so a rapid second click REPLACES the playback in
+ * flight (generation cancel, same semantics as `_gen` in `BrowserTTS`) instead
+ * of queueing behind or overlapping it. The rate/volume are read live from the
+ * dock, so the word matches the current tempo (0.75/1/1.25) and coach volume.
+ * Conversely, a coach read started later cancels an isolated word the same
+ * way (`speak()`/`speakWithKaraoke()` stop the TTS first): never two coach
+ * audios at once.
+ *
+ * @param {string} word - exact token from `data-word` (contractions kept)
+ */
+function pronounceWord(word) {
+  if (!word || !tts) return;
+  tts.stop();
+  void tts.speak(word, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+}
+
 /** Speak a line through the best TTS engine; returns false when stopped. */
 async function speak(text, token) {
   dock?.setMode("ai");
   coachSpeaking = true;
+  syncBookInteraction();
+  // The coach wins over an isolated word click still playing (feature 113).
+  tts?.stop();
   try {
     const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
     if (token !== flowToken) return false;
@@ -638,6 +711,7 @@ async function speak(text, token) {
   } finally {
     // Karaoke interaction (112/113) re-opens the moment the coach stops.
     coachSpeaking = false;
+    syncBookInteraction();
   }
 }
 
@@ -657,6 +731,9 @@ async function speak(text, token) {
 async function speakWithKaraoke(text, token, { spans = null } = {}) {
   dock?.setMode("ai");
   coachSpeaking = true;
+  syncBookInteraction();
+  // The coach wins over an isolated word click still playing (feature 113).
+  tts?.stop();
   const activeSpans = spans ?? allWordSpans();
   const params = new URLSearchParams({ text });
   const rate = dock?.getRate() ?? 1;
@@ -713,6 +790,7 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
   } finally {
     stopKaraokeRead = null;
     coachSpeaking = false; // karaoke interaction (112/113) re-opens here
+    syncBookInteraction();
     if (readAudio === audio) readAudio = null;
     stopProgress();
     activeSpans.forEach((s) => s.classList.remove("kw-spoken"));
@@ -850,6 +928,7 @@ function waitForUserRecording(target, token) {
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
       dock?.setMicLabel(MIC_IDLE_LABEL);
+      syncBookInteraction(); // capture released → word interaction (112/113) re-opens
       resolve(value);
     };
 
@@ -880,6 +959,7 @@ function waitForUserRecording(target, token) {
         closeLookupPopover(); // capture start closes the lookup card (112)
         dock?.setMode("recording");
         dock?.setMicLabel(PTT_RECORD_LABEL);
+        syncBookInteraction(); // capture held → word interaction (112/113) off
         // The capture cuts itself at the ceiling, like a release would.
         ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
         startPromise = recorder.start().catch(() =>
@@ -896,6 +976,7 @@ function waitForUserRecording(target, token) {
         clearCeiling();
         dock?.setMode("idle");
         dock?.setMicLabel(PTT_WAIT_LABEL);
+        syncBookInteraction(); // accidental tap → back to waiting for the press
         void (async () => {
           try {
             if (startPromise) await startPromise;
@@ -971,6 +1052,7 @@ function captureBrowserSpeech(target, token) {
       dock?.setOrbEnabled(false);
       dock?.setRetryEnabled(false);
       dock?.setMicLabel(MIC_IDLE_LABEL);
+      syncBookInteraction(); // capture released → word interaction (112/113) re-opens
       resolve(value);
     };
 
@@ -1010,6 +1092,7 @@ function captureBrowserSpeech(target, token) {
         ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
         dock?.setMode("recording");
         dock?.setMicLabel(PTT_RECORD_LABEL);
+        syncBookInteraction(); // capture held → word interaction (112/113) off
         stt.start();
       },
       onCut: () => {
@@ -1024,6 +1107,7 @@ function captureBrowserSpeech(target, token) {
         clearCeiling();
         dock?.setMode("idle");
         dock?.setMicLabel(PTT_WAIT_LABEL);
+        syncBookInteraction(); // accidental tap → back to waiting for the press
         discarding = true;
         stt.abort();
         discarding = false;
@@ -1140,6 +1224,8 @@ function renderHeader() {
     done: h("div", { class: "practice-done", hidden: true }),
   };
   root.append(els.head, els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
+  // Fresh book node → project the interaction gate onto it (features 112/113).
+  syncBookInteraction();
 
   // Reflect the live speech engine state (store keeps it in sync via /api/health).
   const stateEl = pill.querySelector(".status-state");

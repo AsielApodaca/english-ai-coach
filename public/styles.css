@@ -2003,6 +2003,23 @@ body.overlay-open {
   display: none;
 }
 
+/* Word interaction gate (features 112/113): while the coach reads or a PTT
+   capture is held, the practice view flags the book data-interactive="off"
+   (mirrored from the single canInteractWithWords() gate). This is the FIRST
+   line of defense — no hover affordance and no pointer hits on the words —
+   while the listeners re-check the gate inside their handlers as the second
+   line: a programmatic click or a stale flag can never pronounce a word.
+   Review mode renders no .karaoke-book, so its words stay interactive. */
+.karaoke-book[data-interactive="on"] .kw,
+.karaoke-book[data-interactive="on"] .kw-wrap {
+  cursor: pointer;
+}
+
+.karaoke-book[data-interactive="off"] .kw,
+.karaoke-book[data-interactive="off"] .kw-wrap {
+  pointer-events: none;
+}
+
 /* ---------- Word lookup popover (feature 112) ---------- */
 .lookup-popover {
   position: fixed;
@@ -2297,8 +2314,11 @@ body.overlay-open {
   flex-shrink: 0;
 }
 
+/* Review-mode words pronounce on click too (feature 113): no coach and no
+   capture exist there, so the affordance never turns off. */
 .review-words .kw {
   font-size: 13px;
+  cursor: pointer;
 }
 
 .review-full {
