@@ -100,6 +100,7 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 ## Requerimientos funcionales
 
 - [x] **Máquina de estados de práctica** (client): `intro → question → model → explaining → repeatingFragment → feedback → fullAnswer → done`, con transiciones reactivas a eventos TTS/STT (timeout de guarda en cada fase).
+  - **[Modificado por 115]** La máquina vigente ya **no** tiene `intro` ni `explaining`: `question → model → repeatingFragment → feedback → fullAnswer → done` (del modelo se pasa directo al primer fragmento; la locución de INTRO de la fila siguiente quedó eliminada, ver 115).
 - [x] **INTRO:** texto de apertura generado por LLM (topic + dinámica), hablado con pausas medias (007); transcript IA se muestra como subtítulo (diseño: "columna del coach").
 - [x] **QUESTION:** `POST /api/session/start` (103) genera `{ question }` y la respuesta modelo `{ answer, fragments[] }` (fragmentos = cortes por cláusula/pausa natural, no >18 palabras); `GET /api/session/:id` los sirve a la vista.
 - [x] **Karaoke:** línea activa grande (`40px`), líneas adyacentes atenuadas, blur, scroll con mask-gradient; al reproducir audio del coach el texto se subraya palabra a palabra (fallback: progreso lineal por duración).

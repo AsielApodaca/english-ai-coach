@@ -12,15 +12,7 @@ import { evaluateFragment, generatePracticeSet, isBlankTranscript, isFiller, nor
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, transcribeWords, downloadModel, type WhisperWord } from "./lib/whisper.ts";
 import { alignWords, alignTextWords } from "./lib/align.ts";
-import {
-  buildExplainLine,
-  buildFeedbackText,
-  buildFullLine,
-  buildIntroText,
-  buildNoSpeechText,
-  DEFAULT_PASS_THRESHOLD,
-  readPassThreshold,
-} from "./lib/cu2.ts";
+import { buildFeedbackText, buildNoSpeechText, DEFAULT_PASS_THRESHOLD } from "./lib/cu2.ts";
 import { handleExtractRequest } from "./lib/extract.ts";
 import { handleSessionStartRequest } from "./lib/session-start.ts";
 import {
@@ -33,7 +25,8 @@ import {
   validateLookupText,
 } from "./lib/lookup.ts";
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
-import { applyProfileSettings, parseProfileSettings, readAutoAdvance } from "./lib/settings.ts";
+import { buildSessionPayload } from "./lib/session-payload.ts";
+import { applyProfileSettings, parseProfileSettings } from "./lib/settings.ts";
 import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
 import {
@@ -327,27 +320,20 @@ app.post("/api/session/start", async (req, res) => {
  * GET /api/session/:id — karaoke practice data for a session (feature 105).
  *
  * Returns the stored v2 session plus the spoken lines the view needs to run
- * the CU2 flow without importing server-side modules: the intro speech, the
- * fragment-dynamics explanation, the full-answer instruction and the pass
- * threshold from the session's settings snapshot (feature 108). The question
- * served is the LAST one — continuous sessions (feature 107) grow questions[].
- * 404 when the session does not exist.
+ * the CU2 flow without importing server-side modules: the full-answer
+ * instruction and the pass threshold from the session's settings snapshot
+ * (feature 108). The opening speech fields (`intro`, `explainLine`) were
+ * removed from this contract by feature 115: the session now starts at the
+ * question and the model answer hands over directly to the first fragment.
+ * The body itself is built by `buildSessionPayload` (lib/session-payload.ts)
+ * so the contract is unit-testable without binding a port. The question
+ * served is the LAST one — continuous sessions (feature 107) grow
+ * questions[]. 404 when the session does not exist.
  */
 app.get("/api/session/:id", (req, res) => {
   const session = storage.loadSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found." });
-  const question = session.questions.at(-1);
-  res.json({
-    session,
-    intro: buildIntroText({ topicPrompt: session.config.topicPrompt, level: session.config.level }),
-    explainLine: buildExplainLine(),
-    fullLine: buildFullLine(),
-    passThreshold: readPassThreshold(session.config.settingsSnapshot),
-    autoAdvance: readAutoAdvance(session.config.settingsSnapshot),
-    question: question
-      ? { q: question.q, answer: question.answer, fragments: question.fragments }
-      : null,
-  });
+  res.json(buildSessionPayload(session));
 });
 
 /**

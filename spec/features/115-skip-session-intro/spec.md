@@ -1,6 +1,6 @@
 # 115 · Quitar la introducción: la sesión empieza en la pregunta
 
-**Estado:** especificado 📋 (ola 7 — pendiente de implementar)
+**Estado:** implementado ✅ (ola 7 — lista para PR)
 
 ## Contexto
 
@@ -24,16 +24,16 @@ Elimina las locuciones de apertura y de dinámica. Al entrar a la práctica (o r
 
 ## Requerimientos funcionales
 
-- [ ] **Sin intro:** no se locuta `buildIntroText` en ningún caso (primer inicio, resume, "hacer otra práctica", siguiente pregunta de sesión continua). El flujo arranca en la fase `question` (mostrar + leer la pregunta).
-- [ ] **Sin explicación de dinámica:** no se locuta `buildExplainLine` — de la lectura de la respuesta modelo se pasa **directo** al resaltado y lectura del primer fragmento. El resaltado visual del fragmento activo (paso 7 del CU2) **se conserva** (es visual, no hablado).
-- [ ] **Fases eliminadas del reducer:** `intro` y `explaining` se **eliminan** de la máquina de estados de `src/lib/cu2.ts` (transiciones y guards asociados), no se dejan como fases muertas. Diagrama resultante: `question → model → repeatingFragment → feedback ⇄ repeatingFragment → fullAnswer → done`.
-- [ ] **Payload del server:** `GET /api/session/:id` deja de devolver `intro` y `explainLine` (contrato actualizado en la misma feature). `fullLine` y el resto del payload se conservan. *Alternativa compatible* (si se prefiere no romper clientes viejos): mantener los campos con `null` y que el cliente los ignore — elegir una y reflejarla en tests.
-- [ ] **Clientes consumidores:** `practice-view.js` elimina los `await speak(introText)` / `await speak(explainLine)` y sus branches de resume relacionados; ningún otro consumidor queda hablando esos textos.
-- [ ] **`buildIntroText`/`buildExplainLine`:** se **eliminan** (código + tests) junto con sus constantes; no se conservan "por si acaso". `buildFullLine` permanece intacto.
-- [ ] **Semántica de "empieza donde genera la pregunta":** el primer evento del flujo es la **generación/carga de la pregunta** (ya creada en `POST /api/session/start`) + su lectura TTS + mostrarla en pantalla — sin ninguna frase previa hablada.
-- [ ] **`fullLine` intacta:** antes de la respuesta completa el coach sigue instruyendo con `buildFullLine()` (decisión explícita del usuario).
-- [ ] **Documento CU2 actualizado:** la tabla de "Interpretación técnica" de `spec/use-cases/CU2.md` (filas **Intro** y **Explicación**) y los pasos 1 y 6 se ajustan para reflejar este flujo, dejando constancia del cambio de decisión (el texto oficial del producto se marca como modificado, no se reescribe en silencio).
-- [ ] **Sin regresión de estados UI:** el panel/orb/dock durante el primer instante de la práctica muestran el estado "pregunta" (no un estado vacío de intro); no hay pantalla en blanco entre el modal de inicio y la pregunta.
+- [x] **Sin intro:** no se locuta `buildIntroText` en ningún caso (primer inicio, resume, "hacer otra práctica", siguiente pregunta de sesión continua). El flujo arranca en la fase `question` (mostrar + leer la pregunta).
+- [x] **Sin explicación de dinámica:** no se locuta `buildExplainLine` — de la lectura de la respuesta modelo se pasa **directo** al resaltado y lectura del primer fragmento. El resaltado visual del fragmento activo (paso 7 del CU2) **se conserva** (es visual, no hablado).
+- [x] **Fases eliminadas del reducer:** `intro` y `explaining` se **eliminan** de la máquina de estados de `src/lib/cu2.ts` (transiciones y guards asociados), no se dejan como fases muertas. Diagrama resultante: `question → model → repeatingFragment → feedback ⇄ repeatingFragment → fullAnswer → done`.
+- [x] **Payload del server:** `GET /api/session/:id` deja de devolver `intro` y `explainLine` (contrato actualizado en la misma feature). `fullLine` y el resto del payload se conservan. *Alternativa compatible* (si se prefiere no romper clientes viejos): mantener los campos con `null` y que el cliente los ignore — elegir una y reflejarla en tests.
+- [x] **Clientes consumidores:** `practice-view.js` elimina los `await speak(introText)` / `await speak(explainLine)` y sus branches de resume relacionados; ningún otro consumidor queda hablando esos textos.
+- [x] **`buildIntroText`/`buildExplainLine`:** se **eliminan** (código + tests) junto con sus constantes; no se conservan "por si acaso". `buildFullLine` permanece intacto.
+- [x] **Semántica de "empieza donde genera la pregunta":** el primer evento del flujo es la **generación/carga de la pregunta** (ya creada en `POST /api/session/start`) + su lectura TTS + mostrarla en pantalla — sin ninguna frase previa hablada.
+- [x] **`fullLine` intacta:** antes de la respuesta completa el coach sigue instruyendo con `buildFullLine()` (decisión explícita del usuario).
+- [x] **Documento CU2 actualizado:** la tabla de "Interpretación técnica" de `spec/use-cases/CU2.md` (filas **Intro** y **Explicación**) y los pasos 1 y 6 se ajustan para reflejar este flujo, dejando constancia del cambio de decisión (el texto oficial del producto se marca como modificado, no se reescribe en silencio).
+- [ ] **Sin regresión de estados UI:** el panel/orb/dock durante el primer instante de la práctica muestran el estado "pregunta" (no un estado vacío de intro); no hay pantalla en blanco entre el modal de inicio y la pregunta. *(Verificación visual — queda en el checklist manual pre-merge.)*
 
 ## Requerimientos no funcionales
 
@@ -57,10 +57,10 @@ Elimina las locuciones de apertura y de dinámica. Al entrar a la práctica (o r
 
 ## Criterios de aceptación
 
-- [ ] `tests/cu2.test.ts` actualizado: el reducer **no** tiene fases `intro` ni `explaining` (grep/assert de ausencia), arranca en `question`, `model → repeatingFragment` es directo, `fullAnswer` conserva `buildFullLine`, y todas las transiciones restantes tienen su test.
-- [ ] Test de "cero locuciones de apertura": una pregunta completa simulada en el reducer no emite ningún evento de texto de intro/explicación (o el builder `buildIntroText` ya no existe — aserción por `typeof` o import fallido, elegir según la decisión de eliminación).
-- [ ] Test del shape de `GET /api/session/:id`: sin `intro`/`explainLine` (o `null` si se eligió compat), con `fullLine` presente.
-- [ ] `npm test` y `npm run check` verdes.
+- [x] `tests/cu2.test.ts` actualizado: el reducer **no** tiene fases `intro` ni `explaining` (grep/assert de ausencia), arranca en `question`, `model → repeatingFragment` es directo, `fullAnswer` conserva `buildFullLine`, y todas las transiciones restantes tienen su test.
+- [x] Test de "cero locuciones de apertura": una pregunta completa simulada en el reducer no emite ningún evento de texto de intro/explicación (o el builder `buildIntroText` ya no existe — aserción por `typeof` o import fallido, elegir según la decisión de eliminación).
+- [x] Test del shape de `GET /api/session/:id`: sin `intro`/`explainLine` (o `null` si se eligió compat), con `fullLine` presente.
+- [x] `npm test` y `npm run check` verdes.
 
 ## Checklist de verificación (pre-merge)
 
