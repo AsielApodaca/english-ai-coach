@@ -47,8 +47,13 @@ export const LOOKUP_DEADLINE_MS = 9000;
 /** Default capacity of the server LRU cache (good entries have no TTL). */
 export const LOOKUP_CACHE_MAX = 256;
 
-/** Per-call network budgets (ms) so a stuck source can never block a hover. */
-const HTTP_TIMEOUT_MS = 5000;
+/**
+ * Per-call network budgets (ms) so a stuck source can never block a hover.
+ * dictionaryapi.dev is unreachable from this network (it always times out),
+ * so the HTTP budget is capped at 2.5 s — the maximum stall a hover pays
+ * before the pipeline falls through to the next source.
+ */
+const HTTP_TIMEOUT_MS = 2500;
 const LLM_TIMEOUT_MS = 12000;
 const LLM_MAX_TOKENS = 400;
 
@@ -303,27 +308,55 @@ export function parseDictionaryEntry(data: unknown): DictionaryHit | null {
 
 /**
  * Build the dictionary resolver on top of an injectable fetch.
- * 404s, timeouts, malformed JSON and empty entries all resolve to `null`
- * (never throw) so the pipeline can fall back to the LLM.
+ * 404s, malformed JSON and empty entries all resolve to `null` (never throw)
+ * so the pipeline can fall to the LLM.
+ *
+ * Circuit breaker: a NETWORK failure only (timeout/abort or a fetch-level
+ * `TypeError`, i.e. "fetch failed") opens the circuit for `cooldownMs` —
+ * while open, calls return `null` immediately WITHOUT touching the network.
+ * dictionaryapi.dev being unreachable would otherwise tax every cold word
+ * with the full timeout. Application-level responses (404/other non-OK,
+ * malformed bodies) return `null` inside the `try` and do NOT trip the
+ * breaker: they are legitimate answers, not an outage.
  *
  * @param fetchImpl - fetch-like function (global `fetch` in production)
  * @param opts.timeoutMs - per-request budget
+ * @param opts.cooldownMs - how long the circuit stays open after a network failure (default 60 s)
+ * @param opts.now - clock, injectable for tests (default `Date.now`)
  */
 export function createDictionaryLookup(
   fetchImpl: FetchLike,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; cooldownMs?: number; now?: () => number } = {},
 ): (word: string) => Promise<DictionaryHit | null> {
   const timeoutMs = opts.timeoutMs ?? HTTP_TIMEOUT_MS;
+  const cooldownMs = opts.cooldownMs ?? 60_000;
+  const now = opts.now ?? Date.now;
+  let openUntil = 0;
   return async (word: string): Promise<DictionaryHit | null> => {
+    if (now() < openUntil) return null; // circuit open: skip the network entirely
     try {
       const url = `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`;
       const res = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
       if (!res.ok) return null;
       return parseDictionaryEntry(await res.json());
-    } catch {
+    } catch (err) {
+      if (isNetworkFailure(err)) openUntil = now() + cooldownMs;
       return null;
     }
   };
+}
+
+/**
+ * Network/transport-level failure worth tripping the dictionary breaker.
+ * `AbortSignal.timeout` surfaces as `TimeoutError` (Node) or `AbortError`
+ * (DOM-compatible name); fetch network failures surface as `TypeError:
+ * fetch failed`.
+ *
+ * @param err - the caught error
+ */
+function isNetworkFailure(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  return err.name === "AbortError" || err.name === "TimeoutError" || err instanceof TypeError;
 }
 
 // ---------------------------------------------------------------------------

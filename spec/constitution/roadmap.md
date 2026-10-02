@@ -20,6 +20,7 @@ Estado del producto English AI Coach (documento normativo de planificación). Fe
 14. **111 · Captura manual push-to-talk** — fin del apagado/encendido automático del micrófono: el usuario inicia manteniendo presionado el botón o la tecla espacio y **suelta para evaluar**; espera infinita para iniciar + techo de 3 s por palabra; micrófono resaltado claramente al presionar; sin beep (señal solo visual). El VAD del corte de turno se retira — el bug del abanico (turno que nunca termina) queda resuelto por diseño; se fijan constraints de ruido del micrófono. *(Camino no elegido documentado: VAD adaptativo por suelo de ruido.)*
 15. **112 · Popover léxico** — hover en palabra → recuadro con significado (EN), ejemplo y traducción (ES); arrastrar varias palabras → recuadro del conjunto (phrasals tipo "shut up"). Pipeline `dictionaryapi.dev + MyMemory + fallback LLM` con endpoint `GET /api/lookup` y caché cliente+servidor (presupuesto $0). *(Rama `feature/word-popover-dictionary`; gate anti cross-origin y deadline total en el endpoint.)*
 16. **115 · Quitar la introducción de sesión** — se eliminan las fases `intro` y `explaining` (y sus builders `buildIntroText`/`buildExplainLine`); la sesión arranca directo en la pregunta y del modelo pasa al primer fragmento sin explicar la dinámica. Se conserva `fullLine`. `GET /api/session/:id` deja de servir `intro`/`explainLine` (contrato extraído a `src/lib/session-payload.ts`). Actualiza la interpretación de `../use-cases/CU2.md`. *(Rama `feature/skip-session-intro`.)*
+17. **113 · Click en palabra → pronunciación** — click simple sobre una palabra de la letra karaoke reproduce el token exacto vía la cadena TTS existente (`BrowserTTS` → `/api/tts`, tempo/volumen actuales del dock); gate único compartido con 112 (`canInteractWithWords()` + espejo CSS `data-interactive`) que bloquea click/hover mientras el coach lee o graba; umbral click-vs-arrastre (5 px/400 ms, constantes testeables) para convivir con la selección múltiple de 112 + selección múltiple → frase en conjunto al clickear la selección (todos los tokens en una sola llamada `tts.speak(string[])`, precedencia sobre el umbral, popover de 112 visible); side-effect aislado del flujo (sin eventos de máquina de estados), con reemplazo por generación y prioridad de la lectura del coach. *(Rama `feature/113-word-click-pronounce`; lógica pura en `public/ui/word-click.js` + `tests/word-click.test.ts`.)*
 
 ## Siguiente 🔜 (rediseño v2 — CU1/CU2/CU3)
 
@@ -29,10 +30,9 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 ## Pendiente de implementar 📋 (ola 7 — UX de sesión, especificada)
 
-Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111, 112 y 115 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
+Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111, 112, 113 y 115 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
 
-1. **113 · Click en palabra → pronunciación** — click simple reproduce la palabra vía TTS existente (tempo/volumen actuales); gate: sin efecto mientras el coach habla o graba; umbral click-vs-arrastre para convivir con 112.
-2. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
+1. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
 
 ## Backlog 💡
 

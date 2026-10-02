@@ -14,18 +14,43 @@ export interface Env extends Record<string, string | undefined> {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_MODEL?: string;
   OLLAMA_MODEL?: string;
+  /** KV-cache window (tokens) for the session model; default 32768. */
+  OLLAMA_CTX?: string;
+  /** Fast local model that serves the lookup popup (e.g. phi4-mini). */
+  OLLAMA_FAST_MODEL?: string;
+  /** KV-cache window (tokens) for the fast lookup model; default 8192. */
+  OLLAMA_FAST_CTX?: string;
+  /** Local-model warmup at boot/app-load: enabled unless set to the string "0". */
+  OLLAMA_WARM?: string;
   /** TEMPORARY testing aid: MOCK_LLM=1 serves canned LLM replies (provider "mock"). */
   MOCK_LLM?: string;
 }
 
-/** Build the provider registry from environment/config. */
+/** Parse an env-declared `num_ctx`, falling back on missing/invalid values. */
+function parseCtx(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return raw !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Build the provider registry from environment/config.
+ *
+ * Order (mock first when `MOCK_LLM` is set) is what the practice flow relies
+ * on and must not change. When `OLLAMA_FAST_MODEL` is configured, a second
+ * Ollama provider (`"ollama-fast"`, small `num_ctx`) is appended; the lookup
+ * popup puts it ahead of the chain via `lookupCandidates()` in `server.ts`.
+ */
 export function buildProviders(env: Env): Provider[] {
   const mock = env.MOCK_LLM ? [createMockProvider()] : [];
+  const fast = env.OLLAMA_FAST_MODEL
+    ? [createOllamaProvider(undefined, env.OLLAMA_FAST_MODEL, { id: "ollama-fast", numCtx: parseCtx(env.OLLAMA_FAST_CTX, 8192) })]
+    : [];
   return [
     ...mock,
     createGeminiProvider(env.GEMINI_API_KEY),
     createCloudflareProvider(env.CLOUDFLARE_API_TOKEN, env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_MODEL),
-    createOllamaProvider(undefined, env.OLLAMA_MODEL),
+    createOllamaProvider(undefined, env.OLLAMA_MODEL, { id: "ollama", numCtx: parseCtx(env.OLLAMA_CTX, 32768) }),
+    ...fast,
   ];
 }
 
@@ -46,6 +71,49 @@ export async function providerStatus(providers: Provider[]): Promise<Map<string,
     }),
   );
   return status;
+}
+
+/**
+ * Whether the local-model warmup runs at server boot and app load. On by
+ * default; only the exact string `OLLAMA_WARM="0"` opts out.
+ */
+export function warmupEnabled(env: Pick<Env, "OLLAMA_WARM">): boolean {
+  return env.OLLAMA_WARM !== "0";
+}
+
+/**
+ * Warm every local Ollama-backed provider with a 1-token completion.
+ *
+ * Rationale: the first request to a local Ollama model pays the model load —
+ * weights are read from disk and the KV cache is allocated (phi4-mini ~2-3 s,
+ * qwen3.5:9b ~10-17 s), which makes the first session or lookup popup feel
+ * laggy. Asking each Ollama provider for a single token forces Ollama to load
+ * the weights and KV cache with EXACTLY the parameters the real call will use
+ * (the provider's baked-in `num_ctx`, the native `/api/chat` endpoint and
+ * `think:false`), so the warm allocation matches the real one. The provider's
+ * regular idle `keep_alive` of 5 min then keeps the model resident — we
+ * deliberately do NOT pass `keep_alive` so that default applies untouched.
+ *
+ * Only `ollama` / `ollama-fast` providers are targeted (never gemini,
+ * cloudflare or mock). They run in parallel; a throw marks that provider
+ * `false` and never rejects the batch.
+ *
+ * @param providers - full provider registry
+ * @returns per-provider warm outcome keyed by provider id
+ */
+export async function warmProviders(providers: Provider[]): Promise<Record<string, boolean>> {
+  const targets = providers.filter((p) => p.id === "ollama" || p.id === "ollama-fast");
+  const results = await Promise.all(
+    targets.map(async (p): Promise<readonly [string, boolean]> => {
+      try {
+        await p.complete([{ role: "user", content: "hi" }], { maxTokens: 1 });
+        return [p.id, true];
+      } catch {
+        return [p.id, false];
+      }
+    }),
+  );
+  return Object.fromEntries(results);
 }
 
 /**

@@ -1,13 +1,37 @@
-import type { ChatMessage, Provider, CompleteOptions } from "./types.ts";
+import type { ChatMessage, Provider, CompleteOptions, ProviderId } from "./types.ts";
 import { ProviderError } from "./types.ts";
 
 const OLLAMA_BASE = "http://localhost:11434/v1";
 export const OLLAMA_DEFAULT_MODEL = "llama3.1";
 
-interface OllamaResponse {
-  choices?: { message?: { content?: string } }[];
+/** Default KV-cache context (tokens) per call: caps VRAM/RAM per concurrent request. */
+const DEFAULT_NUM_CTX = 32768;
+
+/** Native `/api/chat` response shape: `{ message: { content } }`. */
+interface OllamaChatResponse {
+  message?: { content?: string };
 }
 
+/**
+ * Options for `createOllamaProvider`.
+ *
+ * - `id` lets several providers of the same runtime coexist in the registry
+ *   (e.g. `"ollama"` for the session model and `"ollama-fast"` for the small
+ *   model that serves the lookup popup).
+ * - `numCtx` caps `options.num_ctx`, the KV-cache window Ollama allocates per
+ *   request; smaller values allow more concurrent calls within the same RAM.
+ */
+export interface OllamaProviderOptions {
+  id?: ProviderId;
+  numCtx?: number;
+}
+
+/**
+ * Health probe against the OpenAI-compat surface (`GET /models`), used both by
+ * `available()` and as a pre-flight before every chat call.
+ *
+ * @param baseUrl - OpenAI-compat base URL (defaults to `http://localhost:11434/v1`)
+ */
 export async function pingOllama(baseUrl = OLLAMA_BASE): Promise<boolean> {
   try {
     const res = await fetch(`${baseUrl}/models`, { signal: AbortSignal.timeout(1500) });
@@ -17,35 +41,65 @@ export async function pingOllama(baseUrl = OLLAMA_BASE): Promise<boolean> {
   }
 }
 
-export function createOllamaProvider(baseUrl = OLLAMA_BASE, defaultModel = OLLAMA_DEFAULT_MODEL): Provider {
+/** Derive the server origin from the OpenAI-compat base URL (strip `/v1`). */
+function originOf(baseUrl: string): string {
+  return baseUrl.endsWith("/v1") ? baseUrl.slice(0, -"/v1".length) : baseUrl.replace(/\/+$/, "");
+}
+
+/**
+ * Create a provider backed by a local Ollama server.
+ *
+ * Chat calls go to the NATIVE `POST /api/chat` endpoint rather than the
+ * OpenAI-compat one, because only the native API understands `"think": false`.
+ * That flag matters for thinking models (e.g. `qwen3.5:9b`): without it the
+ * server streams reasoning before the answer, which both slows the reply down
+ * and breaks strict-JSON parsing; non-thinking models (e.g. `phi4-mini`)
+ * simply ignore the flag. `options.num_ctx` bounds the KV cache per call so a
+ * burst of concurrent requests cannot exhaust RAM.
+ *
+ * Health checks keep using the OpenAI-compat `/models` path (`pingOllama`).
+ *
+ * @param baseUrl - OpenAI-compat base URL (origin is derived from it for chat)
+ * @param defaultModel - model used when `options.model` is not given
+ * @param opts - provider `id` (default `"ollama"`) and `numCtx` (default 32768)
+ */
+export function createOllamaProvider(
+  baseUrl = OLLAMA_BASE,
+  defaultModel = OLLAMA_DEFAULT_MODEL,
+  opts: OllamaProviderOptions = {},
+): Provider {
+  const id = opts.id ?? "ollama";
+  const numCtx = opts.numCtx ?? DEFAULT_NUM_CTX;
   return {
-    id: "ollama",
+    id,
     name: "Ollama (local)",
     async available() {
       return pingOllama(baseUrl);
     },
     async complete(messages: ChatMessage[], options: CompleteOptions = {}) {
       const up = await pingOllama(baseUrl);
-      if (!up) throw new ProviderError("Ollama is not running (start `ollama serve` first)", false, "ollama");
+      if (!up) throw new ProviderError("Ollama is not running (start `ollama serve` first)", false, id);
       const model = options.model ?? defaultModel;
-      const res = await fetch(`${baseUrl}/chat/completions`, {
+      const res = await fetch(`${originOf(baseUrl)}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model,
           messages,
+          stream: false,
+          think: false,
           temperature: options.temperature ?? 0.4,
-          options: { num_predict: options.maxTokens ?? 2048 },
+          options: { num_predict: options.maxTokens ?? 2048, num_ctx: numCtx },
         }),
         signal: options.signal,
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new ProviderError(`ollama ${res.status}: ${text.slice(0, 200)}`, res.status === 429 || res.status >= 500, "ollama");
+        throw new ProviderError(`ollama ${res.status}: ${text.slice(0, 200)}`, res.status === 429 || res.status >= 500, id);
       }
-      const data = (await res.json().catch(() => ({}))) as OllamaResponse;
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new ProviderError("ollama returned empty content", true, "ollama");
+      const data = (await res.json().catch(() => ({}))) as OllamaChatResponse;
+      const content = data.message?.content;
+      if (!content) throw new ProviderError("ollama returned empty content", true, id);
       return content;
     },
   };
