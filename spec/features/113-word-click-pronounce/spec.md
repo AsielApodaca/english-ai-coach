@@ -34,7 +34,8 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
   - Implementación sugerida: clase/flag de estado en el contenedor del libro (`data-interactive="on|off"`) que gate-ee los listeners de 112 y 113 en un solo punto.
 - [x] **No desincroniza el flujo:** el click **nunca** emite eventos de la máquina de estados (no `TTS_END`, no avance de fase, no cancelación de turno). Es un side-effect aislado del flujo de práctica.
 - [x] **Locución del coach en curso:** si el usuario clicka mientras el coach habla… **no puede pasar** por el gate anterior (deshabilitado). Documentar la defensa: el listener verifica el gate **dentro** del handler (no solo CSS `pointer-events`), para que ni un race de timing ni un click programático disparen audio.
-- [x] **Colisión con selección (drag):** distinguir click de arrastre con umbral de movimiento (p. ej. ≤ 5 px y < 400 ms desde `pointerdown` → click; si supera, es selección → la 112 maneja el popover y **no** se reproduce audio). El `click` nativo ya no dispara si hubo selección de texto arrastrada — verificar el comportamiento y definir el umbral como constante testeable.
+- [x] **Colisión con selección (drag):** distinguir click de arrastre con umbral de movimiento (p. ej. ≤ 5 px y < 400 ms desde `pointerdown` → click; si supera, es selección → la 112 maneja el popover y **no** se reproduce el audio de la palabra única — salvo con selección activa: ver *Selección → frase*). El `click` nativo ya no dispara si hubo selección de texto arrastrada — verificar el comportamiento y definir el umbral como constante testeable.
+- [x] **Selección → frase:** al hacer click con una selección activa (arrastre sobre ≥1 palabras dentro del libro/review), se pronuncian **todos** los tokens seleccionados **en conjunto** (una sola llamada `tts.speak(string[])` → un solo request `/api/tts` con `segments`); precedencia sobre el umbral click-vs-arrastre (un arrastre con selección siempre lo supera); el popover de 112 permanece abierto; mismas reglas de gate y de side-effect aislado.
 - [x] **Colisión con popover (112):** el hover abre el popover; el click sobre la palabra reproduce el audio **y mantiene** abierto el popover (el usuario quiere oír mientras lee el significado). Si el click fuera sobre el propio popover, no pronuncia (el popover no es la palabra).
 - [x] **Un click = una síntesis:** clicks rápidos sucesivos sobre la misma u otra palabra **reemplazan** la reproducción en curso (cancelación por generación, misma semántica que `_gen` de `BrowserTTS`), no se encolan ni se superponen.
 - [x] **Sin interrupción del resto:** si mientras suena la palabra clickada el coach arranca una lectura por cambio de fase, la lectura del coach tiene prioridad: cancela la palabra aislada (no debe haber dos audios del coach a la vez).
@@ -49,6 +50,7 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 ## Decisiones de diseño / tecnología
 
 - **Click = audio, arrastre = selección** (decisión del usuario): resuelve el conflicto 112↔113 sin modifiers (no shift ni ctrl). Umbral de 5 px/400 ms como separación.
+- **Selección → frase en el mismo click handler:** la rama de selección tiene **precedencia** sobre el umbral click-vs-arrastre (un arrastre con selección siempre lo supera), resuelta dentro de `createWordClickHandler` sin listeners adicionales.
 - **Gate "coach hablando / grabando" en handler, no solo en CSS:** decisión explícita del usuario ("mientras el coach habla, las palabras no deben ser clickeables, osea, no deben tener efecto hover"); el CSS `pointer-events` es la primera línea, el check de estado en el handler la segunda.
 - **Reutilizar `BrowserTTS`** en vez de `<audio>` dedicado: ya resuelve rate server-side, volumen vivo y cancelación.
 - **Side-effect aislado:** deliberadamente fuera de `cu2.ts` (el reducer no se entera) — el reducer solo modela el flujo de práctica, no el audio casual.
@@ -63,6 +65,7 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 ## Criterios de aceptación
 
 - [x] `tests/word-click.test.ts` (o ampliación del módulo de gate): lógica pura de `isClick vs drag` (umbral px/tiempo), evaluación del gate (coachSpeaking × recording → blocked; idle/review → allowed), y que el handler de click no emite eventos de fase (spy sobre el dispatcher). *La parte DOM se valida manualmente (no hay harness de DOM en el repo).*
+- [x] `tests/word-click.test.ts` — selección → frase: `tokensFromRange` puro (tokens exactos sin normalizar: contracciones/mayúsculas conservadas, elementos no intersectados fuera), precedencia de la selección sobre el umbral, gate aplicado también a la selección, scope del press/click, selección vacía → fallback al path de palabra, y que **ninguna** rama (incluidas las de selección) emite eventos de fase.
 - [x] `npm test` verde y `npm run check` verde (ficheros nuevos listados).
 
 ## Checklist de verificación (pre-merge)
@@ -71,7 +74,8 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 - [ ] Mientras el coach lee el fragmento/modelo/full → click **no** emite audio, no abre popover, no corta la lectura ni desordena el karaoke.
 - [ ] Durante la captura PTT (botón/espacio mantenido) → click sin efecto.
 - [ ] Dos clicks rápidos en palabras distintas → solo se oye la última (sin solapes).
-- [ ] Arrastrar sobre 2+ palabras → **no** reproduce audio; abre el popover del conjunto (112).
+- [ ] Arrastrar sobre 2+ palabras (solo el arrastre, sin click) → **no** reproduce audio; abre el popover del conjunto (112).
+- [ ] Arrastrar selección de 2+ palabras y clickear → se escuchan juntas, popover visible; clickear de nuevo → repite.
 - [ ] Click en palabra → popover del hover sigue visible mientras suena el audio.
 - [ ] Click en review mode (sesión completada) → funciona igual.
 - [ ] Sin servidor TTS (engine null/503) → fallback al motor del navegador o silencio, sin error en consola/UI.
@@ -80,7 +84,6 @@ La pronunciación es el núcleo del producto (CU2) y la letra en pantalla no emi
 
 ## Fuera de alcance
 
-- Reproducir la frase/selección completa (extensión futura: click en popover → oír la frase).
 - Reproducir el fragmento entero al click en la línea (hoy existe diseño para "línea future clicable" en `design-system.md` — fuera de este alcance).
 - Grabar y comparar la voz del usuario con la del coach.
 - Popover de 112 (feature separada, solo se define la convivencia).

@@ -44,7 +44,7 @@ import { playChime, stopChime } from "../speech/chime.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
-import { createWordClickHandler } from "./word-click.js";
+import { createWordClickHandler, tokensFromRange } from "./word-click.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -308,8 +308,9 @@ function syncBookInteraction() {
 /**
  * Install the document-level word-click listeners (feature 113), once.
  *
- * The handler gets the shared gate + the pronunciation side-effect only: it
- * never touches the flow (no `TTS_END`, no phase advance, no turn cancel).
+ * The handler gets the shared gate + the pronunciation side-effect + the
+ * selection/scope probes of "click a selection → hear the phrase": it never
+ * touches the flow (no `TTS_END`, no phase advance, no turn cancel).
  */
 function installWordClick() {
   if (wordClickInstalled) return;
@@ -317,6 +318,8 @@ function installWordClick() {
   const handler = createWordClickHandler({
     isAllowed: canInteractWithWords,
     pronounce: pronounceWord,
+    selection: selectedWordTokens,
+    isScope: isWordScope,
     now: () => performance.now(),
   });
   document.addEventListener("pointerdown", handler.onPointerDown);
@@ -674,11 +677,24 @@ function showAdjustment(message) {
 // Speech
 // ---------------------------------------------------------------------------
 
+/** Word surfaces where a native selection may be pronounced (features 112/113). */
+const WORD_SCOPE_SEL = ".karaoke-book, .review-words";
+
+/** Word spans read from a selection, in document order (karaoke + review). */
+const WORD_SPAN_SEL = ".karaoke-book .kw, .review-words .kw";
+
 /**
- * Pronounce ONE karaoke word on click (feature 113) through the EXISTING TTS
- * chain — BrowserTTS (`GET /api/tts?text=<word>&rate=<dock tempo>`), with the
- * `speechSynthesis` fallback and silent degradation when no engine exists.
+ * Pronounce the karaoke word(s) clicked or selected (feature 113) through the
+ * EXISTING TTS chain — BrowserTTS (`GET /api/tts?…&rate=<dock tempo>`), with
+ * the `speechSynthesis` fallback and silent degradation when no engine exists.
  * No third audio channel, no re-render, no flow event: a pure side-effect.
+ *
+ * Accepts ONE token (word click) or an ARRAY of tokens (selection click). The
+ * array is handed to `tts.speak()` AS-IS — `BrowserTTS` synthesizes it in ONE
+ * `/api/tts` request (repeated `segments` params) with measured silence
+ * between tokens, i.e. the phrase plays as a single utterance. Deliberately
+ * NOT a per-word loop: that would chop the phrase into separate round-trips
+ * and could overlap or queue.
  *
  * `tts.stop()` runs first so a rapid second click REPLACES the playback in
  * flight (generation cancel, same semantics as `_gen` in `BrowserTTS`) instead
@@ -688,12 +704,53 @@ function showAdjustment(message) {
  * way (`speak()`/`speakWithKaraoke()` stop the TTS first): never two coach
  * audios at once.
  *
- * @param {string} word - exact token from `data-word` (contractions kept)
+ * @param {string|string[]} words - exact token(s) from `data-word`
+ *   (contractions kept verbatim), one per selected word
  */
-function pronounceWord(word) {
-  if (!word || !tts) return;
+function pronounceWord(words) {
+  const list = (Array.isArray(words) ? words : [words]).filter(
+    (w) => typeof w === "string" && w.trim() !== "",
+  );
+  if (!list.length || !tts) return;
   tts.stop();
-  void tts.speak(word, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+  void tts.speak(list, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+}
+
+/**
+ * Tokens of the CURRENT native selection, scoped to the word surfaces
+ * (feature 113: click a selection → hear the whole phrase).
+ *
+ * Returns `[]` when there is no selection, when it is collapsed, or when its
+ * common ancestor sits outside `.karaoke-book`/`.review-words`: a selection
+ * made anywhere else in the app (settings, sidebar, chat transcript) must
+ * never trigger audio. The tokens come from `tokensFromRange` — the exact
+ * `data-word` values in document order, never normalized (contractions and
+ * casing preserved for the TTS).
+ *
+ * @returns {string[]} the selected tokens, or [] outside the word surface
+ */
+function selectedWordTokens() {
+  const sel = document.getSelection();
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) return [];
+  const range = sel.getRangeAt(0);
+  const node = range.commonAncestorContainer;
+  const scopeEl = node.nodeType === 1 ? /** @type {Element} */ (node) : node.parentElement;
+  if (!scopeEl?.closest(WORD_SCOPE_SEL)) return [];
+  return tokensFromRange(range, document.querySelectorAll(WORD_SPAN_SEL));
+}
+
+/**
+ * True when an event target sits inside the word surface (`.karaoke-book` or
+ * `.review-words`): the scope probe the click handler applies to BOTH the
+ * press and the click before honoring an active selection (feature 113).
+ * `instanceof Element` guards against text nodes / non-DOM synthetic targets.
+ *
+ * @param {unknown} target - event target
+ * @returns {boolean}
+ */
+function isWordScope(target) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest(WORD_SCOPE_SEL));
 }
 
 /** Speak a line through the best TTS engine; returns false when stopped. */

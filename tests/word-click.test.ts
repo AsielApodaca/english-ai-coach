@@ -9,26 +9,44 @@ import {
   CLICK_MAX_DURATION_MS,
   createWordClickHandler,
   isClickGesture,
+  tokensFromRange,
   wordTokenOf,
 } from "../public/ui/word-click.js";
 import { wordInteractionAllowed } from "../public/speech/ptt.js";
 
 // ---------------------------------------------------------------------------
-// Feature 113 — click on a karaoke word → pronunciation.
+// Feature 113 — click on a karaoke word → pronunciation, click on an active
+// selection → the whole phrase as one utterance.
 //
 // Only PURE logic is covered here (no DOM harness exists in this repo): the
-// click-vs-drag thresholds, the handler's gate matrix, the isolation from the
-// state machine, and the token resolution. The real DOM wiring (document-level
-// delegated listeners, CSS `data-interactive` flag) is verified manually and
-// pinned by the source assertions at the bottom of this file.
+// click-vs-drag thresholds, the handler's gate matrix, the selection path and
+// its precedence over the threshold, the isolation from the state machine, and
+// the token resolution (word path + `tokensFromRange`). The real DOM wiring
+// (document-level delegated listeners, CSS `data-interactive` flag) is
+// verified manually and pinned by the source assertions at the bottom of this
+// file.
 // ---------------------------------------------------------------------------
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const viewSrc = readFileSync(join(repoRoot, "public", "ui", "practice-view.js"), "utf8");
+const popoverSrc = readFileSync(join(repoRoot, "public", "ui", "lookup-popover.js"), "utf8");
 
 /** Fake event target: `closest(sel)` resolves to `el` (whatever the selector). */
 function targetOf(el: object | null) {
   return { closest: (_sel: string) => el };
+}
+
+/**
+ * Fake event target INSIDE the word surface: tagged `inBook` (the marker
+ * `bookScope` reads) while still resolving `closest` for `wordTokenOf`.
+ */
+function bookTargetOf(el: object | null) {
+  return { inBook: true, closest: (_sel: string) => el };
+}
+
+/** `isScope` matching only the book-tagged targets of `bookTargetOf`. */
+function bookScope(target: unknown): boolean {
+  return Boolean(target && typeof target === "object" && "inBook" in target && target.inBook);
 }
 
 /** Fake `.kw` span carrying `data-word`. */
@@ -47,28 +65,48 @@ function wrapEl(token: string) {
   return { querySelector: (_sel: string) => kw };
 }
 
+/** Fake Range: `intersectsNode` is true only for the listed elements. */
+function fakeRange(hits: object[]) {
+  return { intersectsNode: (el: object) => hits.includes(el) };
+}
+
 /**
  * Test rig: the shared gate as a function of (coachSpeaking × recording), the
- * pronounced words, the dispatched state-machine events and an injected clock
- * for the click/drag threshold.
+ * pronounced calls (one entry per `pronounce()` call, each an array — the
+ * word path pushes 1 token, the selection path the whole token array), the
+ * dispatched state-machine events, the optional selection/scope probes of the
+ * selection path and an injected clock for the click/drag threshold.
  */
-function rig(opts: { coachSpeaking?: boolean; recording?: boolean } = {}) {
+function rig(opts: {
+  coachSpeaking?: boolean;
+  recording?: boolean;
+  selection?: () => string[];
+  isScope?: (target: unknown) => boolean;
+} = {}) {
   const allowed = wordInteractionAllowed({
     coachSpeaking: opts.coachSpeaking ?? false,
     recording: opts.recording ?? false,
   });
-  const pronounced: string[] = [];
+  const pronouncedCalls: string[][] = [];
   const dispatched: { type: string }[] = [];
   let clock = 0;
   const handler = createWordClickHandler({
     isAllowed: () => allowed,
-    pronounce: (word) => pronounced.push(word),
+    pronounce: (words: string[]) => pronouncedCalls.push(words),
+    // Defaults preserve the word-click-only behavior (selection path off).
+    selection: opts.selection ?? (() => []),
+    isScope: opts.isScope ?? (() => false),
     dispatch: (event) => dispatched.push(event),
     now: () => clock,
   });
   return {
     handler,
-    pronounced,
+    /** One entry per pronounce() call, each the exact array passed. */
+    pronouncedCalls,
+    /** Flattened view of every pronounced token (old single-word assertions). */
+    get pronounced(): string[] {
+      return pronouncedCalls.flat();
+    },
     dispatched,
     advance: (ms: number) => {
       clock += ms;
@@ -78,14 +116,29 @@ function rig(opts: { coachSpeaking?: boolean; recording?: boolean } = {}) {
 
 type Rig = ReturnType<typeof rig>;
 
-/** Press on `el` at (x, y). */
-function press(r: Rig, el: object, x = 100, y = 50) {
+/** Rig with an active 2-word selection AND the book scope enabled. */
+function selectionRig(opts: { coachSpeaking?: boolean; recording?: boolean } = {}): Rig {
+  return rig({ ...opts, selection: () => ["Shut", "up"], isScope: bookScope });
+}
+
+/** Press on `el` at (x, y) — outside the word surface (no scope probe). */
+function press(r: Rig, el: object | null, x = 100, y = 50) {
   r.handler.onPointerDown({ target: targetOf(el), clientX: x, clientY: y });
 }
 
-/** Click on `el` at (x, y); returns the pronounced token or null. */
-function click(r: Rig, el: object | null, x = 100, y = 50) {
+/** Press on `el` at (x, y) INSIDE the word surface (book/review). */
+function pressInBook(r: Rig, el: object | null, x = 100, y = 50) {
+  r.handler.onPointerDown({ target: bookTargetOf(el), clientX: x, clientY: y });
+}
+
+/** Click on `el` at (x, y); returns the pronounced tokens or null. */
+function click(r: Rig, el: object | null, x = 100, y = 50): string[] | null {
   return r.handler.onClick({ target: targetOf(el), clientX: x, clientY: y });
+}
+
+/** Click on `el` at (x, y) INSIDE the word surface; tokens or null. */
+function clickInBook(r: Rig, el: object | null, x = 100, y = 50): string[] | null {
+  return r.handler.onClick({ target: bookTargetOf(el), clientX: x, clientY: y });
 }
 
 // --- constants (spec: 5 px / 400 ms) ---------------------------------------
@@ -134,15 +187,15 @@ test("click within the threshold pronounces exactly that token", () => {
   press(r, wordEl("hello"));
   r.advance(120);
   const out = click(r, wordEl("hello"));
-  assert.equal(out, "hello");
-  assert.deepEqual(r.pronounced, ["hello"]);
+  assert.deepEqual(out, ["hello"]);
+  assert.deepEqual(r.pronouncedCalls, [["hello"]]);
   assert.deepEqual(r.dispatched, [], "no state-machine event was emitted");
 });
 
 test("the press record is consumed: one click can never pronounce twice", () => {
   const r = rig();
   press(r, wordEl("once"));
-  assert.equal(click(r, wordEl("once")), "once");
+  assert.deepEqual(click(r, wordEl("once")), ["once"]);
   // A second click without a new pointerdown plays nothing.
   assert.equal(click(r, wordEl("once")), null);
   assert.deepEqual(r.pronounced, ["once"]);
@@ -223,8 +276,8 @@ test("gate: blocked while the coach speaks or a capture is held; allowed otherwi
     press(r, wordEl("gated"));
     r.advance(60);
     const out = click(r, wordEl("gated"));
-    assert.equal(out, expected ? "gated" : null, `gate failed for ${JSON.stringify(state)}`);
-    assert.equal(r.pronounced.length, expected ? 1 : 0, JSON.stringify(state));
+    assert.deepEqual(out, expected ? ["gated"] : null, `gate failed for ${JSON.stringify(state)}`);
+    assert.equal(r.pronouncedCalls.length, expected ? 1 : 0, JSON.stringify(state));
     assert.deepEqual(r.dispatched, [], "the click never emits state-machine events");
   }
 });
@@ -244,6 +297,80 @@ test("gate is checked INSIDE the handler: a programmatic click is blocked even w
   assert.deepEqual(recording.pronounced, []);
 });
 
+// --- selection path: click an active selection → the whole phrase -----------
+
+test("selection path: in-scope press + click with a selection → ONE pronounce call with the exact token array", () => {
+  const r = rig({ selection: () => ["Shut", "up"], isScope: bookScope });
+  pressInBook(r, wordEl("Shut"));
+  r.advance(150);
+  const out = clickInBook(r, wordEl("up"), 180, 50); // 80 px of drag
+  assert.deepEqual(out, ["Shut", "up"]);
+  assert.deepEqual(
+    r.pronouncedCalls,
+    [["Shut", "up"]],
+    "called exactly once, with the whole selection as one array",
+  );
+  assert.deepEqual(r.dispatched, [], "the selection path is isolated from the flow");
+});
+
+test("selection path: PRECEDENCE — movement far beyond the threshold still pronounces", () => {
+  // Selecting text always breaks 5 px AND 400 ms; without precedence over the
+  // click-vs-drag threshold the selection could never be pronounced.
+  const r = rig({ selection: () => ["please", "shut", "up"], isScope: bookScope });
+  pressInBook(r, wordEl("please"), 10, 10);
+  r.advance(900); // way past 400 ms
+  const out = clickInBook(r, wordEl("up"), 320, 140); // way past 5 px
+  assert.deepEqual(out, ["please", "shut", "up"]);
+  assert.deepEqual(r.pronouncedCalls, [["please", "shut", "up"]]);
+  assert.deepEqual(r.dispatched, []);
+});
+
+test("selection path: the gate blocks it exactly like a word click", () => {
+  for (const state of [{ coachSpeaking: true }, { recording: true }]) {
+    const r = rig({ ...state, selection: () => ["Shut", "up"], isScope: bookScope });
+    pressInBook(r, wordEl("Shut"));
+    r.advance(60);
+    const out = clickInBook(r, wordEl("up"), 180, 50);
+    assert.equal(out, null, JSON.stringify(state));
+    assert.deepEqual(r.pronouncedCalls, [], JSON.stringify(state));
+    assert.deepEqual(r.dispatched, [], "blocked selection clicks must not dispatch");
+  }
+});
+
+test("selection path: a press outside the book is ignored even with a selection active", () => {
+  const r = rig({ selection: () => ["Shut", "up"], isScope: bookScope });
+  press(r, null); // pointerdown on the dock: no token, out of scope → no record
+  r.advance(60);
+  const out = clickInBook(r, wordEl("Shut"));
+  assert.equal(out, null);
+  assert.deepEqual(r.pronouncedCalls, []);
+  assert.deepEqual(r.dispatched, []);
+});
+
+test("selection path: a click whose target leaves the book (popover) does NOT pronounce", () => {
+  const r = rig({ selection: () => ["Shut", "up"], isScope: bookScope });
+  pressInBook(r, wordEl("Shut"));
+  r.advance(60);
+  const out = click(r, null); // release over the lookup popover: target out of scope
+  assert.equal(out, null);
+  assert.deepEqual(r.pronouncedCalls, []);
+  assert.deepEqual(r.dispatched, []);
+});
+
+test("selection path: an EMPTY selection falls back to the word path", () => {
+  const r = rig({ selection: () => [], isScope: bookScope });
+  // A plain word click has no selection → the single word plays.
+  pressInBook(r, wordEl("hello"));
+  r.advance(60);
+  assert.deepEqual(clickInBook(r, wordEl("hello")), ["hello"]);
+  // A drag with NO selection still yields no audio (112 owns it).
+  pressInBook(r, wordEl("drag"));
+  r.advance(60);
+  assert.equal(clickInBook(r, wordEl("drag"), 160, 50), null);
+  assert.deepEqual(r.pronouncedCalls, [["hello"]]);
+  assert.deepEqual(r.dispatched, []);
+});
+
 // --- isolation from the state machine ---------------------------------------
 
 test("every path of the handler leaves the dispatcher untouched", () => {
@@ -251,7 +378,7 @@ test("every path of the handler leaves the dispatcher untouched", () => {
     (r) => {
       press(r, wordEl("ok"));
       click(r, wordEl("ok"));
-    }, // allowed click
+    }, // allowed word click
     (r) => {
       press(r, wordEl("x"));
       r.advance(900);
@@ -263,19 +390,43 @@ test("every path of the handler leaves the dispatcher untouched", () => {
     }, // cross-word
     (r) => click(r, wordEl("no-down")), // no pointerdown
     (r) => click(r, null), // outside a word
+    (r) => {
+      pressInBook(r, wordEl("Shut"));
+      r.advance(300);
+      clickInBook(r, wordEl("up"), 200, 100);
+    }, // SELECTION path (drag beyond the threshold, selection active)
+    (r) => {
+      pressInBook(r, wordEl("Shut"));
+      r.advance(60);
+      clickInBook(r, null); // selection path, release out of scope
+    },
+    (r) => {
+      press(r, null); // press out of scope with a selection active
+      r.advance(60);
+      clickInBook(r, wordEl("Shut"));
+    },
   ];
   for (const run of paths) {
-    const idle = rig();
+    const idle = selectionRig();
     run(idle);
     assert.deepEqual(idle.dispatched, [], "TTS_END / phase events must never be emitted");
   }
-  const speaking = rig({ coachSpeaking: true });
-  press(speaking, wordEl("gated"));
-  click(speaking, wordEl("gated"));
+  // Sanity: the selection entries above really took the selection path.
+  const exercised = selectionRig();
+  pressInBook(exercised, wordEl("Shut"));
+  exercised.advance(300);
+  clickInBook(exercised, wordEl("up"), 200, 100);
+  assert.deepEqual(exercised.pronouncedCalls, [["Shut", "up"]]);
+
+  const speaking = selectionRig({ coachSpeaking: true });
+  pressInBook(speaking, wordEl("gated"));
+  speaking.advance(60);
+  clickInBook(speaking, wordEl("up"), 200, 100);
   assert.deepEqual(speaking.dispatched, [], "blocked clicks must not dispatch either");
+  assert.deepEqual(speaking.pronouncedCalls, []);
 });
 
-// --- token resolution -------------------------------------------------------
+// --- token resolution (word path) -------------------------------------------
 
 test("wordTokenOf: data-word wins over textContent (contractions kept verbatim)", () => {
   assert.equal(wordTokenOf(targetOf(wordEl("don't"))), "don't");
@@ -301,6 +452,44 @@ test("wordTokenOf: targets outside a word resolve to empty", () => {
   assert.equal(wordTokenOf({ closest: () => ({ textContent: "   " }) }), "");
 });
 
+// --- tokensFromRange (selection → phrase) -----------------------------------
+
+test("tokensFromRange: only the elements the range intersects contribute tokens", () => {
+  const a = wordEl("Please");
+  const b = wordEl("shut");
+  const c = wordEl("up");
+  assert.deepEqual(tokensFromRange(fakeRange([b, c]), [a, b, c]), ["shut", "up"]);
+  assert.deepEqual(tokensFromRange(fakeRange([a]), [a, b, c]), ["Please"]);
+  assert.deepEqual(tokensFromRange(fakeRange([]), [a, b, c]), []); // empty range
+});
+
+test("tokensFromRange: dataset.word wins over textContent", () => {
+  const el = { dataset: { word: "don't" }, textContent: "dont" };
+  assert.deepEqual(tokensFromRange(fakeRange([el]), [el]), ["don't"]);
+});
+
+test("tokensFromRange: contractions and casing preserved verbatim (no normalization)", () => {
+  const contraction = wordEl("don't");
+  const cased = wordEl("SHUT");
+  const review = reviewEl(" Great ");
+  // `phraseFromRange` (112) would lowercase/strip these for its cache key;
+  // the TTS needs the exact rendered tokens instead.
+  assert.deepEqual(
+    tokensFromRange(fakeRange([contraction, cased, review]), [contraction, cased, review]),
+    ["don't", "SHUT", "Great"],
+  );
+});
+
+test("tokensFromRange: whitespace is trimmed and blank elements are skipped", () => {
+  const spaced = wordEl("  spaced  ");
+  const blank = { textContent: "   " };
+  const noDataset = reviewEl("Great");
+  assert.deepEqual(tokensFromRange(fakeRange([spaced, blank, noDataset]), [spaced, blank, noDataset]), [
+    "spaced",
+    "Great",
+  ]);
+});
+
 // --- integration pin (no DOM harness): the wiring in practice-view.js -------
 
 test("practice-view: shared gate + audio-only side-effect, never the flow", () => {
@@ -322,4 +511,29 @@ test("practice-view: shared gate + audio-only side-effect, never the flow", () =
     /setPhase\(|flowToken|captureAttempt|await speak|stopKaraokeRead|activePtt|render/i,
     "the click must never advance, cancel or re-render the flow",
   );
+});
+
+test("practice-view: a selection is pronounced as ONE array in a single speak() call", () => {
+  const body = /function pronounceWord\([^)]*\)\s*\{[\s\S]*?\n\}/.exec(viewSrc)?.[0] ?? "";
+  assert.ok(body, "pronounceWord must exist in practice-view.js");
+  // BrowserTTS accepts string[] → one /api/tts request with `segments` params.
+  assert.equal(
+    (body.match(/tts\.speak\(/g) ?? []).length,
+    1,
+    "exactly one speak() call — the whole array, never a per-word request",
+  );
+  assert.match(body, /tts\.speak\(list/, "the filtered array goes to speak() as-is");
+  assert.doesNotMatch(body, /for\s*\(|while\s*\(|forEach/, "no per-word loop");
+  // The selection/scope probes are wired into the handler, DOM side.
+  assert.match(viewSrc, /createWordClickHandler\(\{[^}]*selection:\s*selectedWordTokens/);
+  assert.match(viewSrc, /createWordClickHandler\(\{[^}]*isScope:\s*isWordScope/);
+  assert.match(viewSrc, /tokensFromRange\(range/);
+});
+
+test("lookup-popover: ANY press inside the book keeps the card open (112+113 coexist)", () => {
+  // Selection clicks often land on line gaps (no `.kw`), so the press guard
+  // must match the whole surface — otherwise the card would close exactly as
+  // the selection audio starts.
+  assert.match(popoverSrc, /WORD_PRESS_SEL = "\.karaoke-book, \.review-words"/);
+  assert.match(popoverSrc, /target\.closest\(WORD_PRESS_SEL\)/);
 });

@@ -13,13 +13,16 @@
  *   - selection: `mouseup` with a native selection inside `.karaoke-book` or
  *     `.review-words` — 1 token behaves like a word, ≥ 2 tokens resolve the
  *     whole phrase (idioms like "shut up");
- *   - close: popover `mouseleave` with a ~150 ms grace, press outside a word,
- *     Escape, phase change / flow cancel (the practice view calls
- *     `closeLookupPopover()`), or the interaction gate flipping closed
- *     (coach speaking / PTT capture — polled while open).
+ *   - close: popover `mouseleave` with a ~150 ms grace, press OUTSIDE the
+ *     book surface (dock, buttons, overlay), Escape, phase change / flow
+ *     cancel (the practice view calls `closeLookupPopover()`), or the
+ *     interaction gate flipping closed (coach speaking / PTT capture — polled
+ *     while open). Presses INSIDE the book/review surface never close the
+ *     card: a word click and a selection click both pronounce (feature 113)
+ *     and the card must stay open while the audio plays.
  *
  * It never intercepts `click` (feature 113 owns click → pronunciation; a
- * press on a word deliberately keeps the card open so audio and meaning
+ * press inside the book deliberately keeps the card open so audio and meaning
  * coexist), never touches the `.kw-*` color/animation classes, and never
  * prevents the native selection used to copy text.
  *
@@ -62,12 +65,17 @@ const SCOPE_SEL = ".karaoke-book, .review-words";
 const WORD_SEL = ".karaoke-book .kw, .review-words .kw";
 
 /**
- * Word surfaces a press must NOT close the card on: clicking a word
- * pronounces it (feature 113) and the popover must stay open while the audio
- * plays — the hover intent timer also has to survive so the card can move to
- * the word just pressed.
+ * Word SURFACE a press must NOT close the card on: the whole book/review
+ * container (element or any descendant via `closest`). Clicking a word
+ * pronounces it and clicking an ACTIVE selection pronounces the whole phrase
+ * (feature 113) — both must keep the card open while the audio plays. The
+ * surface is matched broadly on purpose: a selection click often lands on a
+ * line gap (`.karaoke-line`, the `.review-words` container, text nodes between
+ * review words) where no `.kw`/`.kw-wrap` selector would match, and closing
+ * there would kill the card exactly as the selection audio starts. Presses
+ * outside the surface (dock, buttons, overlay) still close it.
  */
-const WORD_PRESS_SEL = ".karaoke-book .kw, .karaoke-book .kw-wrap, .review-words .kw";
+const WORD_PRESS_SEL = ".karaoke-book, .review-words";
 
 // --- module state (single popover instance) --------------------------------
 
@@ -590,12 +598,17 @@ function onPointerOut(event) {
   if (isOpen) scheduleClose();
 }
 
-/** Press outside the popover closes it (spec 112: click fuera). */
+/**
+ * Press outside the card and outside the book surface closes it (spec 112:
+ * click fuera). Presses inside `.karaoke-book`/`.review-words` never do — a
+ * selection click there is about to pronounce the phrase (feature 113).
+ */
 function onPointerDown(event) {
   const target = /** @type {Element|null} */ (event.target);
   if (target && typeof target.closest === "function") {
     if (target.closest(POPOVER_SEL)) return; // presses inside the card never close it
-    // Press on a word keeps the card open (113: click → audio + popover stays).
+    // Press inside the book keeps the card open (113: word/selection click →
+    // audio + popover stays, including presses on line gaps).
     if (target.closest(WORD_PRESS_SEL)) return;
   }
   if (isOpen) closeLookupPopover();

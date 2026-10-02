@@ -2,10 +2,11 @@
  * Karaoke word click → pronunciation (feature 113 / CU2).
  *
  * Pure, DOM-free core of the "tap a word to hear it" interaction: it turns a
- * `pointerdown` + `click` pair into ONE decision — pronounce this token or
- * stay silent — and runs it through the injected effects only.
+ * `pointerdown` + `click` pair into ONE decision — pronounce this token (or
+ * this selection), or stay silent — and runs it through the injected effects
+ * only.
  *
- * The feature rests on two rules (spec 113):
+ * The feature rests on three rules (spec 113):
  *
  *   - GATE — the click only acts when `isAllowed()` says so. That is the SAME
  *     gate the lookup popover (112) uses (`canInteractWithWords()` in the
@@ -16,6 +17,13 @@
  *     lasted `CLICK_MAX_DURATION_MS` or more is a text selection (feature 112
  *     owns the popover) and must NOT play audio. The thresholds are exported
  *     constants so tests can pin them.
+ *   - SELECTION FIRST (precedence) — when the press started inside the word
+ *     surface AND the click lands inside it too, an ACTIVE selection wins over
+ *     the click-vs-drag threshold: `pronounce(tokens)` plays every selected
+ *     token as ONE utterance. WHY precedence is needed: selecting text always
+ *     requires dragging well past 5 px/400 ms, so without it a selection
+ *     could never be pronounced. An EMPTY selection falls through to the word
+ *     path (a plain word click has no selection at all).
  *
  * The handler is a deliberately isolated side-effect: it never routes through
  * the practice state machine — no `TTS_END`, no phase advance, no turn
@@ -88,66 +96,154 @@ export function wordTokenOf(target) {
 }
 
 /**
+ * Rebuild the selected word tokens from the word spans a selection `Range`
+ * covers — the pure core of "click a selection → hear the whole phrase".
+ *
+ * Deliberate MIRROR of `phraseFromRange` in `lookup-popover.js` with one
+ * crucial difference: NO normalization. Nothing is lowercased, no whitespace
+ * is collapsed and no edge punctuation is stripped — the tokens feed the TTS
+ * and must be spoken exactly as rendered (contractions like `don't` and the
+ * original casing like `Shut` are preserved), while the lookup card
+ * normalizes only to build its cache key.
+ *
+ * Every element the range intersects contributes its `data-word` (the exact
+ * token; contractions included) and falls back to `textContent` for
+ * review-mode spans, which carry no dataset. A drag that starts mid-word
+ * therefore still yields whole words, in document order.
+ *
+ * Deliberately duck-typed (only `intersectsNode`/`dataset`/`textContent` are
+ * touched) so tests can drive it with fakes instead of a real DOM.
+ *
+ * @param {{ intersectsNode(el: object): boolean }} range - the selection range
+ * @param {Iterable<object>} elements - candidate word spans in document order
+ * @returns {string[]} the exact tokens the range covers, in document order
+ */
+export function tokensFromRange(range, elements) {
+  const tokens = [];
+  for (const el of elements) {
+    if (!range.intersectsNode(el)) continue;
+    const node = /** @type {{ dataset?: { word?: unknown }, textContent?: unknown }} */ (el);
+    const raw =
+      node.dataset && typeof node.dataset.word === "string" && node.dataset.word
+        ? node.dataset.word
+        : node.textContent;
+    const token = typeof raw === "string" ? raw.trim() : "";
+    if (token) tokens.push(token);
+  }
+  return tokens;
+}
+
+/**
  * Build the delegated word-click controller of the karaoke book (113).
  *
  * Two listeners, one press record:
- *   - `onPointerDown` stores the token + coordinates + timestamp of the press
- *     (only when it landed on a word),
- *   - `onClick` consumes it and decides — gate first, then token match, then
- *     click-vs-drag — and calls `pronounce(token)` at most once.
+ *   - `onPointerDown` stores the token + scope flag + coordinates + timestamp
+ *     of the press (recorded when it landed on a word OR anywhere inside the
+ *     word surface, so a selection drag that starts on a line gap counts too),
+ *   - `onClick` consumes it and decides — gate first, then SELECTION PATH
+ *     (active selection inside the surface, precedence over the threshold),
+ *     then the WORD PATH (token match + click-vs-drag) — and calls
+ *     `pronounce()` at most once with a `string[]`.
  *
  * @param {{
  *   isAllowed: () => boolean,
- *   pronounce: (word: string) => void,
+ *   pronounce: (words: string[]) => void,
+ *   selection?: () => string[],
+ *   isScope?: (target: unknown) => boolean,
  *   dispatch?: (event: { type: string }) => void,
  *   now?: () => number,
  * }} deps
  *   `isAllowed` — the shared word-interaction gate (coach speaking / capture
  *     held → false); consulted inside `onClick`, the second line of defense
  *     after the CSS `data-interactive` flag.
- *   `pronounce` — play the token through the TTS chain. The ONLY side effect.
+ *   `pronounce` — play the token(s) through the TTS chain, ALWAYS as an array:
+ *     one token on the word path, every selected token on the selection path.
+ *     The ONLY side effect.
+ *   `selection` — returns the tokens of the active native selection (scope
+ *     already verified by the caller) or `[]` when there is none. Optional;
+ *     the default `[]` disables the selection path (word-click-only behavior).
+ *   `isScope` — true when an event target sits inside the word surface
+ *     (`.karaoke-book` / `.review-words`). Optional; the default `false`
+ *     disables the selection path (word-click-only behavior).
  *   `dispatch` — state-machine event sink. MUST never be called from here
  *     (the click is isolated from the flow); present so tests can spy on it.
  *   `now` — injected clock (ms) for the click/drag threshold.
- * @returns {{ onPointerDown: (event: object) => void, onClick: (event: object) => string|null }}
+ * @returns {{
+ *   onPointerDown: (event: object) => void,
+ *   onClick: (event: object) => string[]|null,
+ * }}
  */
-export function createWordClickHandler({ isAllowed, pronounce, dispatch = () => {}, now = () => Date.now() }) {
-  /** Press in flight: token + origin of the last `pointerdown` on a word. */
+export function createWordClickHandler({
+  isAllowed,
+  pronounce,
+  selection = () => [],
+  isScope = () => false,
+  dispatch = () => {},
+  now = () => Date.now(),
+}) {
+  /** Press in flight: the last `pointerdown` that started inside the surface. */
   let press = null;
 
   /** Finite coordinate with a fallback (synthetic events may omit them). */
   const coord = (value, fallback) => (Number.isFinite(value) ? value : fallback);
 
   /**
-   * `pointerdown` on a word → remember where/when the press started.
-   * A press anywhere else clears the record, so a later `click` that did not
-   * start on a word can never pronounce.
+   * `pointerdown` inside the word surface → remember where/when it started.
+   *
+   * A press counts as in-scope when it landed on a word (a `.kw` always lives
+   * inside the book/review surface) OR anywhere else in that surface — a
+   * selection drag may start on a line gap or between review words. A press
+   * outside both clears the record, so a later `click` that did not start in
+   * scope can never pronounce, not even with a selection active.
    *
    * @param {{ target?: unknown, clientX?: number, clientY?: number }} event
    */
   function onPointerDown(event) {
     const token = wordTokenOf(event?.target);
-    press = token
-      ? { token, x: coord(event?.clientX, 0), y: coord(event?.clientY, 0), t: now() }
+    const inScope = Boolean(token) || Boolean(isScope(event?.target));
+    press = inScope
+      ? { token, inScope, x: coord(event?.clientX, 0), y: coord(event?.clientY, 0), t: now() }
       : null;
   }
 
   /**
-   * `click` → pronounce the token when the gate allows it, the press belongs
-   * to the same word and the gesture is a click (not a drag). Returns the
-   * token that was pronounced, or `null` when nothing played.
+   * `click` → pronounce when the gate allows it, in this order:
+   *
+   *   1. GATE — checked first (inside the handler): programmatic clicks and
+   *      timing races stop here.
+   *   2. SELECTION PATH (precedence) — the press started in scope AND the
+   *      click target is in scope AND `selection()` returns ≥ 1 token →
+   *      `pronounce(tokens)` plays the whole selection as one utterance and
+   *      the click-vs-drag threshold is skipped entirely (a selection drag
+   *      ALWAYS exceeds 5 px/400 ms, so applying it would make the selection
+   *      unpronounceable). An empty selection (a plain word click) falls
+   *      through to the word path.
+   *   3. WORD PATH — the target resolves to the SAME token the press started
+   *      on and the gesture is within the click-vs-drag threshold →
+   *      `pronounce([token])`.
    *
    * @param {{ target?: unknown, clientX?: number, clientY?: number }} event
-   * @returns {string|null} the pronounced token, or null
+   * @returns {string[]|null} the pronounced tokens (one on the word path,
+   *   every selected token on the selection path), or null when nothing played
    */
   function onClick(event) {
-    const started = press;
-    press = null;
     // Gate INSIDE the handler: programmatic clicks and timing races stop here.
     if (!isAllowed()) return null;
-    if (!started) return null; // no pointerdown on a word → not our gesture
+    const started = press;
+    press = null;
+    if (!started) return null; // no in-scope pointerdown → not our gesture
+    // SELECTION PATH — takes precedence over the click-vs-drag threshold.
+    if (started.inScope && isScope(event?.target)) {
+      const tokens = selection();
+      if (tokens.length > 0) {
+        pronounce(tokens);
+        // `dispatch` is deliberately never called: an isolated audio side-effect.
+        return tokens;
+      }
+    }
+    // WORD PATH — released on another word / on an ancestor after a drag →
+    // not a click on the pressed word.
     const token = wordTokenOf(event?.target);
-    // Released on another word / on an ancestor after a drag → not a click.
     if (!token || token !== started.token) return null;
     const gesture = {
       dx: coord(event?.clientX, started.x) - started.x,
@@ -156,9 +252,9 @@ export function createWordClickHandler({ isAllowed, pronounce, dispatch = () => 
     };
     // Over the threshold → selection: feature 112 owns it, NO audio.
     if (!isClickGesture(gesture)) return null;
-    pronounce(token);
+    pronounce([token]);
     // `dispatch` is deliberately never called: an isolated audio side-effect.
-    return token;
+    return [token];
   }
 
   return { onPointerDown, onClick };
