@@ -1,6 +1,6 @@
 # 007 · Voz humana (TTS neural local)
 
-**Estado:** Hecho ✅ (feature/007) — en el rediseño v2 el TTS segmentado de esta feature es el motor de voz del karaoke (fases de 105: intro, pregunta, fragmentos, feedback).
+**Estado:** Hecho ✅ (feature/007) — en el rediseño v2 el TTS segmentado de esta feature es el motor de voz del karaoke (fases de 105: intro, pregunta, fragmentos, feedback). **[Modificado por 115 — la fase `intro` fue eliminada; fases vigentes: pregunta → modelo → fragmentos → feedback → respuesta completa → done.]**
 
 ## Qué hace
 

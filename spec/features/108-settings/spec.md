@@ -55,6 +55,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 - [x] Cada sub-tab edita su porción de estado; **precedencia:** `settingsSnapshot` de la sesión (102) > preferencias de localStorage > defaults de `profile.json > defaults` de código.
 - [x] Los toggles de anotación/autoAdvance/liveHighlight afectan en vivo a la práctica karaoke (105/106) sin recargar.
 - [x] El **volumen del coach** se aplica en **todas** sus lecturas (intro, fragmentos, respuesta modelo) y se re-aplica **en vivo** si el usuario mueve el slider a mitad de la lectura. El slider no permite bajar de **10%** (un valor legacy `0` se lee como 10%).
+  - **[Modificado por 115]** La locución de intro ya no existe: el volumen aplica a pregunta, fragmentos y respuesta modelo.
 - [x] Rigor/fillers/adaptive/prepTempo alimentan `config.settingsSnapshot` al **crear** sesión (103), no en runtime.
 - [x] "Export JSON" descarga `data/profile.json` (y opcionalmente sesiones elegidas) como archivo.
 - [x] Mapa de motor ("Speech Engine · READY" / "not installed") refleja whisper/piper/edge según instalados (data de `/api/health`).
@@ -79,6 +80,7 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 - [x] Cambiar rigor/muletillas/adaptive → nueva sesión creada con `settingsSnapshot` correcto (test unitario merge).
 - [x] Toggle de anotación de pronunciación encendido/apagado se refleja en el karaoke en vivo.
 - [x] El volumen elegido (p. ej. 20%) se escucha igual en la introducción, los fragmentos y la respuesta modelo; mover el slider durante la lectura cambia el volumen al instante (motor de servidor; con `speechSynthesis` del navegador aplica en la siguiente lectura — Chrome fija el volumen al arrancar la utterance).
+  - **[Modificado por 115]** Sin introducción hablada: verificar el volumen sobre pregunta, fragmentos y respuesta modelo.
 - [x] El slider de volumen no puede bajar de 10%.
 - [x] Export JSON descarga `profile.json`.
 - [x] `npm test` y `npm run check` verdes.

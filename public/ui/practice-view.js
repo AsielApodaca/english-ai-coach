@@ -5,8 +5,12 @@
  * (the reducer there is the canonical, unit-tested spec; this view is the
  * effectful layer that speaks, records and calls the API):
  *
- *   intro → question → model → explaining → repeatingFragment → feedback
+ *   question → model → repeatingFragment ⇄ feedback
  *        → fullAnswer → done
+ *
+ * The session opens straight at the question (feature 115): the first sound
+ * the coach makes is the question itself, and the model answer hands over
+ * directly to the first fragment (highlighted visually, never announced).
  *
  * The coach speaks each line via the server TTS (BrowserTTS) and the user
  * repeats fragments under their own control: capture is PUSH-TO-TALK (feature
@@ -61,8 +65,8 @@ const CHIME_MAX_MS = 500;
 // Module state (mirrors PracticeState in cu2.ts)
 // ---------------------------------------------------------------------------
 
-/** @type {"intro"|"question"|"model"|"explaining"|"repeatingFragment"|"feedback"|"fullAnswer"|"done"} */
-let phase = "intro";
+/** @type {"question"|"model"|"repeatingFragment"|"feedback"|"fullAnswer"|"done"} */
+let phase = "question";
 let fragmentCount = 0;
 let fragmentIndex = 0;
 let attemptCount = 0;
@@ -77,8 +81,6 @@ let fullPassed = false;
 let session = null;
 let question = null; // { q, answer, fragments }
 let passThreshold = 70;
-let introText = "";
-let explainLine = "";
 let fullLine = "";
 
 /** Continuous-session settings from the session snapshot (feature 107/108). */
@@ -314,7 +316,7 @@ function cancelFlow() {
 async function startFlow(sessionId) {
   const token = ++flowToken;
   root.innerHTML = "";
-  phase = "intro";
+  phase = "question";
   fragmentCount = 0;
   fragmentIndex = 0;
   attemptCount = 0;
@@ -385,8 +387,6 @@ async function loadSessionPayload(sessionId, token) {
   const data = await res.json();
   session = data.session;
   question = data.question;
-  introText = data.intro;
-  explainLine = data.explainLine;
   fullLine = data.fullLine;
   passThreshold = data.passThreshold ?? 70;
   autoAdvance = data.autoAdvance ?? false;
@@ -398,22 +398,17 @@ async function loadSessionPayload(sessionId, token) {
 // ---------------------------------------------------------------------------
 
 async function runFlow(token) {
-  // INTRO — coach explains the dynamics (first question only). Resumed
-  // sessions (feature 109) skip it: they continue at the exact checkpoint.
-  const resuming = isResume();
-  if (!resuming) {
-    setPhase("intro");
-    await speak(introText, token);
-    if (token !== flowToken) return;
-  }
-
-  await runQuestionLoop(token, { resume: resuming });
+  // Feature 115: no opening speech — the flow starts at the question (the
+  // loop below renders and reads it right away, so the panel/orb/dock show
+  // the question state immediately). Resume only shifts where the fragment
+  // loop starts; it no longer changes whether a prelude is spoken (none is).
+  await runQuestionLoop(token, { resume: isResume() });
 }
 
 /**
  * True when the session has progress to resume (feature 109): more than one
  * question, or the last question already has attempts / a full answer / an
- * evaluation. A fresh session starts from the intro.
+ * evaluation. A fresh session starts at the first fragment.
  */
 function isResume() {
   const q = session?.questions?.at(-1);
@@ -424,10 +419,10 @@ function isResume() {
 }
 
 /**
- * One question pass: question → model → explaining → fragments →
- * full → done. Reused by `nextQuestion()` for the continuous session
- * (feature 107), skipping the intro. When `resume` is true (feature 109) the
- * fragment loop starts at the first unpassed fragment instead of fragment 0.
+ * One question pass: question → model → fragments → full → done. Reused by
+ * `nextQuestion()` for the continuous session (feature 107). When `resume`
+ * is true (feature 109) the fragment loop starts at the first unpassed
+ * fragment instead of fragment 0.
  */
 async function runQuestionLoop(token, { resume = false } = {}) {
   // A new question starts without a scorable attempt to re-color.
@@ -453,11 +448,6 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   setPhase("model");
   renderKaraokeBook();
   await speakWithKaraoke(question.answer, token);
-  if (token !== flowToken) return;
-
-  // EXPLAIN — coach explains the fragment dynamics.
-  setPhase("explaining");
-  await speak(explainLine, token);
   if (token !== flowToken) return;
 
   // LOOP — one pass per fragment; failed attempts retry the same fragment.
@@ -489,7 +479,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     if (outcome.passed) {
       // Feature 110: pass → synthesized chime (no spoken congratulation),
       // then advance straight to the next fragment — its read is verbatim
-      // `fragment.text`, no intro phrase (the loop reads it below).
+      // `fragment.text`, with no spoken preamble (the loop reads it below).
       passedFragments.push(fi);
       fragmentScores.push(outcome.score);
       await playSuccessChime();
@@ -558,8 +548,8 @@ async function runQuestionLoop(token, { resume = false } = {}) {
 
 /**
  * Next question (feature 107): POST /api/session/next-question, then reload
- * the session snapshot (fresh explainLine/fullLine/autoAdvance + the
- * new last question) and restart the question loop from the QUESTION phase.
+ * the session snapshot (fresh fullLine/autoAdvance + the new last question)
+ * and restart the question loop from the QUESTION phase.
  */
 async function nextQuestion() {
   if (phase !== "done") return;
@@ -1196,8 +1186,8 @@ function renderKaraokeBook() {
  * Rebuild the book from the current phase + last attempt (settings listener,
  * `renderFull()`):
  *   - full answer in flight → a single `current full` line, white;
- *   - model/explaining → one line per fragment with the book in `reading`
- *     mode (every line legible while the coach reads the whole answer);
+ *   - model → one line per fragment with the book in `reading` mode
+ *     (every line legible while the coach reads the whole answer);
  *   - any other phase → one line per fragment, active line highlighted.
  *
  * Traffic-light colors are restored only during FEEDBACK, for the exact line
@@ -1208,7 +1198,7 @@ function rebuildBook() {
   if (!els?.book || !question) return;
   const scored = phase === "feedback" && Boolean(lastAttempt);
   const isFull = phase === "fullAnswer" || (scored && lastAttemptLineIndex === -1);
-  const reading = phase === "model" || phase === "explaining";
+  const reading = phase === "model";
   els.book.innerHTML = "";
   if (isFull) {
     const line = buildLine(0, question.answer);

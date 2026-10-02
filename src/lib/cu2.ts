@@ -8,9 +8,10 @@
 // chime of feature 110 — for a passing attempt). Keeping the reducer pure
 // makes the transitions unit-testable without audio, network or DOM.
 //
-// Phases:
-//   intro → question → model → explaining → repeatingFragment → feedback
-//        → fullAnswer → done
+// Phases (feature 115: the session opens straight at the question, with no
+// spoken preamble before it and no spoken explanation after the model answer):
+//   question → model → repeatingFragment ⇄ feedback
+//            → fullAnswer → done
 //
 // The LOOP (repeatingFragment ↔ feedback) runs once per fragment; a failed
 // attempt (score < passThreshold) retries the same fragment. After the last
@@ -19,10 +20,8 @@
 // ---------------------------------------------------------------------------
 
 export type PracticePhase =
-  | "intro"
   | "question"
   | "model"
-  | "explaining"
   | "repeatingFragment"
   | "feedback"
   | "fullAnswer"
@@ -103,10 +102,10 @@ export type PracticeEvent =
   | { type: "TIMEOUT"; target: string }
   | { type: "ERROR"; message: string };
 
-/** Create the initial practice state (intro phase, coach starts speaking). */
+/** Create the initial practice state (question phase: coach reads the question). */
 export function initialPracticeState(fragmentCount: number): PracticeState {
   return {
-    phase: "intro",
+    phase: "question",
     fragmentCount: Math.max(0, fragmentCount),
     fragmentIndex: 0,
     attemptCount: 0,
@@ -132,7 +131,7 @@ export function reducePractice(state: PracticeState, event: PracticeEvent): Prac
   const base: PracticeState = { ...state, updatedAt: Date.now() };
   switch (event.type) {
     case "ENTER":
-      return { ...base, phase: "intro", ttsSpeaking: true, waitingForUser: false, error: null };
+      return { ...base, phase: "question", ttsSpeaking: true, waitingForUser: false, error: null };
 
     case "TTS_START":
       return { ...base, ttsSpeaking: true };
@@ -200,13 +199,12 @@ export function reducePractice(state: PracticeState, event: PracticeEvent): Prac
 /** TTS_END transitions: the coach finished speaking → next phase. */
 function onTtsEnd(state: PracticeState): PracticeState {
   switch (state.phase) {
-    case "intro":
-      return { ...state, phase: "question", ttsSpeaking: false };
     case "question":
       return { ...state, phase: "model", ttsSpeaking: false };
     case "model":
-      return { ...state, phase: "explaining", ttsSpeaking: false };
-    case "explaining":
+      // Feature 115: the model answer hands over DIRECTLY to the first
+      // fragment — no spoken explanation of the dynamics in between (the
+      // active fragment is highlighted visually instead).
       return {
         ...state,
         phase: "repeatingFragment",
@@ -361,25 +359,6 @@ export function currentTarget(
 // ---------------------------------------------------------------------------
 // Spoken lines (served to the view via the session endpoints)
 // ---------------------------------------------------------------------------
-
-/** INTRO: opening speech — topic context + dynamics (CU2 step 1). */
-export function buildIntroText(config: { topicPrompt: string; level: string }): string {
-  return (
-    "Welcome to your practice session. Here is how it works: I will ask you a question, " +
-    "then I will show you a strong model answer. I will read it in short fragments, and you " +
-    "repeat each one after me. I will give you feedback as we go. At the end, you will read " +
-    "the whole answer out loud. Let's begin."
-  );
-}
-
-/** EXPLAIN: coach explains the fragment dynamics (CU2 step 6). */
-export function buildExplainLine(): string {
-  return (
-    "Now let's practice. I will read the answer in short fragments. Listen to each fragment, " +
-    "then repeat it after me. Try to match my pronunciation. I will highlight the words you " +
-    "need to work on."
-  );
-}
 
 /** FULL: coach instructs the user to read the whole answer (CU2 step 14). */
 export function buildFullLine(): string {
