@@ -73,3 +73,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 loadHealth();
+
+// Pre-load the local Ollama models before the user reaches the session, so the
+// first practice/popup call does not pay the model-load latency. Fire-and-forget.
+fetch("/api/warmup", { method: "POST" }).catch(() => {});

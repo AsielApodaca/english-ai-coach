@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
-import { buildProviders, completeWithFallback, providerById, providerStatus } from "./lib/providers/index.ts";
+import { buildProviders, completeWithFallback, providerById, providerStatus, warmProviders, warmupEnabled } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
 import { evaluateFragment, generatePracticeSet, isBlankTranscript, isFiller, normalize, tokenize } from "./lib/practice.ts";
@@ -48,6 +48,43 @@ const env = process.env as NodeJS.ProcessEnv;
 
 const providers = buildProviders(env as never);
 const primaryProviderId = env.LLM_PROVIDER ?? (env.MOCK_LLM ? "mock" : "cloudflare");
+
+/**
+ * Single in-flight warm batch, shared by server boot and `POST /api/warmup`:
+ * an endpoint hit while the boot warm is still running joins that promise
+ * instead of spawning a second batch. Reset to null on settle so a later call
+ * can warm again (cheap once the models are resident).
+ */
+let warmInFlight: Promise<Record<string, boolean>> | null = null;
+
+/** Deduped warm of every local Ollama provider (never rejects). */
+function startWarmup(): Promise<Record<string, boolean>> {
+  if (!warmInFlight) {
+    warmInFlight = warmProviders(providers)
+      .catch(() => ({}) as Record<string, boolean>)
+      .finally(() => {
+        warmInFlight = null;
+      });
+  }
+  return warmInFlight;
+}
+
+// Boot warm (feature 113): pre-load the local Ollama models so the first
+// session/popup does not pay the model-load latency. Fire-and-forget — it
+// must never block or throw around `app.listen`.
+if (warmupEnabled(env)) {
+  const startedAt = performance.now();
+  void startWarmup().then((results) => {
+    for (const [id, ok] of Object.entries(results)) {
+      if (ok) {
+        console.log(`[warmup] ${id}: ready (${((performance.now() - startedAt) / 1000).toFixed(1)} s)`);
+      } else {
+        console.log(`[warmup] ${id}: failed`);
+      }
+    }
+  });
+}
+
 /** TEMPORARY: MOCK_LLM=1 short-circuits every LLM call with canned replies. */
 const MOCK_LLM = Boolean(env.MOCK_LLM);
 const storage = createStorage(rootDir);
@@ -102,6 +139,21 @@ app.get("/api/health", async (_req, res) => {
     tts: ttsStatus(),
     dataDir: storage.dataDir,
   });
+});
+
+/**
+ * POST /api/warmup — pre-load the local Ollama models (feature 113).
+ *
+ * Shares the deduped in-flight warm with the boot call, so hitting this while
+ * the boot warm is still running joins it instead of starting a second batch.
+ * Responds 200 `{ ok: false, reason: "disabled" }` without touching Ollama
+ * when `OLLAMA_WARM=0`, else 200 `{ ok, warmed: { ollama, "ollama-fast" } }`.
+ * The frontend fires it (fire-and-forget) on app load.
+ */
+app.post("/api/warmup", async (_req, res) => {
+  if (!warmupEnabled(env)) return res.json({ ok: false, reason: "disabled" });
+  const warmed = await startWarmup();
+  res.json({ ok: Object.values(warmed).every(Boolean), warmed });
 });
 
 app.post("/api/practice/new", async (req, res) => {
