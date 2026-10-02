@@ -1,6 +1,7 @@
 # Secrets
 .env
 .env.*
+!.env.example
 
 # Personal practice data (learner history, profile, tmp audio)
 data/

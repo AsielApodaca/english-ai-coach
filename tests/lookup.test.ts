@@ -563,6 +563,54 @@ test("MyMemory wrapper: translation parsed; quota prose and errors → null", as
 });
 
 // ---------------------------------------------------------------------------
+// Dictionary circuit breaker (fast-lookup fix): an unreachable
+// dictionaryapi.dev must cost ONE timeout, then be skipped until cooldown.
+// ---------------------------------------------------------------------------
+
+test("breaker: a timeout opens the circuit — the second call skips fetch", async () => {
+  const timedOut = fakeFetch(() => {
+    throw new DOMException("timed out", "TimeoutError");
+  });
+  const lookup = createDictionaryLookup(timedOut.fetchImpl, { cooldownMs: 60_000 });
+  assert.equal(await lookup("hello"), null);
+  assert.equal(await lookup("hello"), null);
+  assert.equal(timedOut.calls.length, 1, "an open circuit must not reach the network");
+});
+
+test("breaker: non-OK answers (404) do NOT trip the circuit", async () => {
+  const notFound = fakeFetch(() => ({ status: 404, body: { title: "No Definitions Found" } }));
+  const lookup = createDictionaryLookup(notFound.fetchImpl);
+  assert.equal(await lookup("hello"), null);
+  assert.equal(await lookup("hello"), null);
+  assert.equal(notFound.calls.length, 2, "a 404 is an answer, not an outage");
+});
+
+test("breaker: the circuit closes again once the cooldown elapses", async () => {
+  let clock = 1_000;
+  const timedOut = fakeFetch(() => {
+    throw new DOMException("timed out", "TimeoutError");
+  });
+  const lookup = createDictionaryLookup(timedOut.fetchImpl, { cooldownMs: 60_000, now: () => clock });
+  assert.equal(await lookup("hello"), null);
+  clock += 59_999;
+  assert.equal(await lookup("hello"), null);
+  assert.equal(timedOut.calls.length, 1, "still inside the cooldown window");
+  clock += 1;
+  assert.equal(await lookup("hello"), null);
+  assert.equal(timedOut.calls.length, 2, "after the cooldown the network is retried");
+});
+
+test('breaker: a network TypeError ("fetch failed") trips the circuit too', async () => {
+  const networkDown = fakeFetch(() => {
+    throw new TypeError("fetch failed");
+  });
+  const lookup = createDictionaryLookup(networkDown.fetchImpl);
+  assert.equal(await lookup("hello"), null);
+  assert.equal(await lookup("hello"), null);
+  assert.equal(networkDown.calls.length, 1, "an open circuit must not reach the network");
+});
+
+// ---------------------------------------------------------------------------
 // Selection reconstruction (review fixes #2, #7): rebuild the phrase from the
 // `.kw` spans a Range intersects — `Range.toString()` is polluted by `.kw-ipa`
 // annotations and missing whitespace (`Shut~shuhtupuhpand`, `easy.EE·zeePlease`).

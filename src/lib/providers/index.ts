@@ -14,18 +14,41 @@ export interface Env extends Record<string, string | undefined> {
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_MODEL?: string;
   OLLAMA_MODEL?: string;
+  /** KV-cache window (tokens) for the session model; default 32768. */
+  OLLAMA_CTX?: string;
+  /** Fast local model that serves the lookup popup (e.g. phi4-mini). */
+  OLLAMA_FAST_MODEL?: string;
+  /** KV-cache window (tokens) for the fast lookup model; default 8192. */
+  OLLAMA_FAST_CTX?: string;
   /** TEMPORARY testing aid: MOCK_LLM=1 serves canned LLM replies (provider "mock"). */
   MOCK_LLM?: string;
 }
 
-/** Build the provider registry from environment/config. */
+/** Parse an env-declared `num_ctx`, falling back on missing/invalid values. */
+function parseCtx(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return raw !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * Build the provider registry from environment/config.
+ *
+ * Order (mock first when `MOCK_LLM` is set) is what the practice flow relies
+ * on and must not change. When `OLLAMA_FAST_MODEL` is configured, a second
+ * Ollama provider (`"ollama-fast"`, small `num_ctx`) is appended; the lookup
+ * popup puts it ahead of the chain via `lookupCandidates()` in `server.ts`.
+ */
 export function buildProviders(env: Env): Provider[] {
   const mock = env.MOCK_LLM ? [createMockProvider()] : [];
+  const fast = env.OLLAMA_FAST_MODEL
+    ? [createOllamaProvider(undefined, env.OLLAMA_FAST_MODEL, { id: "ollama-fast", numCtx: parseCtx(env.OLLAMA_FAST_CTX, 8192) })]
+    : [];
   return [
     ...mock,
     createGeminiProvider(env.GEMINI_API_KEY),
     createCloudflareProvider(env.CLOUDFLARE_API_TOKEN, env.CLOUDFLARE_ACCOUNT_ID, env.CLOUDFLARE_MODEL),
-    createOllamaProvider(undefined, env.OLLAMA_MODEL),
+    createOllamaProvider(undefined, env.OLLAMA_MODEL, { id: "ollama", numCtx: parseCtx(env.OLLAMA_CTX, 32768) }),
+    ...fast,
   ];
 }
 

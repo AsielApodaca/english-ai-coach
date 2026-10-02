@@ -64,6 +64,13 @@ function candidates(providerRequested?: string): Candidate[] {
   return [...(viaId ? [viaId] : []), ...providers.filter((p) => p.id !== primary)];
 }
 
+/** Lookup chain: mock excluded (popup must use real LLM), fast local model first. */
+function lookupCandidates(): Candidate[] {
+  const chain = candidates().filter((c) => c.id !== "mock");
+  const fast = chain.filter((c) => c.id === "ollama-fast");
+  return [...fast, ...chain.filter((c) => c.id !== "ollama-fast")];
+}
+
 const app = express();
 app.use(express.json({ limit: "25mb" }));
 app.use(express.static(join(rootDir, "public")));
@@ -930,8 +937,9 @@ app.get("/api/lookup", async (req, res) => {
       dictionary: lookupDictionary,
       translate: lookupTranslate,
       // The provider chain is resolved per call so MOCK_LLM/primary selection
-      // keeps working exactly like every other endpoint.
-      llm: (query, kind, memory) => createLlmLookup(candidates())(query, kind, memory),
+      // keeps working exactly like every other endpoint — except that the
+      // lookup popup always uses real providers (`lookupCandidates`).
+      llm: (query, kind, memory) => createLlmLookup(lookupCandidates())(query, kind, memory),
       getLearnerMemory: () => buildLearnerMemory(storage.loadProfile(), storage.loadAllSessions()),
       cache: lookupCache,
     });
