@@ -190,3 +190,37 @@ test("splitForTts: pause classes cover the three spec ranges on a long mixed lin
   assert.equal(last, LONG_PAUSE_MS);
   assert.ok(SHORT_TEXT_MAX_WORDS >= 4, "short-text threshold is documented");
 });
+
+// ---------------------------------------------------------------------------
+// Degenerate inputs (review fixes #5 and #6)
+// ---------------------------------------------------------------------------
+
+test("splitForTts: punctuation-only input still honors the >= 1 segment contract", () => {
+  // Every comma boundary is dropped as "no speech before it", which used to
+  // leave ZERO segments — the server answered 400 for non-empty input.
+  const text = ", , , , ,";
+  const { segments, pausesMs } = splitForTts(text);
+  assert.deepEqual(segments, [text], "the whole source comes back as one segment");
+  assert.deepEqual(pausesMs, [LONG_PAUSE_MS]);
+  assert.equal(pausesMs.length, segments.length);
+});
+
+test("splitForTts: a dash between digits is a number range, not a clause boundary", () => {
+  const spacedHyphen = "The daily limit is 10 - 20 requests for every team today.";
+  const hyphen = splitForTts(spacedHyphen);
+  assert.ok(
+    hyphen.segments.some((s) => s.includes("10 - 20")),
+    `number range was split apart: ${JSON.stringify(hyphen.segments)}`,
+  );
+
+  const emDash = "Expect anywhere from 10 \u2014 20 minutes of waiting on weekdays here.";
+  const dash = splitForTts(emDash);
+  assert.ok(
+    dash.segments.some((s) => s.includes("10 \u2014 20")),
+    `number range was split apart: ${JSON.stringify(dash.segments)}`,
+  );
+
+  // A dash between WORDS is still a clause boundary (short pause).
+  const words = splitForTts("Bring the reports, wait \u2014 hold on a second before answering please.");
+  assert.equal(words.pausesMs[0], SHORT_PAUSE_MS);
+});

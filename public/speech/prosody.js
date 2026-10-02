@@ -90,6 +90,13 @@ function nextVisibleChar(src, index) {
   return i < src.length ? src[i] : "";
 }
 
+/** First character before `index`, skipping spaces; "" at start of text. */
+function prevVisibleChar(src, index) {
+  let i = index;
+  while (i > 0 && /\s/.test(src[i - 1])) i--;
+  return i > 0 ? src[i - 1] : "";
+}
+
 /**
  * True when the `.` at `index` must not end a clause.
  *
@@ -136,10 +143,13 @@ function matchBoundary(src, index, depth) {
     while (end < src.length && ",;:".includes(src[end])) end++;
     return { pause: SHORT_PAUSE_MS, end };
   }
-  if (ch === "\u2014" || ch === "\u2013") {
-    return { pause: SHORT_PAUSE_MS, end: index + 1 };
-  }
-  if (ch === "-" && /\s/.test(prev) && /\s/.test(next)) {
+  if (ch === "\u2014" || ch === "\u2013" || (ch === "-" && /\s/.test(prev) && /\s/.test(next))) {
+    // A dash between digits is a number range, not a clause break
+    // (`10 - 20`, `10 — 20`): look past the spaces, same spirit as the
+    // digit guard on `,;:`.
+    if (isDigit(prevVisibleChar(src, index)) && isDigit(nextVisibleChar(src, index + 1))) {
+      return null;
+    }
     return { pause: SHORT_PAUSE_MS, end: index + 1 };
   }
 
@@ -218,7 +228,10 @@ export function splitForTts(text) {
   const cleaned = pieces
     .map((p) => ({ text: p.text.trim(), pause: p.pause }))
     .filter((p) => p.text.length > 0);
-  if (cleaned.length === 0) return { segments: [], pausesMs: [] };
+  // Punctuation-only input (`", , , ,"`) leaves nothing to place: fall back
+  // to the whole source as ONE segment so the documented contract holds
+  // (`>= 1` segment for non-empty input — the server answers 400 otherwise).
+  if (cleaned.length === 0) return { segments: [src], pausesMs: [LONG_PAUSE_MS] };
 
   // The final segment always gets the long handover beat (the learner is
   // about to speak); every other keeps the pause of its closing punctuation.

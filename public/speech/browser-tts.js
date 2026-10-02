@@ -21,6 +21,32 @@
 import { splitForTts } from "./prosody.js";
 import { tryNormalizeElement, setElementVolume, releaseElement } from "./level.js";
 
+/**
+ * Server cap on the number of `segments` per request, mirrored client-side
+ * (`TTS_MAX_SEGMENTS` in src/server.ts): sending more gets a 400.
+ */
+export const MAX_TOKEN_SEGMENTS = 40;
+
+/**
+ * Group an array of tokens into segments of at most
+ * {@link MAX_TOKEN_SEGMENTS} words (tokens joined with a space), so a long
+ * word selection (feature 113) stays ONE `/api/tts` request under the
+ * server's segment cap — a 60-token selection previously sent 60 `segments`
+ * params, was rejected with 400 and silently fell back to the mechanical
+ * browser voice (review major #2).
+ *
+ * @param {string[]} tokens - exact tokens, in order
+ * @param {number} [maxWords] - max words per segment
+ * @returns {string[]} phrase segments (each ≤ `maxWords` words)
+ */
+export function chunkTokens(tokens, maxWords = MAX_TOKEN_SEGMENTS) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i += maxWords) {
+    out.push(tokens.slice(i, i + maxWords).join(" "));
+  }
+  return out;
+}
+
 export class BrowserTTS {
   /** @type {SpeechSynthesisVoice[]} */
   voices = [];
@@ -92,8 +118,10 @@ export class BrowserTTS {
    *   - a STRING line → split into clauses client-side (feature 114) and sent
    *     as `segments[]` + `pausesMs[]`, so `/api/tts` returns ONE file with
    *     measured human pauses (comma 220 ms, sentence 400 ms, handover 650 ms);
-   *   - an ARRAY of tokens (word click / selection) → explicit segments with
-   *     the legacy pause contract (no measured pauses), one single request.
+   *   - an ARRAY of tokens (word click / selection) → grouped by
+   *     {@link chunkTokens} into ≤40-word segments (one request, legacy pause
+   *     contract: no measured pauses) so a large selection cannot trip the
+   *     server's segment cap.
    *
    * Cancellation: `stop()` (or a newer `speak()`) invalidates this call. When
    * that happens the promise resolves `false` and the browser fallback is
@@ -115,9 +143,11 @@ export class BrowserTTS {
     const cancelled = () => id !== this._callId || gen !== this._gen;
 
     // Feature 114: strings are split into clauses with measured pauses;
-    // token arrays keep the legacy contract (no internal pauses).
+    // token arrays keep the legacy contract (no internal pauses) but are
+    // grouped into ≤40-word segments so a long selection stays under the
+    // server's segment cap (review major #2).
     const { segments, pausesMs } = Array.isArray(text)
-      ? { segments: texts, pausesMs: /** @type {number[]|null} */ (null) }
+      ? { segments: chunkTokens(texts), pausesMs: /** @type {number[]|null} */ (null) }
       : splitForTts(text);
 
     // --- Layer 1: server TTS (Piper local → edge-tts online) ---

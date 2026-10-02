@@ -68,7 +68,7 @@ Mejora la calidad percibida de la voz del coach atacando las tres causas reporta
 - [x] **Invalidación:** TTL razonable (p. ej. 24 h) + purge en arranque de `data/tmp`; la caché es descartable (si no existe, se resintetiza).
   - TTL **24 h** por mtime de archivo (sobrevive reinicios); el índice se reconstruye al construir la caché (arranque) purgando lo caducado. Errores **nunca** se cachean.
 - [x] **Acotada:** respeta `TTS_MAX_CHARS = 1000` y el límite de segmentos antes de consultar la caché.
-  - Validación previa: `TTS_MAX_CHARS = 1000`, `TTS_MAX_SEGMENTS = 40`, `pausesMs.length === segments.length` → todo ANTES de tocar la caché.
+  - Validación previa: `TTS_MAX_CHARS = 1000`, `TTS_MAX_SEGMENTS = 40`, `pausesMs.length === segments.length` (validado **contra los segmentos ya limpios**, review #4) → todo ANTES de tocar la caché. El cliente agrupa las selecciones de tokens largas en segmentos de ≤40 palabras (`chunkTokens`) para no chocar con el cap (review #2).
 
 ### Motor y settings
 
@@ -77,7 +77,7 @@ Mejora la calidad percibida de la voz del coach atacando las tres causas reporta
 - [x] **Visibilidad de degradación:** si el motor activo es `browser` (el de peor calidad), el pill "Speech Engine" lo muestra claramente (ya existe `BROWSER`) — verificar que el usuario puede descubrir que necesita Piper/edge para buena calidad (`npm run setup`).
   - La fila "Speech Engine" de settings ahora muestra el `hint` del server cuando el engine es `browser` (p. ej. `browser (Piper not found. Install with: pipx install piper-tts…)`).
 - [x] **Sin regressión de red/caída:** la cadena de fallback Piper→edge→browser y los 503 del `/api/tts` siguen funcionando idéntico.
-  - `npm test` (473 tests, 0 fallos) + smoke manual: rutas legacy (`segments` sin `pausesMs`) siguen operativas.
+  - `npm test` (493 tests, 0 fallos) + smoke manual: rutas legacy (`segments` sin `pausesMs`) siguen operativas.
 
 ## Requerimientos no funcionales
 
@@ -95,9 +95,9 @@ Mejora la calidad percibida de la voz del coach atacando las tres causas reporta
 - **Edge MP3 sin normalización server-side:** aceptado; mitigado con gain en cliente (documenta la asimetría).
 - **Partidor compartido cliente+servidor:** la implementación canónica vive en `public/speech/prosody.js` (importable por Node sin build); `src/lib/prosody.ts` re-exporta. El cliente parte para enviar `segments+pausas`; el servidor parte también los textos planos (defensa/curl). Mismo splitter → misma clave de caché.
 - **Contrato `pausesMs`:** repeatable, una entrada por segmento, `pausesMs[i]` = silencio **DESPUÉS** del segmento `i` (el último = handover largo). Longitud distinta → 400. `pauseAfterMs` legacy se preserva: entre segmentos (ruta `segments` sin `pausesMs`) o trailing (ruta `text`).
-- **Normalización por segmento (Piper):** `normalizeWav` corre antes de concatenar → cada cláusula al objetivo y los bordes internos (junto a los silencios) no crujen. RMS −15 dBFS / pico ≤ −1 dBFS / fades 8 ms. RMS medido sobre el archivo completo queda por debajo del objetivo porque los silencios de pausa lo incluyen — correcto e intencional.
+- **Normalización por segmento (Piper):** `normalizeWav` corre antes de concatenar → cada cláusula al objetivo y los bordes internos (junto a los silencios) no crujen. RMS −15 dBFS / pico ≤ −1 dBFS / fades 8 ms / **boost máximo ×4 (+12 dB), la misma constante `MAX_BOOST` que el gain del cliente**. RMS medido sobre el archivo completo queda por debajo del objetivo porque los silencios de pausa lo incluyen — correcto e intencional.
 - **Voz efectiva:** `voice` no soportada → 400 (contrato existente); soportada sin modelo → se usa `DEFAULT_VOICE` (degradación silenciosa). `ttsStatus()` expone `voices` + `readyVoices` para el select.
-- **Karaoke pausa-aware:** `buildWordStarts()` (onsets por palabra con las pausas insertadas) + fallback lineal si el tokenizado no cuadra; se evitó la solución "empujar la pausa a la palabra frontera" porque da el mismo resultado con menos acoplamiento al texto.
+- **Karaoke pausa-aware:** `buildWordStarts()` (onsets por palabra con las pausas insertadas, módulo puro `public/ui/karaoke-schedule.js`) + fallback lineal si el tokenizado no cuadra; se evitó la solución "empujar la pausa a la palabra frontera" porque da el mismo resultado con menos acoplamiento al texto. **Solo se aplica cuando la respuesta lo indica** (`X-TTS-Pauses: measured`, solo Piper): edge sintetiza sin silencios y un schedule pausa-aware ahí adelantaría el resaltado 0.5–1 s (regresión del review #1).
 - **Edge: una sola síntesis del texto unido** (sin silencios medidos): insertar silencio PCM requeriría un codificador MP3. Las pausas de prosodia aplican al 100% en Piper; edge queda sin pausas internas (limitación documentada) + gain de cliente.
 
 ## Dependencias
@@ -108,11 +108,12 @@ Mejora la calidad percibida de la voz del coach atacando las tres causas reporta
 
 ## Criterios de aceptación
 
-- [x] `tests/prosody.test.ts` (nuevo, puro): `splitForTts` — división por cláusulas, pausas asignadas (ms por tipo de signo), abreviaturas/números intactos, texto corto sin dividir, límite de segmentos, sin segmentos vacíos. ≥ 10 casos. → **16 tests**
-- [x] Tests de caché: hit/miss con engine/voice/rate distintos (misma clave ⇒ hit), invalidación TTL, límite LRU evict, no cachea errores. → `tests/tts-cache.test.ts`, 15 tests
-- [x] Tests de normalización WAV: peak ≤ target, sin clipping, fades aplicados (usable con los helpers WAV existentes de `tests/piper.test.ts`). → `tests/audio-normalize.test.ts`, 12 tests (+ 10 tests puros del gain de cliente en `tests/level.test.ts`)
+- [x] `tests/prosody.test.ts` (nuevo, puro): `splitForTts` — división por cláusulas, pausas asignadas (ms por tipo de signo), abreviaturas/números intactos, texto corto sin dividir, límite de segmentos, sin segmentos vacíos, guion entre dígitos = rango numérico (no corte), input solo-puntuación ⇒ 1 segmento (contrato ≥ 1). → **20 tests**
+- [x] Tests de caché: hit/miss con engine/voice/rate distintos (misma clave ⇒ hit), invalidación TTL, límite LRU evict, no cachea errores, rechazo de llaves que no son sha1 hex (defensa path traversal). → `tests/tts-cache.test.ts`, 14 tests
+- [x] Tests de normalización WAV: peak ≤ target, sin clipping, fades aplicados, boost limitado a `MAX_BOOST` (×4, compartido con el cliente) (usable con los helpers WAV existentes de `tests/piper.test.ts`). → `tests/audio-normalize.test.ts`, 13 tests (+ 10 tests puros del gain de cliente en `tests/level.test.ts`)
+- [x] Tests del schedule de karaoke y del chunking de selecciones largas (regresiones del review PR #28): `tests/karaoke-schedule.test.ts` (4) + `tests/browser-tts.test.ts` (12, incluye selección de ~60 tokens en 2 segmentos).
 - [x] `tests/piper.test.ts`/`tests/edge-tts.test.ts` siguen verdes (sin romper la cadena existente).
-- [x] `npm test` y `npm run check` verdes (archivos nuevos listados en `package.json`). → **473 tests, 0 fallos (2 skips por piper instalado/no instalado)**
+- [x] `npm test` y `npm run check` verdes (archivos nuevos listados en `package.json`). → **493 tests, 0 fallos (2 skips por piper instalado/no instalado)**
 
 ## Checklist de verificación (pre-merge)
 

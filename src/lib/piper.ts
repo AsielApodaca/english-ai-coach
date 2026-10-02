@@ -14,6 +14,9 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { renameSync } from "node:fs";
 import { join } from "node:path";
+// Shared with the client gain (public/speech/level.js): one MAX_BOOST for
+// both normalizers so server WAV and edge MP3 behave identically (review #3).
+import { MAX_BOOST } from "../../public/speech/level.js";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -390,10 +393,12 @@ export function normalizeWav(wav: Buffer, opts: NormalizeWavOptions = {}): Buffe
 
   // Gain: reach the RMS target, but never past the peak ceiling (the smaller
   // factor always wins → loud files are attenuated, quiet ones only boosted
-  // while the peak stays ≤ ceiling, so the result can never clip).
+  // while the peak stays ≤ ceiling, so the result can never clip). The boost
+  // is additionally capped at MAX_BOOST (+12 dB, shared with the client gain)
+  // so a near-silent file is never amplified into hiss.
   const gainRms = Math.pow(10, (rmsTargetDbfs - rmsDb) / 20);
   const gainPeak = Math.pow(10, (peakCeilingDbfs - 20 * Math.log10(peakLin)) / 20);
-  const gain = Math.min(gainRms, gainPeak);
+  const gain = Math.min(gainRms, gainPeak, MAX_BOOST);
 
   // --- apply gain + fades per frame (interleaved channels) ---
   const channels = fmt.numChannels;

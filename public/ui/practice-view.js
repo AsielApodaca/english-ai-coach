@@ -47,6 +47,7 @@ import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
 import { createWordClickHandler, tokensFromRange } from "./word-click.js";
+import { buildWordStarts } from "./karaoke-schedule.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -832,6 +833,11 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     // The flow may have been cancelled while the audio was being fetched.
     if (token !== flowToken) return;
     if (!res.ok) throw new Error("tts-unavailable");
+    // Did THIS response actually carry the requested silences? Only Piper
+    // inserts them (edge joins the segments without), and the health snapshot
+    // may be stale — the schedule must follow the response, not the snapshot
+    // (review major #1). `none`/absent → plain linear spread, exact for edge.
+    const pausesMeasured = res.headers.get("X-TTS-Pauses") === "measured";
     const blob = await res.blob();
     if (token !== flowToken) return;
     const url = URL.createObjectURL(blob);
@@ -861,8 +867,11 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
         durationMs = 0; // no progress highlight
       }
     }
-    // Word onsets that honor the clause pauses (null → plain linear spread).
-    const wordStarts = buildWordStarts(durationMs, segments, pausesMs, activeSpans.length);
+    // Word onsets that honor the clause pauses — only when the served bytes
+    // really contain them (Piper); edge falls back to the linear spread.
+    const wordStarts = pausesMeasured
+      ? buildWordStarts(durationMs, segments, pausesMs, activeSpans.length)
+      : null;
     await new Promise((resolve) => {
       const done = () => {
         stopKaraokeRead = null;
@@ -898,44 +907,6 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
   }
   if (token !== flowToken) return;
   dock?.setMode("idle");
-}
-
-/**
- * Per-word highlight onsets (ms) that PAUSE during the clause silences
- * (feature 114) — the mitigation for karaoke drift: a linear spread would
- * keep advancing while the audio sits in a 220–650 ms pause and light words
- * ahead of the coach.
- *
- * The schedule is only trusted when the segment word count matches the span
- * count (the book tokenizes contractions the same way, but any mismatch —
- * e.g. reading a fragment with the full answer's spans — falls back to the
- * linear animation, which is always safe).
- *
- * Each segment gets a share of the speech time proportional to its word
- * count; its words spread evenly inside that share; its pause follows.
- *
- * @param {number} durationMs - total audio duration (incl. pauses)
- * @param {string[]} segments - clauses the server synthesized
- * @param {number[]} pausesMs - silence after each segment (same length)
- * @param {number} spanCount - number of highlighted word spans
- * @returns {number[]|null} onset in ms per span, or null for linear spread
- */
-function buildWordStarts(durationMs, segments, pausesMs, spanCount) {
-  if (!(durationMs > 0) || !segments.length || pausesMs.length !== segments.length) return null;
-  const counts = segments.map((s) => s.split(/\s+/).filter(Boolean).length);
-  const words = counts.reduce((a, b) => a + b, 0);
-  if (words !== spanCount || words === 0) return null;
-  const totalPause = pausesMs.reduce((a, b) => a + b, 0);
-  const speechMs = durationMs - totalPause;
-  if (speechMs <= 0) return null;
-  const starts = [];
-  let cursor = 0;
-  counts.forEach((n, i) => {
-    const segMs = (speechMs * n) / words;
-    for (let w = 0; w < n; w++) starts.push(cursor + (segMs * w) / n);
-    cursor += segMs + pausesMs[i];
-  });
-  return starts;
 }
 
 /**

@@ -69,11 +69,25 @@ test("normalizeWav: brings a loud sine to the RMS target without clipping", () =
   assert.ok(rms >= -16 && rms <= -14, `RMS ${rms.toFixed(2)} dBFS outside −16..−14`);
 });
 
-test("normalizeWav: boosts a quiet signal up to the RMS target", () => {
-  const out = normalizeWav(wav(sinePcm({ amplitude: 1000 })));
+test("normalizeWav: a quiet signal is boosted up to the RMS target (within boost cap)", () => {
+  // Amplitude 2500 ⇒ ~×3.3 needed, under the ×4 boost cap, so the target is
+  // reachable; quieter inputs hit the cap (covered by the cap test below).
+  const input = wav(sinePcm({ amplitude: 2500 }));
+  const out = normalizeWav(input);
   const rms = rmsDbfs(out);
   assert.ok(rms >= -16 && rms <= -14, `RMS ${rms.toFixed(2)} dBFS outside −16..−14`);
   assert.ok(peakOf(out) <= PEAK_LIMIT, "boost must never push the peak past the ceiling");
+});
+
+test("normalizeWav: boost is capped at MAX_BOOST (+12 dB), mirroring the client gain", () => {
+  // Amplitude 500 would need ×16.4 to reach the target — the cap wins, so
+  // the lift is exactly +12 dB (and still far below the target), which is
+  // what keeps a near-silent file from being amplified into hiss.
+  const input = wav(sinePcm({ amplitude: 500, ms: 500 }));
+  const out = normalizeWav(input);
+  const liftDb = rmsDbfs(out) - rmsDbfs(input);
+  assert.ok(liftDb > 11.5 && liftDb <= 12.1, `boost lift ${liftDb.toFixed(2)} dB ≠ +12 dB cap`);
+  assert.ok(rmsDbfs(out) < RMS_TARGET_DBFS, "capped output stays below the RMS target");
 });
 
 test("normalizeWav: a spiky (high crest) signal is peak-limited, never clipped", () => {
@@ -124,7 +138,9 @@ test("normalizeWav: fadeMs=0 leaves the edges untouched (gain only)", () => {
   const out = normalizeWav(input, { fadeMs: 0 });
   assert.ok(Math.abs(out.readInt16LE(44)) > 0, "no fade-in with fadeMs=0");
   assert.ok(Math.abs(out.readInt16LE(out.length - 2)) > 0, "no fade-out with fadeMs=0");
-});test("normalizeWav: default fade length is inside the spec's 5–10 ms window", () => {
+});
+
+test("normalizeWav: default fade length is inside the spec's 5–10 ms window", () => {
   assert.ok(FADE_MS >= 5 && FADE_MS <= 10, `FADE_MS=${FADE_MS} outside 5–10 ms`);
   assert.ok(RMS_TARGET_DBFS >= -16 && RMS_TARGET_DBFS <= -14);
   assert.ok(PEAK_CEILING_DBFS <= -1);

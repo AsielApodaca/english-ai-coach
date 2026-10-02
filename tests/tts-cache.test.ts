@@ -147,7 +147,7 @@ test("cache: get() on an expired entry misses and drops the file", async () => {
 
 test("cache: purgeExpired removes only the entries past the TTL", () => {
   const cache = createTtsCache({ dir: cacheDir, ttlMs: 1000 });
-  const staleKey = "s".repeat(40);
+  const staleKey = "d".repeat(40); // valid sha1 shape (hex), unlike a bare "s"
   const freshKey = "f".repeat(40);
   cache.set(staleKey, Buffer.from("old"));
   cache.set(freshKey, Buffer.from("new"));
@@ -204,11 +204,12 @@ test("cache: evicts the least recently used entry beyond maxEntries", async () =
 
 test("cache: evicts until totalBytes fits maxBytes", () => {
   const cache = createTtsCache({ dir: cacheDir, maxEntries: 100, maxBytes: 2500 });
-  cache.set("k1".padEnd(40, "1"), Buffer.alloc(1000, 1));
-  cache.set("k2".padEnd(40, "2"), Buffer.alloc(1000, 2));
+  // Keys must have the sha1-hex shape (get/set validate it — review fix #7).
+  cache.set("a1".padEnd(40, "0"), Buffer.alloc(1000, 1));
+  cache.set("b1".padEnd(40, "0"), Buffer.alloc(1000, 2));
   assert.equal(cache.size, 2);
 
-  cache.set("k3".padEnd(40, "3"), Buffer.alloc(1000, 3)); // 3000 > 2500
+  cache.set("c1".padEnd(40, "0"), Buffer.alloc(1000, 3)); // 3000 > 2500
   assert.ok(cache.totalBytes <= 2500, `totalBytes ${cache.totalBytes}`);
   assert.equal(cache.size, 2, "the oldest entry was dropped to fit the byte cap");
 });
@@ -249,5 +250,32 @@ test("cache: set() failures never throw (a broken tmp must not break the request
   const blocked = join(dir, "blocked");
   writeFileSync(blocked, "not a directory");
   const broken = createTtsCache({ dir: join(blocked, "nested") });
-  assert.doesNotThrow(() => broken.set("deadbeef", Buffer.from("x")));
+  assert.doesNotThrow(() => broken.set("a".repeat(40), Buffer.from("x")));
+});
+
+// ---------------------------------------------------------------------------
+// Key shape (review fix #7): keys become file names — nothing else gets in
+// ---------------------------------------------------------------------------
+
+test("cache: get/set reject keys that are not sha1 hex (path-traversal defense)", () => {
+  const cache = createTtsCache({ dir: cacheDir });
+  const foreignKeys = [
+    "../../etc/passwd",
+    "../evil",
+    "a/b",
+    "",
+    "nothex".padEnd(40, "0"), // wrong alphabet
+    "A".repeat(40), // uppercase is not what ttsCacheKey produces
+    "abc", // truncated
+  ];
+  for (const key of foreignKeys) {
+    assert.equal(cache.get(key), null, `get must reject: ${key}`);
+    assert.doesNotThrow(() => cache.set(key, Buffer.from("payload")));
+    assert.equal(cache.size, 0, `set must ignore: ${key}`);
+  }
+  assert.equal(cacheFiles().length, 0, "no file may be written under a foreign key");
+  // The legitimate path still works (the guard only blocks malformed keys).
+  const key = ttsCacheKey({ ...BASE_KEY });
+  cache.set(key, Buffer.from("ok"));
+  assert.equal(cache.get(key)?.toString(), "ok");
 });

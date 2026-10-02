@@ -28,6 +28,17 @@ export const TTS_CACHE_MAX_ENTRIES = 100;
 /** LRU byte cap (spec: ~50 MB). */
 export const TTS_CACHE_MAX_BYTES = 50 * 1024 * 1024;
 
+/**
+ * Keys are sha1 hex digests ({@link ttsCacheKey}) and become file names
+ * under the cache dir — anything else is rejected in `get`/`set` so a future
+ * caller can never smuggle a path separator past `join()` (defense in depth
+ * against path traversal, review fix #7).
+ */
+const KEY_RE = /^[a-f0-9]{40}$/;
+
+/** True when `key` is a sha1 hex digest the cache will ever produce. */
+const isValidKey = (key: string): boolean => KEY_RE.test(key);
+
 /** Inputs that uniquely identify one synthesis result (feature 114). */
 export interface TtsCacheKeyParts {
   /** Engine that produced the audio (`piper` | `edge-tts`). */
@@ -161,6 +172,7 @@ export function createTtsCache(opts: TtsCacheOptions): TtsCache {
 
   return {
     get(key: string): Buffer | null {
+      if (!isValidKey(key)) return null; // never touch the fs with a foreign key
       const entry = index.get(key);
       if (!entry) return null;
       let audio: Buffer;
@@ -183,6 +195,7 @@ export function createTtsCache(opts: TtsCacheOptions): TtsCache {
     },
 
     set(key: string, audio: Buffer): void {
+      if (!isValidKey(key)) return; // no write outside the cache dir, ever
       try {
         mkdirSync(dir, { recursive: true });
         const path = filePath(key);

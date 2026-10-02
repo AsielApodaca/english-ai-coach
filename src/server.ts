@@ -904,9 +904,11 @@ function queryList(value: unknown): string[] {
  *
  * Response headers: `X-TTS-Cache: hit|miss` (feature 114 synthesis cache —
  * key = sha1(engine|voice|rate|segments|pauses), LRU + 24 h TTL under
- * `data/tmp/tts-cache/`). Piper output is level-normalized and faded
- * server-side (`normalizeWav`); edge MP3 is served as-is (client gain, see
- * `public/speech/level.js`).
+ * `data/tmp/tts-cache/`) and `X-TTS-Pauses: measured|none` (whether the
+ * served bytes actually contain the requested silences: Piper yes, edge MP3
+ * no — the karaoke keys its pause-aware schedule on it). Piper output is
+ * level-normalized and faded server-side (`normalizeWav`); edge MP3 is
+ * served as-is (client gain, see `public/speech/level.js`).
  */
 app.get("/api/tts", async (req, res) => {
   const rawSegments = queryList(req.query.segments);
@@ -923,11 +925,14 @@ app.get("/api/tts", async (req, res) => {
 
   if (rawSegments.length) {
     // Explicit segments: the client already split the line into clauses.
+    // Empty entries are dropped FIRST so the pause count is validated against
+    // the segments that will actually be synthesized (the error message stays
+    // accurate and `pausesMs` cannot drift out of sync — review fix #4).
     segments = rawSegments.map((s) => s.trim()).filter(Boolean);
     if (rawPauses.length) {
-      if (rawPauses.length !== rawSegments.length) {
+      if (rawPauses.length !== segments.length) {
         return res.status(400).json({
-          error: `pausesMs must have one entry per segment (${rawSegments.length} expected).`,
+          error: `pausesMs must have one entry per segment (${segments.length} expected).`,
         });
       }
       pausesMs = rawPauses.map((p) => clampNumber(p, 0, TTS_MAX_PAUSE_MS, 0));
@@ -1002,6 +1007,11 @@ app.get("/api/tts", async (req, res) => {
     res.setHeader("Content-Type", status.engine === "edge-tts" ? "audio/mpeg" : "audio/wav");
     res.setHeader("Content-Length", String(audio.length));
     res.setHeader("X-TTS-Cache", cacheHit ? "hit" : "miss");
+    // Only Piper inserts the requested silences into the bytes (edge joins the
+    // segments without them), so the karaoke derives its pause-aware schedule
+    // from THIS response instead of the possibly-stale health snapshot
+    // (review major #1).
+    res.setHeader("X-TTS-Pauses", status.engine === "piper" ? "measured" : "none");
     res.end(audio);
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
