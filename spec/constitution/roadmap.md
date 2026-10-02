@@ -21,6 +21,7 @@ Estado del producto English AI Coach (documento normativo de planificación). Fe
 15. **112 · Popover léxico** — hover en palabra → recuadro con significado (EN), ejemplo y traducción (ES); arrastrar varias palabras → recuadro del conjunto (phrasals tipo "shut up"). Pipeline `dictionaryapi.dev + MyMemory + fallback LLM` con endpoint `GET /api/lookup` y caché cliente+servidor (presupuesto $0). *(Rama `feature/word-popover-dictionary`; gate anti cross-origin y deadline total en el endpoint.)*
 16. **115 · Quitar la introducción de sesión** — se eliminan las fases `intro` y `explaining` (y sus builders `buildIntroText`/`buildExplainLine`); la sesión arranca directo en la pregunta y del modelo pasa al primer fragmento sin explicar la dinámica. Se conserva `fullLine`. `GET /api/session/:id` deja de servir `intro`/`explainLine` (contrato extraído a `src/lib/session-payload.ts`). Actualiza la interpretación de `../use-cases/CU2.md`. *(Rama `feature/skip-session-intro`.)*
 17. **113 · Click en palabra → pronunciación** — click simple sobre una palabra de la letra karaoke reproduce el token exacto vía la cadena TTS existente (`BrowserTTS` → `/api/tts`, tempo/volumen actuales del dock); gate único compartido con 112 (`canInteractWithWords()` + espejo CSS `data-interactive`) que bloquea click/hover mientras el coach lee o graba; umbral click-vs-arrastre (5 px/400 ms, constantes testeables) para convivir con la selección múltiple de 112 + selección múltiple → frase en conjunto al clickear la selección (todos los tokens en una sola llamada `tts.speak(string[])`, precedencia sobre el umbral, popover de 112 visible); side-effect aislado del flujo (sin eventos de máquina de estados), con reemplazo por generación y prioridad de la lectura del coach. *(Rama `feature/113-word-click-pronounce`; lógica pura en `public/ui/word-click.js` + `tests/word-click.test.ts`.)*
+18. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente sin cambiar de motor: partidor de cláusulas compartido cliente/servidor (`public/speech/prosody.js` + `src/lib/prosody.ts`, 220/400/650 ms, contrato `pausesMs[i]` = silencio tras el segmento i), normalización peak-safe por segmento (`normalizeWav`: RMS −15 dBFS, pico ≤ −1 dBFS, fades 8 ms → 0 samples recortados, antes −0.00 dBFS/2 recortados), caché de síntesis LRU en `data/tmp/tts-cache/` (100/50 MB, TTL 24 h, cabecera `X-TTS-Cache`), `engcoach.voice` efectiva (select Auto+voces descargadas, fallback silencioso a la voz por defecto), karaoke pausa-aware (`buildWordStarts`) y gain de cliente para edge MP3 (`public/speech/level.js`). Diagnóstico: motor activo piper, causa raíz = peak clipping. *(Rama `feature/114-tts-prosody-quality`.)*
 
 ## Siguiente 🔜 (rediseño v2 — CU1/CU2/CU3)
 
@@ -30,9 +31,7 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 ## Pendiente de implementar 📋 (ola 7 — UX de sesión, especificada)
 
-Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111, 112, 113 y 115 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
-
-1. **114 · Calidad de voz del coach** — prosodia sobre la cadena existente (Piper→edge→browser), sin cambiar de motor: pausas humanas por cláusulas (`segments`+`pauseAfterMs`, ya soportado y sin uso), normalización/fades anti-estática, caché de síntesis, y `engcoach.voice` deja de ser inerte. Diagnóstico del motor activo como gate.
+Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111, 112, 113, 114 y 115 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
 
 ## Backlog 💡
 

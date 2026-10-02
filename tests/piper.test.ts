@@ -250,3 +250,49 @@ test("concatWavWithPauses: result header reflects the combined format", () => {
 test("concatWavWithPauses: throws on empty input", () => {
   assert.throws(() => concatWavWithPauses([], 100), /No WAV buffers/);
 });
+
+// ---------------------------------------------------------------------------
+// Per-boundary pauses + trailing silence (feature 114)
+// ---------------------------------------------------------------------------
+
+test("concatWavWithPauses: array pauseMs applies a different silence per boundary", () => {
+  const clips = [1, 2, 3].map((n) => makeTestWav(Buffer.from([n]), MONO_16K));
+  const short = 220; // comma
+  const long = 650; // end of utterance
+  const shortBytes = Math.round((short / 1000) * 16000) * 2;
+  const longBytes = Math.round((long / 1000) * 16000) * 2;
+
+  const out = concatWavWithPauses(clips, [short, long]);
+  assert.equal(out.length, 44 + 3 + shortBytes + longBytes);
+
+  const data = out.subarray(44);
+  assert.equal(data[0], 1);
+  assert.equal(data[1 + shortBytes], 2, "first boundary uses the short pause");
+  assert.equal(data[2 + shortBytes + longBytes], 3, "second boundary uses the long pause");
+  assert.ok(data.subarray(1, 1 + shortBytes).every((b) => b === 0));
+  assert.ok(data.subarray(2 + shortBytes, 2 + shortBytes + longBytes).every((b) => b === 0));
+});
+
+test("concatWavWithPauses: trailingMs appends silence after the last clip", () => {
+  const clip = makeTestWav(Buffer.from([7, 7]), MONO_16K);
+  const trailing = 650;
+  const silenceBytes = Math.round((trailing / 1000) * 16000) * 2;
+
+  const out = concatWavWithPauses([clip], 0, trailing);
+  assert.notEqual(out, clip, "a single clip with trailing silence must be rebuilt");
+  assert.equal(out.length, 44 + 2 + silenceBytes);
+  const data = out.subarray(44);
+  assert.deepEqual([...data.subarray(0, 2)], [7, 7]);
+  assert.ok(data.subarray(2).every((b) => b === 0), "trailing beat must be silent");
+});
+
+test("concatWavWithPauses: a short pauses array treats missing entries as 0", () => {
+  const clips = [1, 2, 3].map((n) => makeTestWav(Buffer.from([n]), MONO_16K));
+  const out = concatWavWithPauses(clips, [100]); // only the first boundary
+  const pauseBytes = Math.round((100 / 1000) * 16000) * 2;
+  assert.equal(out.length, 44 + 3 + pauseBytes);
+  const data = out.subarray(44);
+  assert.equal(data[0], 1);
+  assert.equal(data[1 + pauseBytes], 2, "first boundary has the 100 ms pause");
+  assert.equal(data[2 + pauseBytes], 3, "second boundary has NO pause");
+});

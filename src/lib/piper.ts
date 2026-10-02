@@ -46,6 +46,20 @@ const VOICE_FILES: Record<string, { subdir: string; onnx: string; json: string }
 /** Voices that are known and can be synthesized/downloaded. */
 export const SUPPORTED_VOICES = Object.freeze(Object.keys(VOICE_FILES));
 
+/**
+ * True when the ONNX + JSON model files of `voice` exist locally (feature 114).
+ *
+ * Unlike {@link checkPiper} this is a pure file check — no `which` subprocess —
+ * so the TTS route can resolve the effective voice on every request without
+ * paying a process spawn per candidate voice.
+ */
+export function isVoiceReady(baseDir: string, voice: string): boolean {
+  const info = VOICE_FILES[voice];
+  if (!info) return false;
+  const modelsDir = join(baseDir, "models", "piper");
+  return existsSync(join(modelsDir, info.onnx)) && existsSync(join(modelsDir, info.json));
+}
+
 // ---------------------------------------------------------------------------
 // Binary detection
 // ---------------------------------------------------------------------------
@@ -186,26 +200,44 @@ export async function downloadVoice(
 
 /**
  * Concatenate multiple WAV files (must share the same format: sample rate,
- * bit depth, channels). Inserts `pauseMs` milliseconds of silence between
- * each pair of adjacent clips. Returns a single WAV buffer.
+ * bit depth, channels) inserting silence between and after them.
+ *
+ * @param buffers - the clips to glue, in order.
+ * @param pauseMs - silence BETWEEN adjacent clips: a single value applied to
+ *   every boundary, or one value per boundary (length `buffers.length - 1`;
+ *   missing entries count as 0). Feature 114 uses the array form so a comma
+ *   gets a shorter pause than a full stop.
+ * @param trailingMs - silence appended AFTER the last clip (the long
+ *   handover beat before the learner speaks; feature 114).
+ * @returns a single WAV buffer.
  */
-export function concatWavWithPauses(buffers: Buffer[], pauseMs: number): Buffer {
+export function concatWavWithPauses(buffers: Buffer[], pauseMs: number | number[], trailingMs = 0): Buffer {
   if (buffers.length === 0) {
     throw new Error("No WAV buffers to concatenate");
   }
-  if (buffers.length === 1 && pauseMs <= 0) return buffers[0];
+  if (buffers.length === 1 && trailingMs <= 0 && (typeof pauseMs !== "number" || pauseMs <= 0)) {
+    return buffers[0];
+  }
 
   // Read format info from the first WAV header.
   const fmt = readWavFormat(buffers[0]);
 
+  // Resolve the between-clause pauses (array wins, missing entries are 0).
+  const between: number[] = buffers.slice(1).map((_, i) =>
+    Array.isArray(pauseMs) ? pauseMs[i] ?? 0 : pauseMs,
+  );
+
   // Build a list of data-only chunks.
   const chunks: Buffer[] = [];
   for (let i = 0; i < buffers.length; i++) {
-    if (i > 0 && pauseMs > 0) {
+    if (i > 0 && between[i - 1] > 0) {
       // Strip the silence's own WAV header — only raw PCM belongs in the data region.
-      chunks.push(extractWavData(makeSilence(pauseMs, fmt)));
+      chunks.push(extractWavData(makeSilence(between[i - 1], fmt)));
     }
     chunks.push(extractWavData(buffers[i]));
+  }
+  if (trailingMs > 0) {
+    chunks.push(extractWavData(makeSilence(trailingMs, fmt)));
   }
 
   // Calculate total PCM data size.
@@ -282,6 +314,111 @@ export function buildWavHeader(dataSize: number, fmt: { sampleRate: number; bits
   header.writeUInt32LE(dataSize, 40);
 
   return header;
+}
+
+// ---------------------------------------------------------------------------
+// Level normalization + anti-click fades (feature 114)
+// ---------------------------------------------------------------------------
+
+/** RMS target of the normalized output (spec: −16 to −14 dBFS). */
+export const RMS_TARGET_DBFS = -15;
+
+/** Hard peak ceiling so the served WAV can never clip (spec: ≤ −1 dBFS). */
+export const PEAK_CEILING_DBFS = -1;
+
+/** Fade in/out length per file (spec: 5–10 ms) — kills start/end pops. */
+export const FADE_MS = 8;
+
+/** Below this RMS the buffer counts as silence and is returned untouched. */
+const SILENCE_FLOOR_DBFS = -60;
+
+export interface NormalizeWavOptions {
+  /** RMS level to normalize toward (dBFS). Default {@link RMS_TARGET_DBFS}. */
+  rmsTargetDbfs?: number;
+  /** Peak ceiling (dBFS); the applied gain never exceeds it. Default −1. */
+  peakCeilingDbfs?: number;
+  /** Fade in/out length in ms; 0 disables fades. Default {@link FADE_MS}. */
+  fadeMs?: number;
+}
+
+/**
+ * Normalize a PCM16 WAV buffer: level (RMS toward the target, clamped so the
+ * peak stays under the ceiling → no clipping) plus a linear fade in/out so
+ * the file never starts or ends on a hard sample edge (clicks/pops).
+ *
+ * Piper's raw output measured −0.00 dBFS peak with clipped samples (feature
+ * 114 diagnosis) — this is the server-side cleanup that fixes it. Non-16-bit
+ * or silent buffers are returned unchanged (defensive: Piper always emits
+ * PCM16 @ 22.05 kHz).
+ *
+ * @param wav - the WAV file to clean (header + PCM16 data).
+ * @param opts - optional targets (see {@link NormalizeWavOptions}).
+ * @returns a new buffer with the same format/duration, cleaned.
+ */
+export function normalizeWav(wav: Buffer, opts: NormalizeWavOptions = {}): Buffer {
+  const rmsTargetDbfs = opts.rmsTargetDbfs ?? RMS_TARGET_DBFS;
+  const peakCeilingDbfs = opts.peakCeilingDbfs ?? PEAK_CEILING_DBFS;
+  const fadeMs = opts.fadeMs ?? FADE_MS;
+
+  const fmt = readWavFormat(wav);
+  if (fmt.bitsPerSample !== 16 || fmt.numChannels < 1) return wav;
+
+  // Clamp the declared data size to what is actually in the buffer.
+  const declared = wav.readUInt32LE(fmt.dataOffset - 4);
+  const dataSize = Math.max(0, Math.min(declared, wav.length - fmt.dataOffset));
+  if (dataSize < 4) return wav;
+
+  const out = Buffer.from(wav); // never mutate the caller's buffer
+  const pcm = out.subarray(fmt.dataOffset, fmt.dataOffset + dataSize);
+  const totalSamples = pcm.length >> 1;
+
+  // --- measure peak + RMS ---
+  let peakAbs = 0;
+  let sumSquares = 0;
+  for (let s = 0; s < totalSamples; s++) {
+    const v = pcm.readInt16LE(s * 2);
+    const a = v < 0 ? -v : v;
+    if (a > peakAbs) peakAbs = a;
+    sumSquares += v * v;
+  }
+  if (peakAbs === 0) return wav; // digital silence: nothing to clean
+
+  const peakLin = peakAbs / 32768;
+  const rmsLin = Math.sqrt(sumSquares / totalSamples) / 32768;
+  const rmsDb = 20 * Math.log10(rmsLin);
+  if (rmsDb < SILENCE_FLOOR_DBFS) return wav; // near-silence: don't boost noise
+
+  // Gain: reach the RMS target, but never past the peak ceiling (the smaller
+  // factor always wins → loud files are attenuated, quiet ones only boosted
+  // while the peak stays ≤ ceiling, so the result can never clip).
+  const gainRms = Math.pow(10, (rmsTargetDbfs - rmsDb) / 20);
+  const gainPeak = Math.pow(10, (peakCeilingDbfs - 20 * Math.log10(peakLin)) / 20);
+  const gain = Math.min(gainRms, gainPeak);
+
+  // --- apply gain + fades per frame (interleaved channels) ---
+  const channels = fmt.numChannels;
+  const totalFrames = Math.floor(totalSamples / channels);
+  const fadeFrames =
+    fadeMs > 0 ? Math.min(Math.round((fadeMs / 1000) * fmt.sampleRate), totalFrames) : 0;
+
+  for (let f = 0; f < totalFrames; f++) {
+    let factor = gain;
+    if (fadeFrames > 0 && f < fadeFrames) factor *= f / fadeFrames;
+    if (fadeFrames > 0 && f >= totalFrames - fadeFrames) {
+      factor *= (totalFrames - 1 - f) / fadeFrames;
+    }
+    if (factor === 1) continue;
+    for (let c = 0; c < channels; c++) {
+      const idx = f * channels + c;
+      let v = pcm.readInt16LE(idx * 2) * factor;
+      if (v > 32767) v = 32767; // defensive clamp (gain ≤ ceiling ⇒ unreachable)
+      else if (v < -32768) v = -32768;
+      else if (v >= -0.5 && v <= 0.5) v = 0;
+      pcm.writeInt16LE(Math.round(v), idx * 2);
+    }
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,25 +501,38 @@ export async function synthesize(
 
 /**
  * Synthesize multiple segments into a single WAV with measured silence
- * between them. Useful for "Repeat after me… [pause] …fragment" flows where
- * the browser should receive one audio file, not a sequence.
+ * between them (feature 114: human-style clause pauses). Useful for
+ * "Repeat after me… [pause] …fragment" flows where the browser should receive
+ * one audio file, not a sequence.
+ *
+ * Each segment is level-normalized and faded ({@link normalizeWav}) BEFORE
+ * concatenation, so every clause sits at the target level and the clip
+ * edges inside the pauses cannot click.
  *
  * @param segments  Texts to speak, in order (each ≤ 1000 chars).
  * @param baseDir   Project root.
- * @param opts      `pauseBetweenMs` controls the silence between segments;
- *                  `lengthScale` controls the overall speaking rate; `voice`
+ * @param opts      `pausesAfterMs[i]` = silence AFTER segment i (preferred,
+ *                  feature 114); `pauseBetweenMs` = one value for every
+ *                  boundary (legacy); `pauseAfterMs` = trailing silence;
+ *                  `lengthScale` controls the speaking rate; `voice`
  *                  selects the Piper voice.
  */
 export async function synthesizeSegments(
   segments: string[],
   baseDir: string,
-  opts: SynthesizeOptions & { pauseBetweenMs?: number } = {},
+  opts: SynthesizeOptions & { pauseBetweenMs?: number; pausesAfterMs?: number[] } = {},
 ): Promise<Buffer> {
   const clean = segments.map((s) => s.trim()).filter(Boolean);
   if (clean.length === 0) throw new Error("No text to synthesize");
   const wavs: Buffer[] = [];
   for (const segment of clean) {
-    wavs.push(await synthesize(segment, baseDir, { lengthScale: opts.lengthScale, voice: opts.voice }));
+    const wav = await synthesize(segment, baseDir, { lengthScale: opts.lengthScale, voice: opts.voice });
+    wavs.push(normalizeWav(wav));
   }
-  return concatWavWithPauses(wavs, opts.pauseBetweenMs ?? 0);
+  const pausesAfter = opts.pausesAfterMs ?? [];
+  const between = clean.slice(1).map((_, i) => pausesAfter[i] ?? opts.pauseBetweenMs ?? 0);
+  // Trailing beat: explicit per-segment pauses win (their last entry is the
+  // silence after the final segment), else the legacy `pauseAfterMs`.
+  const trailing = opts.pausesAfterMs ? pausesAfter[clean.length - 1] ?? 0 : opts.pauseAfterMs ?? 0;
+  return concatWavWithPauses(wavs, between, trailing);
 }

@@ -54,11 +54,11 @@ export function renderModelAi(root, ctx) {
         }),
         settingRow({
           label: "Voz del coach",
-          hint: "Voz TTS (auto = la mejor disponible).",
+          hint: "Voz TTS (auto = la mejor disponible). Solo voces ya descargadas.",
           control: selectControl({
             label: "Voz del coach",
             value: getLocal("voice", "auto"),
-            options: [{ value: "auto", label: "Auto" }],
+            options: voiceOptions(ctx.health),
             onChange: (v) => setLocal("voice", v),
           }),
         }),
@@ -66,6 +66,23 @@ export function renderModelAi(root, ctx) {
       settingsSection("Estado de motores", engineRows(ctx.health)),
     ]),
   );
+}
+
+/**
+ * Options of the "Voz del coach" select (feature 114): Auto plus every Piper
+ * voice ALREADY DOWNLOADED (`readyVoices` from `/api/health`) so choosing one
+ * can never send an unsupported id to `/api/tts`. Outside the Piper engine
+ * (edge/browser) only Auto is meaningful — the chain decides the voice.
+ *
+ * @param {object|null} health - the /api/health payload
+ * @returns {{value: string, label: string}[]}
+ */
+function voiceOptions(health) {
+  const opts = [{ value: "auto", label: "Auto" }];
+  if (health?.tts?.engine !== "piper") return opts;
+  const ready = health.tts.piper?.readyVoices ?? [];
+  for (const v of ready) opts.push({ value: v, label: v });
+  return opts;
 }
 
 /** Build the engine status list from a health payload (or offline state). */
@@ -76,7 +93,10 @@ function engineRows(health) {
     return list;
   }
   const ttsEngine = health.tts?.engine ?? null;
-  list.appendChild(engineRow("Speech Engine", ttsEngine ?? "browser fallback", ttsEngine ? "ok" : "warn"));
+  // Feature 114: make the degradation VISIBLE — "browser" is the mechanical
+  // fallback, and the hint names the command that installs Piper/edge.
+  const ttsState = ttsEngine ?? `browser (${health.tts?.piper?.hint ?? "npm run setup -- --tts"})`;
+  list.appendChild(engineRow("Speech Engine", ttsState, ttsEngine ? "ok" : "warn"));
   const whisper = health.whisper;
   const whisperState = whisper?.available ? (whisper.modelReady ? "ready" : "model pending") : "not installed";
   list.appendChild(engineRow("Whisper (STT)", whisperState, whisper?.available ? "ok" : "warn"));

@@ -41,6 +41,8 @@ import { BrowserTTS } from "../speech/browser-tts.js";
 import { BrowserSTT } from "../speech/browser-stt.js";
 import { pickStt } from "../speech/stt-pick.js";
 import { playChime, stopChime } from "../speech/chime.js";
+import { splitForTts } from "../speech/prosody.js";
+import { tryNormalizeElement, setElementVolume, releaseElement } from "../speech/level.js";
 import { respellFor } from "./ipa.js";
 import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
@@ -684,7 +686,19 @@ const WORD_SCOPE_SEL = ".karaoke-book, .review-words";
 const WORD_SPAN_SEL = ".karaoke-book .kw, .review-words .kw";
 
 /**
- * Pronounce the karaoke word(s) clicked or selected (feature 113) through the
+ * The coach voice chosen in settings (`engcoach.voice`, feature 114) or null
+ * to keep the default engine chain ("Auto" / missing pref). Read live on every
+ * read, so changing the select applies to the very next line.
+ *
+ * @returns {string|null} a Piper voice id, or null for the default chain
+ */
+function coachVoice() {
+  const v = getLocal("voice", "auto");
+  return typeof v === "string" && v && v !== "auto" ? v : null;
+}
+
+/**
+ * Pronounce the karaoke word(s) clicked or selected (features 112/113) through the
  * EXISTING TTS chain — BrowserTTS (`GET /api/tts?…&rate=<dock tempo>`), with
  * the `speechSynthesis` fallback and silent degradation when no engine exists.
  * No third audio channel, no re-render, no flow event: a pure side-effect.
@@ -713,7 +727,7 @@ function pronounceWord(words) {
   );
   if (!list.length || !tts) return;
   tts.stop();
-  void tts.speak(list, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+  void tts.speak(list, { rate: dock?.getRate() ?? 1, volume: volumeSetting(), piperVoice: coachVoice() });
 }
 
 /**
@@ -761,7 +775,7 @@ async function speak(text, token) {
   // The coach wins over an isolated word click still playing (feature 113).
   tts?.stop();
   try {
-    const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting() });
+    const ok = await tts.speak(text, { rate: dock?.getRate() ?? 1, volume: volumeSetting(), piperVoice: coachVoice() });
     if (token !== flowToken) return false;
     dock?.setMode("idle");
     return ok;
@@ -776,10 +790,20 @@ async function speak(text, token) {
  * Speak a line through the server TTS and light the karaoke words live.
  *
  * Fetches the TTS audio directly so we can decode its duration and highlight
- * the spans linearly (Piper emits no word timestamps). `spans` defaults to
- * every word of the book (the full model answer); pass a single line's spans
- * to light only that fragment. Whatever path the read takes — finished, error
- * or fallback to plain `tts.speak()` — the spans return to white at the end.
+ * the spans (Piper emits no word timestamps). `spans` defaults to every word
+ * of the book (the full model answer); pass a single line's spans to light
+ * only that fragment. Whatever path the read takes — finished, error or
+ * fallback to plain `tts.speak()` — the spans return to white at the end.
+ *
+ * Feature 114 (prosody): the line is split into clauses client-side and sent
+ * as `segments[]` + `pausesMs[]`, so the server returns ONE audio file with
+ * human pauses — and this side knows where those pauses are, which lets the
+ * word highlight PAUSE with them (see `buildWordStarts`) instead of drifting
+ * ahead during the silences. The chosen coach voice goes along as `voice`.
+ *
+ * Level: the Piper WAV arrives normalized from the server; an edge-tts MP3 is
+ * normalized here through the client gain (`speech/level.js`), which also
+ * yields the duration — one decode instead of two.
  *
  * @param {string} text - what the coach reads
  * @param {number} token - flow cancellation token
@@ -792,9 +816,14 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
   // The coach wins over an isolated word click still playing (feature 113).
   tts?.stop();
   const activeSpans = spans ?? allWordSpans();
-  const params = new URLSearchParams({ text });
+  const { segments, pausesMs } = splitForTts(text);
+  const params = new URLSearchParams();
+  for (const s of segments) params.append("segments", s);
+  for (const p of pausesMs) params.append("pausesMs", String(p));
   const rate = dock?.getRate() ?? 1;
   if (rate !== 1) params.set("rate", String(rate));
+  const voice = coachVoice();
+  if (voice && health?.tts?.engine === "piper") params.set("voice", voice);
 
   let audio = null;
   let stopProgress = () => {};
@@ -809,18 +838,31 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     audio = new Audio(url);
     // The engine defaults to 1.0: without this the model answer and every
     // fragment re-read played at 100% regardless of the user's setting.
-    audio.volume = volumeSetting();
-    readAudio = audio;
     let durationMs = 0;
-    try {
-      const buf = await blob.arrayBuffer();
-      const ac = new AudioContext();
-      const decoded = await ac.decodeAudioData(buf);
-      durationMs = decoded.duration * 1000;
-      ac.close();
-    } catch {
-      durationMs = 0; // no progress highlight
+    let ctl = null;
+    if (health?.tts?.engine === "edge-tts") {
+      // Edge MP3: client-side level normalization (feature 114) — it decodes
+      // the blob, so its duration serves as the karaoke duration too.
+      ctl = await tryNormalizeElement(audio, blob);
+      if (token !== flowToken) return;
+      durationMs = ctl?.durationMs ?? 0;
     }
+    if (ctl) ctl.setVolume(volumeSetting());
+    else audio.volume = volumeSetting();
+    readAudio = audio;
+    if (!(durationMs > 0)) {
+      try {
+        const buf = await blob.arrayBuffer();
+        const ac = new AudioContext();
+        const decoded = await ac.decodeAudioData(buf);
+        durationMs = decoded.duration * 1000;
+        ac.close();
+      } catch {
+        durationMs = 0; // no progress highlight
+      }
+    }
+    // Word onsets that honor the clause pauses (null → plain linear spread).
+    const wordStarts = buildWordStarts(durationMs, segments, pausesMs, activeSpans.length);
     await new Promise((resolve) => {
       const done = () => {
         stopKaraokeRead = null;
@@ -838,12 +880,12 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
         return;
       }
       audio.play().catch(done);
-      if (durationMs > 0) stopProgress = animateWordProgress(durationMs, token, activeSpans);
+      if (durationMs > 0) stopProgress = animateWordProgress(durationMs, token, activeSpans, wordStarts);
     });
   } catch {
     // Server TTS unavailable → plain browser speech, no progress.
     if (token !== flowToken) return;
-    await tts.speak(text, { rate, volume: volumeSetting() });
+    await tts.speak(text, { rate, volume: volumeSetting(), piperVoice: coachVoice() });
   } finally {
     stopKaraokeRead = null;
     coachSpeaking = false; // karaoke interaction (112/113) re-opens here
@@ -851,6 +893,7 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
     if (readAudio === audio) readAudio = null;
     stopProgress();
     activeSpans.forEach((s) => s.classList.remove("kw-spoken"));
+    releaseElement(audio); // edge gain graph, if any (no-op otherwise)
     if (audio) URL.revokeObjectURL(audio.src);
   }
   if (token !== flowToken) return;
@@ -858,21 +901,67 @@ async function speakWithKaraoke(text, token, { spans = null } = {}) {
 }
 
 /**
- * Highlight the given karaoke spans linearly over `durationMs` (rAF loop).
+ * Per-word highlight onsets (ms) that PAUSE during the clause silences
+ * (feature 114) — the mitigation for karaoke drift: a linear spread would
+ * keep advancing while the audio sits in a 220–650 ms pause and light words
+ * ahead of the coach.
+ *
+ * The schedule is only trusted when the segment word count matches the span
+ * count (the book tokenizes contractions the same way, but any mismatch —
+ * e.g. reading a fragment with the full answer's spans — falls back to the
+ * linear animation, which is always safe).
+ *
+ * Each segment gets a share of the speech time proportional to its word
+ * count; its words spread evenly inside that share; its pause follows.
+ *
+ * @param {number} durationMs - total audio duration (incl. pauses)
+ * @param {string[]} segments - clauses the server synthesized
+ * @param {number[]} pausesMs - silence after each segment (same length)
+ * @param {number} spanCount - number of highlighted word spans
+ * @returns {number[]|null} onset in ms per span, or null for linear spread
+ */
+function buildWordStarts(durationMs, segments, pausesMs, spanCount) {
+  if (!(durationMs > 0) || !segments.length || pausesMs.length !== segments.length) return null;
+  const counts = segments.map((s) => s.split(/\s+/).filter(Boolean).length);
+  const words = counts.reduce((a, b) => a + b, 0);
+  if (words !== spanCount || words === 0) return null;
+  const totalPause = pausesMs.reduce((a, b) => a + b, 0);
+  const speechMs = durationMs - totalPause;
+  if (speechMs <= 0) return null;
+  const starts = [];
+  let cursor = 0;
+  counts.forEach((n, i) => {
+    const segMs = (speechMs * n) / words;
+    for (let w = 0; w < n; w++) starts.push(cursor + (segMs * w) / n);
+    cursor += segMs + pausesMs[i];
+  });
+  return starts;
+}
+
+/**
+ * Highlight the given karaoke spans over `durationMs` (rAF loop).
+ *
+ * With `starts` (feature 114) each span lights at its scheduled onset, so the
+ * highlight waits out the clause pauses with the audio; without it the spread
+ * is linear over the duration (legacy behavior / fallback).
  *
  * @param {number} durationMs - duration of the read
  * @param {number} token - flow cancellation token
  * @param {Element[]} spans - spans to light, in reading order
+ * @param {number[]|null} [starts] - per-span onset in ms (pause-aware)
  * @returns {() => void} `stop()` — cancels the loop (safe to call twice)
  */
-function animateWordProgress(durationMs, token, spans) {
+function animateWordProgress(durationMs, token, spans, starts = null) {
   if (!spans.length) return () => {};
   const start = performance.now();
   let cancelled = false;
   const tick = () => {
     if (cancelled || token !== flowToken) return;
-    const t = Math.min(1, (performance.now() - start) / durationMs);
-    const count = Math.floor(t * spans.length);
+    const elapsed = performance.now() - start;
+    const t = Math.min(1, elapsed / durationMs);
+    const count = starts
+      ? starts.filter((s) => s <= elapsed).length
+      : Math.floor(t * spans.length);
     spans.forEach((s, i) => s.classList.toggle("kw-spoken", i < count));
     if (t < 1) requestAnimationFrame(tick);
   };
@@ -1738,7 +1827,9 @@ function applyLiveSettings() {
 function applyLiveVolume() {
   const v = volumeSetting();
   tts?.setVolume(v);
-  if (readAudio) readAudio.volume = v;
+  // `setElementVolume` knows about the edge gain graph (feature 114): it
+  // moves the gain node when one is attached, the plain volume otherwise.
+  if (readAudio) setElementVolume(readAudio, v);
 }
 
 /**
