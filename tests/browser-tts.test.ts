@@ -1,7 +1,7 @@
 import { test, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 
-import { BrowserTTS } from "../public/speech/browser-tts.js";
+import { BrowserTTS, chunkTokens, MAX_TOKEN_SEGMENTS } from "../public/speech/browser-tts.js";
 
 // ---------------------------------------------------------------------------
 // Browser globals (BrowserTTS talks to `window`, `fetch`, `Audio` and
@@ -282,4 +282,45 @@ test("setVolume() with nothing playing is a safe no-op", () => {
   tts.setVolume(0.4);
   assert.equal(tts._audio, null);
   assert.equal(tts._utt, null);
+});
+
+// ---------------------------------------------------------------------------
+// Long token selections stay under the server's segment cap (review major #2)
+// ---------------------------------------------------------------------------
+
+test("chunkTokens: groups tokens into ≤40-word segments without dropping any", () => {
+  const many = Array.from({ length: 60 }, (_, i) => `w${i}`);
+  const chunks = chunkTokens(many);
+  assert.equal(chunks.length, 2, "60 tokens → 40 + 20");
+  assert.equal(chunks[0].split(" ").length, MAX_TOKEN_SEGMENTS);
+  assert.equal(chunks[1].split(" ").length, 20);
+  assert.deepEqual(chunks.join(" ").split(" "), many, "order and content preserved");
+
+  assert.equal(chunkTokens(["only", "three"]).length, 1, "short selections stay one segment");
+  assert.deepEqual(chunkTokens([]), [], "an empty selection stays empty");
+});
+
+test("a ~60-token selection is sent as two ≤40-word segments in ONE request", async () => {
+  const urls: string[] = [];
+  (globalThis as { fetch: unknown }).fetch = async (url: unknown) => {
+    urls.push(String(url));
+    return audioResponse();
+  };
+  const tts = serverTts();
+  const tokens = Array.from({ length: 60 }, (_, i) => `word${i}`);
+
+  const pending = tts.speak(tokens);
+  await tick();
+
+  assert.equal(urls.length, 1, "a long selection must stay a single request");
+  const params = new URLSearchParams(urls[0].split("?")[1]);
+  const segments = params.getAll("segments");
+  assert.equal(segments.length, 2, "60 tokens must not become 60 segments (server cap is 40)");
+  for (const s of segments) {
+    assert.ok(s.split(" ").length <= 40, `segment over the cap: "${s}"`);
+  }
+  assert.deepEqual(segments.join(" ").split(" "), tokens, "no token lost or reordered");
+
+  FakeAudio.instances[0]?.onended?.();
+  await pending;
 });

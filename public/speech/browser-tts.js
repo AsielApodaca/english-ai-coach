@@ -6,11 +6,47 @@
  *                   (online fallback) as chosen by the server.
  *   2. speechSynthesis — browser Web Speech API (last resort, always available).
  *
+ * Feature 114 (prosody): a STRING line is split into clauses client-side
+ * (`splitForTts`) and sent as `segments[]` + `pausesMs[]`, so the server can
+ * glue them into ONE audio file with human pauses. An ARRAY of tokens (word
+ * click / selection, feature 113) goes through as-is with the legacy pause
+ * contract (no measured pauses). When the engine is `edge-tts` (MP3) the
+ * blob is level-normalized on the client via `speech/level.js`.
+ *
  * The public API (`speak`, `stop`, `setVolume`, `supported`, `refresh`,
  * `allVoices`, `setHealth`) — the previous surface plus `setVolume` — keeps
  * existing callers (`autoplayFragment`, `speakCoachFeedback`, chat read-aloud)
  * working without modification.
  */
+import { splitForTts } from "./prosody.js";
+import { tryNormalizeElement, setElementVolume, releaseElement } from "./level.js";
+
+/**
+ * Server cap on the number of `segments` per request, mirrored client-side
+ * (`TTS_MAX_SEGMENTS` in src/server.ts): sending more gets a 400.
+ */
+export const MAX_TOKEN_SEGMENTS = 40;
+
+/**
+ * Group an array of tokens into segments of at most
+ * {@link MAX_TOKEN_SEGMENTS} words (tokens joined with a space), so a long
+ * word selection (feature 113) stays ONE `/api/tts` request under the
+ * server's segment cap — a 60-token selection previously sent 60 `segments`
+ * params, was rejected with 400 and silently fell back to the mechanical
+ * browser voice (review major #2).
+ *
+ * @param {string[]} tokens - exact tokens, in order
+ * @param {number} [maxWords] - max words per segment
+ * @returns {string[]} phrase segments (each ≤ `maxWords` words)
+ */
+export function chunkTokens(tokens, maxWords = MAX_TOKEN_SEGMENTS) {
+  const out = [];
+  for (let i = 0; i < tokens.length; i += maxWords) {
+    out.push(tokens.slice(i, i + maxWords).join(" "));
+  }
+  return out;
+}
+
 export class BrowserTTS {
   /** @type {SpeechSynthesisVoice[]} */
   voices = [];
@@ -77,8 +113,15 @@ export class BrowserTTS {
    * Speak text using the best available engine.
    *
    * Priority: server TTS (Piper or edge-tts) → speechSynthesis (browser).
-   * `text` may be a single string or an array of segments synthesized in one
-   * request with measured silence between them.
+   *
+   * `text` may be:
+   *   - a STRING line → split into clauses client-side (feature 114) and sent
+   *     as `segments[]` + `pausesMs[]`, so `/api/tts` returns ONE file with
+   *     measured human pauses (comma 220 ms, sentence 400 ms, handover 650 ms);
+   *   - an ARRAY of tokens (word click / selection) → grouped by
+   *     {@link chunkTokens} into ≤40-word segments (one request, legacy pause
+   *     contract: no measured pauses) so a large selection cannot trip the
+   *     server's segment cap.
    *
    * Cancellation: `stop()` (or a newer `speak()`) invalidates this call. When
    * that happens the promise resolves `false` and the browser fallback is
@@ -87,6 +130,9 @@ export class BrowserTTS {
    *
    * @param {string|string[]} text
    * @param {{rate?: number, pitch?: number, voiceURI?: string, piperVoice?: string, pauseAfterMs?: number, volume?: number}} [opts]
+   *   `piperVoice` is the chosen `engcoach.voice` id (null/undefined = keep
+   *   the default chain). `pauseAfterMs` only applies to explicit arrays
+   *   (strings get their pauses from the clause splitter).
    * @returns {Promise<boolean>} true on success, false on error/cancel/fallback failure.
    */
   async speak(text, { rate = 0.95, pitch = 1, voiceURI = null, piperVoice = null, pauseAfterMs = 0, volume = 1 } = {}) {
@@ -96,9 +142,17 @@ export class BrowserTTS {
     /** True when `stop()` ran or a newer `speak()` took over mid-flight. */
     const cancelled = () => id !== this._callId || gen !== this._gen;
 
+    // Feature 114: strings are split into clauses with measured pauses;
+    // token arrays keep the legacy contract (no internal pauses) but are
+    // grouped into ≤40-word segments so a long selection stays under the
+    // server's segment cap (review major #2).
+    const { segments, pausesMs } = Array.isArray(text)
+      ? { segments: chunkTokens(texts), pausesMs: /** @type {number[]|null} */ (null) }
+      : splitForTts(text);
+
     // --- Layer 1: server TTS (Piper local → edge-tts online) ---
     if (this._serverEngine) {
-      const ok = await this._speakServer(texts, { rate, piperVoice, pauseAfterMs, volume, cancelled });
+      const ok = await this._speakServer(segments, { pausesMs, rate, piperVoice, pauseAfterMs, volume, cancelled });
       // Cancelled reads must NOT fall through: layer 2 would replay the line.
       if (cancelled()) return false;
       if (ok) return true;
@@ -117,15 +171,27 @@ export class BrowserTTS {
   /**
    * Fetch a WAV/MP3 from the server and play it through an `<audio>` element.
    * The server resolves Piper vs edge-tts; 503 means "no server engine".
-   * @param {string[]} texts
-   * @param {{rate?: number, piperVoice?: string|null, pauseAfterMs?: number, volume?: number, cancelled?: () => boolean}} [opts]
+   *
+   * Params: `segments[]` always; `pausesMs[]` (one per segment, feature 114)
+   * when the caller passed a split line; otherwise the legacy `pauseAfterMs`
+   * between tokens. `voice` goes only to Piper.
+   *
+   * Edge MP3 level: the blob is normalized client-side (`speech/level.js`)
+   * before playback; the Piper WAV is already normalized server-side.
+   *
+   * @param {string[]} segments
+   * @param {{pausesMs?: number[]|null, rate?: number, piperVoice?: string|null, pauseAfterMs?: number, volume?: number, cancelled?: () => boolean}} [opts]
    * @returns {Promise<boolean>}
    */
-  async _speakServer(texts, { rate = 0.95, piperVoice = null, pauseAfterMs = 0, volume = 1, cancelled = () => false } = {}) {
+  async _speakServer(segments, { pausesMs = null, rate = 0.95, piperVoice = null, pauseAfterMs = 0, volume = 1, cancelled = () => false } = {}) {
     try {
       const params = new URLSearchParams();
-      for (const t of texts) params.append("segments", t);
-      if (pauseAfterMs > 0) params.set("pauseAfterMs", String(pauseAfterMs));
+      for (const t of segments) params.append("segments", t);
+      if (pausesMs && pausesMs.length === segments.length) {
+        for (const p of pausesMs) params.append("pausesMs", String(p));
+      } else if (pauseAfterMs > 0) {
+        params.set("pauseAfterMs", String(pauseAfterMs));
+      }
       if (rate !== 1) params.set("rate", String(rate));
       // The `voice` param is a Piper voice; only send it when Piper is active.
       if (this._serverEngine === "piper" && piperVoice) params.set("voice", piperVoice);
@@ -139,16 +205,30 @@ export class BrowserTTS {
       // playing after the caller already left.
       if (cancelled()) return false;
       const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+
+      // Edge MP3: normalize the level on the client (feature 114). Piper WAV
+      // needs nothing — the server already normalized it. Any failure leaves
+      // `ctl` null and playback falls back to `audio.volume`.
+      let ctl = null;
+      if (this._serverEngine === "edge-tts") {
+        ctl = await tryNormalizeElement(audio, blob);
+        if (cancelled()) {
+          releaseElement(audio);
+          URL.revokeObjectURL(url);
+          return false;
+        }
+      }
+      if (ctl) ctl.setVolume(volume);
+      else audio.volume = Math.max(0, Math.min(1, volume));
 
       return await new Promise((resolve) => {
         this._stopCurrentAudio(); // cancel any previous audio (same generation)
 
-        const audio = new Audio(url);
         this._audio = audio;
         // Speed is applied server-side (Piper length_scale / edge --rate),
         // so playback stays natural at 1.0 (no pitch distortion).
         audio.playbackRate = 1;
-        audio.volume = Math.max(0, Math.min(1, volume));
         this._pending = { resolve, url };
 
         const finish = (ok) => {
@@ -156,6 +236,7 @@ export class BrowserTTS {
             this._audio = null;
             this._pending = null;
           }
+          releaseElement(audio); // tear down the edge gain graph, if any
           resolve(ok);
         };
 
@@ -235,7 +316,7 @@ export class BrowserTTS {
     const v = Number(volume);
     if (!Number.isFinite(v)) return;
     const vol = Math.max(0, Math.min(1, v));
-    if (this._audio) this._audio.volume = vol;
+    if (this._audio) setElementVolume(this._audio, vol);
     if (this._utt) this._utt.volume = vol;
   }
 
@@ -264,6 +345,7 @@ export class BrowserTTS {
     if (this._audio) {
       this._audio.pause();
       this._audio.currentTime = 0;
+      releaseElement(this._audio); // edge gain graph, if any
       this._audio = null;
     }
     if (this._pending) {

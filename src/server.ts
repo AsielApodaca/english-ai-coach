@@ -27,8 +27,10 @@ import {
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
 import { buildSessionPayload } from "./lib/session-payload.ts";
 import { applyProfileSettings, parseProfileSettings } from "./lib/settings.ts";
-import { checkPiper, synthesize as piperSynthesize, synthesizeSegments as piperSynthesizeSegments, SUPPORTED_VOICES } from "./lib/piper.ts";
+import { checkPiper, isVoiceReady, synthesizeSegments as piperSynthesizeSegments, DEFAULT_VOICE, SUPPORTED_VOICES } from "./lib/piper.ts";
 import { checkEdgeTts, synthesizeEdge, DEFAULT_EDGE_VOICE } from "./lib/edge-tts.ts";
+import { splitForTts } from "./lib/prosody.ts";
+import { createTtsCache, ttsCacheKey, withTtsCache } from "./lib/tts-cache.ts";
 import {
   createStorage,
   DEFAULT_ACCENT,
@@ -799,8 +801,17 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
 });
 
 // ---------------------------------------------------------------------------
-// TTS — Piper neural voice with edge-tts fallback (feature 007)
+// TTS — Piper neural voice with edge-tts fallback (features 007 + 114)
 // ---------------------------------------------------------------------------
+
+/**
+ * Shared synthesis cache for `/api/tts` (feature 114): the same line asked
+ * again (retries, loops, word clicks) is served byte-identical and instantly
+ * instead of being re-synthesized — re-synthesis is what made repeats
+ * "crackle". Lives under `data/tmp/tts-cache/` (git-ignored, disposable);
+ * building it also purges entries past the 24 h TTL (purge on boot).
+ */
+const ttsCache = createTtsCache({ dir: join(rootDir, "data", "tmp", "tts-cache") });
 
 /**
  * Resolve the active TTS engine and return a combined status payload.
@@ -811,6 +822,10 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
  *     not in OFFLINE_MODE (feature 006 forces the local stack).
  *   - Otherwise no server engine is available and the browser must fall back
  *     to `speechSynthesis`.
+ *
+ * `piper.voices` lists every supported voice id; `piper.readyVoices` only the
+ * ones already downloaded — the settings select (feature 114) offers those so
+ * picking a voice can never 400 the TTS route.
  */
 function ttsStatus() {
   const piper = checkPiper(rootDir);
@@ -829,6 +844,8 @@ function ttsStatus() {
       voiceReady: piper.voiceReady,
       voice: piper.voiceName,
       hint: piper.hint,
+      voices: SUPPORTED_VOICES,
+      readyVoices: SUPPORTED_VOICES.filter((v) => isVoiceReady(rootDir, v)),
     },
     edge: {
       available: edge.available,
@@ -845,6 +862,8 @@ app.get("/api/tts/status", (_req, res) => {
 
 const TTS_MAX_CHARS = 1000;
 const TTS_MAX_PAUSE_MS = 10_000;
+/** Segment cap checked BEFORE the cache is consulted (feature 114). */
+const TTS_MAX_SEGMENTS = 40;
 const RATE_MIN = 0.5;
 const RATE_MAX = 2;
 
@@ -855,47 +874,92 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
   return Math.min(max, Math.max(min, n));
 }
 
+/** Read a repeatable query param as a string list (Express gives string|string[]). */
+function queryList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value === "string" && value) return [value];
+  return [];
+}
+
 /**
- * Serve TTS audio as a binary file.
+ * Serve TTS audio as a binary file (features 007 + 114).
  *
  * Query params:
- *   text        — text to speak (required unless `segments` given; ≤ 1000 chars)
- *   segments    — repeatable param for multi-fragment synthesis with measured
- *                 silence *between* them (e.g. "Repeat after me" + fragment);
- *                 `pauseAfterMs` is the inter-fragment silence
- *   pauseAfterMs — silence appended after `text` (single-text route), or the
- *                 pause inserted between `segments` — ≤ 10 s
- *   rate        — speed factor 0.5–2 (Piper length_scale / edge --rate)
- *   voice       — Piper voice id (optional; validated against supported voices)
+ *   text         — text to speak (required unless `segments` is given; ≤ 1000
+ *                  chars). The server runs the clause splitter itself, so
+ *                  plain-text callers get human pauses too.
+ *   segments     — repeatable: pre-split clauses (preferred; feature 114 — the
+ *                  frontend splits and sends `pausesMs` alongside).
+ *   pausesMs     — repeatable: silence AFTER each segment (one per segment,
+ *                  ≤ 10 s each). When absent, the legacy contract applies:
+ *                  `pauseAfterMs` = silence BETWEEN segments, no trailing beat.
+ *   pauseAfterMs — for the `text` route: overrides the trailing handover pause.
+ *   rate         — speed factor 0.5–2 (Piper length_scale / edge --rate);
+ *                  pauses stay fixed in ms (they are not scaled).
+ *   voice        — Piper voice id; unsupported → 400, supported-but-not-
+ *                  downloaded → silently falls back to the default voice.
  *
  * Engine chain (server-side): Piper → edge-tts (unless OFFLINE_MODE) →
  * 503 so the frontend can fall back to browser `speechSynthesis`.
+ *
+ * Response headers: `X-TTS-Cache: hit|miss` (feature 114 synthesis cache —
+ * key = sha1(engine|voice|rate|segments|pauses), LRU + 24 h TTL under
+ * `data/tmp/tts-cache/`) and `X-TTS-Pauses: measured|none` (whether the
+ * served bytes actually contain the requested silences: Piper yes, edge MP3
+ * no — the karaoke keys its pause-aware schedule on it). Piper output is
+ * level-normalized and faded server-side (`normalizeWav`); edge MP3 is
+ * served as-is (client gain, see `public/speech/level.js`).
  */
 app.get("/api/tts", async (req, res) => {
-  const segmentsParam = req.query.segments;
-  const segments = Array.isArray(segmentsParam)
-    ? segmentsParam.map(String)
-    : typeof segmentsParam === "string" && segmentsParam
-      ? [segmentsParam]
-      : [];
+  const rawSegments = queryList(req.query.segments);
+  const rawPauses = queryList(req.query.pausesMs);
   const text = typeof req.query.text === "string" ? req.query.text.trim() : "";
+  const hasPauseAfter = "pauseAfterMs" in req.query;
   const pauseAfterMs = clampNumber(req.query.pauseAfterMs, 0, TTS_MAX_PAUSE_MS, 0);
   const rate = clampNumber(req.query.rate, RATE_MIN, RATE_MAX, 1);
-  const voice = typeof req.query.voice === "string" && req.query.voice ? req.query.voice : undefined;
+  const voiceParam = typeof req.query.voice === "string" && req.query.voice ? req.query.voice : undefined;
 
-  const cleanSegments = segments.map((s) => s.trim()).filter(Boolean);
-  const totalChars = cleanSegments.length
-    ? cleanSegments.reduce((sum, s) => sum + s.length, 0)
-    : text.length;
+  // --- resolve segments + the silence after each one (feature 114) ---
+  let segments: string[];
+  let pausesMs: number[];
 
-  if (!cleanSegments.length && !text) {
+  if (rawSegments.length) {
+    // Explicit segments: the client already split the line into clauses.
+    // Empty entries are dropped FIRST so the pause count is validated against
+    // the segments that will actually be synthesized (the error message stays
+    // accurate and `pausesMs` cannot drift out of sync — review fix #4).
+    segments = rawSegments.map((s) => s.trim()).filter(Boolean);
+    if (rawPauses.length) {
+      if (rawPauses.length !== segments.length) {
+        return res.status(400).json({
+          error: `pausesMs must have one entry per segment (${segments.length} expected).`,
+        });
+      }
+      pausesMs = rawPauses.map((p) => clampNumber(p, 0, TTS_MAX_PAUSE_MS, 0));
+    } else {
+      // Legacy contract (pre-114 callers): pauseAfterMs = between segments.
+      pausesMs = segments.map((_, i) => (i < segments.length - 1 ? pauseAfterMs : 0));
+    }
+  } else if (text) {
+    // Plain text: split server-side so curl/old clients get the same prosody.
+    const split = splitForTts(text);
+    segments = split.segments;
+    pausesMs = split.pausesMs;
+    // An explicit pauseAfterMs keeps its legacy meaning: the trailing beat.
+    if (hasPauseAfter && pausesMs.length) pausesMs[pausesMs.length - 1] = pauseAfterMs;
+  } else {
     return res.status(400).json({ error: "text or segments query parameter is required." });
   }
-  if (totalChars === 0) {
+
+  const totalChars = segments.reduce((sum, s) => sum + s.length, 0);
+  if (!segments.length || totalChars === 0) {
     return res.status(400).json({ error: "Text must not be empty." });
   }
   if (totalChars > TTS_MAX_CHARS) {
     return res.status(400).json({ error: `Text exceeds ${TTS_MAX_CHARS} character limit.` });
+  }
+  if (segments.length > TTS_MAX_SEGMENTS) {
+    return res.status(400).json({ error: `Too many segments (max ${TTS_MAX_SEGMENTS}).` });
   }
 
   const status = ttsStatus();
@@ -907,38 +971,49 @@ app.get("/api/tts", async (req, res) => {
   }
 
   // Voice selection only applies to Piper; edge-tts keeps its default voice.
-  if (status.engine === "piper" && voice && !SUPPORTED_VOICES.includes(voice)) {
-    return res.status(400).json({ error: `Unsupported voice "${voice}". Supported: ${SUPPORTED_VOICES.join(", ")}.` });
+  // A supported but not-downloaded voice falls back to the default one so a
+  // stale settings value degrades instead of failing the read (feature 114).
+  let effectiveVoice: string;
+  if (status.engine === "piper") {
+    if (voiceParam && !SUPPORTED_VOICES.includes(voiceParam)) {
+      return res.status(400).json({ error: `Unsupported voice "${voiceParam}". Supported: ${SUPPORTED_VOICES.join(", ")}.` });
+    }
+    effectiveVoice = voiceParam && isVoiceReady(rootDir, voiceParam) ? voiceParam : DEFAULT_VOICE;
+  } else {
+    effectiveVoice = DEFAULT_EDGE_VOICE;
   }
 
-  const tmpDir = join(rootDir, "data", "tmp");
-  mkdirSync(tmpDir, { recursive: true });
-  const ext = status.engine === "edge-tts" ? "mp3" : "wav";
-  const outPath = join(tmpDir, `tts-${randomUUID()}.${ext}`);
+  // Validate BEFORE touching the cache (spec 114: limits checked first).
+  const key = ttsCacheKey({ engine: status.engine, voice: effectiveVoice, rate, segments, pauses: pausesMs });
 
   try {
-    let audio: Buffer;
-    let mime: string;
-    if (status.engine === "piper") {
-      const lengthScale = 1 / rate;
-      audio = cleanSegments.length
-        ? await piperSynthesizeSegments(cleanSegments, rootDir, { pauseBetweenMs: pauseAfterMs, lengthScale, voice })
-        : await piperSynthesize(text, rootDir, { pauseAfterMs, lengthScale, voice });
-      mime = "audio/wav";
-    } else {
-      audio = await synthesizeEdge(cleanSegments.length ? cleanSegments.join(" ") : text, rootDir, {
-        rate,
-      });
-      mime = "audio/mpeg";
-    }
-    writeFileSync(outPath, audio);
-    res.setHeader("Content-Type", mime);
-    res.setHeader("Content-Length", String(audio.length));
-    res.sendFile(outPath, () => {
-      rmSync(outPath, { force: true });
+    const { audio, cacheHit } = await withTtsCache(ttsCache, key, async () => {
+      if (status.engine === "piper") {
+        // Per-segment normalization + measured silence happen inside
+        // `synthesizeSegments` (RMS target, peak ceiling, anti-click fades).
+        return piperSynthesizeSegments(segments, rootDir, {
+          pausesAfterMs: pausesMs,
+          lengthScale: 1 / rate,
+          voice: effectiveVoice,
+        });
+      }
+      // edge-tts (MP3): ONE synthesis of the joined line. Measured silence
+      // cannot be inserted without an MP3 encoder — accepted codec limitation
+      // (spec 114 "Edge MP3 sin normalización server-side"; the client gain
+      // node compensates the level instead).
+      return synthesizeEdge(segments.join(" "), rootDir, { rate });
     });
+
+    res.setHeader("Content-Type", status.engine === "edge-tts" ? "audio/mpeg" : "audio/wav");
+    res.setHeader("Content-Length", String(audio.length));
+    res.setHeader("X-TTS-Cache", cacheHit ? "hit" : "miss");
+    // Only Piper inserts the requested silences into the bytes (edge joins the
+    // segments without them), so the karaoke derives its pause-aware schedule
+    // from THIS response instead of the possibly-stale health snapshot
+    // (review major #1).
+    res.setHeader("X-TTS-Pauses", status.engine === "piper" ? "measured" : "none");
+    res.end(audio);
   } catch (err) {
-    rmSync(outPath, { force: true });
     res.status(500).json({ error: (err as Error).message });
   }
 });

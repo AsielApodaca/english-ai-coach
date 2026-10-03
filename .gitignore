@@ -5,6 +5,9 @@
 
 # Personal practice data (learner history, profile, tmp audio)
 data/
+# TTS synthesis cache (feature 114) — disposable LRU, never committed
+# (already covered by `data/`; listed explicitly for clarity)
+data/tmp/tts-cache/
 
 # Downloaded models (whisper STT + piper TTS voices), fetched by scripts/setup.sh
 models/
