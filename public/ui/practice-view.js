@@ -19,9 +19,12 @@
  * released (or at the 3 s/word ceiling). Silence detection plays no part in
  * ending the turn anymore. Attempts go to POST /api/attempt (whisper with word
  * timestamps; text fallback via BrowserSTT when whisper is unavailable), and
- * the karaoke book colors each word green/amber/red. A failed attempt (score <
- * passThreshold) retries the same fragment; after the last fragment passes,
- * the user reads the whole answer and the session is done.
+ * the karaoke book colors each word green/amber/red. Feature 116: that paint no
+ * longer waits for the LLM — the response carries the deterministic evaluation
+ * plus an `attemptId`, and the refinement (forced-amber recolor + LLM coach
+ * line) is fetched in background from GET /api/attempt/:id/feedback. A failed
+ * attempt (score < passThreshold) retries the same fragment; after the last
+ * fragment passes, the user reads the whole answer and the session is done.
  *
  * A PASSING attempt (fragment or full answer — feature 110) plays the
  * synthesized chime of `speech/chime.js` instead of the congratulation line
@@ -64,6 +67,14 @@ const MIC_UNAVAILABLE = "Micrófono no disponible. Revisa los permisos del naveg
 
 /** Defensive cap on the success chime so phase `feedback` can never hang. */
 const CHIME_MAX_MS = 500;
+
+/**
+ * Cap on waiting for the LLM refinement before speaking the coach line
+ * (feature 116). The wait starts when the feedback is PAINTED, so it is
+ * overlapped with the user's own replay and only the remainder is paid
+ * right before `speak()`.
+ */
+const REFINE_WAIT_MS = 10000;
 
 // ---------------------------------------------------------------------------
 // Module state (mirrors PracticeState in cu2.ts)
@@ -126,6 +137,13 @@ let lastWavBlob = null;
  * full answer, `-2` no attempt yet (colors must not be restored from it).
  */
 let lastAttemptLineIndex = -2;
+
+/**
+ * `attemptId` of the attempt currently painted (feature 116): a landing
+ * refinement may only recolor/refresh the line when it still identifies THIS
+ * attempt. Null when there is none (blank transcript, timed-out turn).
+ */
+let lastAttemptId = null;
 
 /** Pending karaoke read; the dock's retry pill can cut it short. */
 let stopKaraokeRead = null;
@@ -376,6 +394,7 @@ async function startFlow(sessionId) {
   fragmentScores = [];
   lastAttempt = null;
   lastAttemptLineIndex = -2;
+  lastAttemptId = null;
   fullAttemptCount = 0;
   fullPassed = false;
   session = null;
@@ -480,6 +499,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   // A new question starts without a scorable attempt to re-color.
   lastAttempt = null;
   lastAttemptLineIndex = -2;
+  lastAttemptId = null;
 
   // A question whose eval is already checkpointed is done: resumed sessions
   // land directly on the done panel (offer the next question).
@@ -516,6 +536,10 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     // Entering (or retrying) a fragment: legible book, active line, white line.
     els.book.classList.remove("reading");
     setCurrentLine(fi);
+    // Feature 116: this line's paint is about to be cleared — a refinement
+    // still in flight for it must not recolor it afterwards (the line has to
+    // stay white while the coach reads and the user speaks).
+    if (lastAttemptLineIndex === fi) lastAttemptId = null;
     clearLineColors(fi);
     await speakWithKaraoke(question.fragments[fi].text, token, { spans: lineWordSpans(fi) });
     if (token !== flowToken) return;
@@ -527,6 +551,10 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     lastAttempt = outcome;
     attemptCount++;
     renderFeedback(outcome, fi);
+    // Feature 116: ask for the LLM refinement right away (NO await) — it
+    // repaints the line with the forced-amber words when it lands and is only
+    // awaited before speaking, on the fail path.
+    const refinement = startRefinement(outcome, fi, token);
 
     if (outcome.passed) {
       // Feature 110: pass → synthesized chime (no spoken congratulation),
@@ -546,7 +574,13 @@ async function runQuestionLoop(token, { resume = false } = {}) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
-    await speak(outcome.coachLine, token);
+    // The refinement request has been in flight since the paint (overlapping
+    // the replay): wait for it — capped — so the coach keeps its LLM-quality
+    // line. On timeout, dead provider or a blank transcript (no attemptId)
+    // the deterministic coachLine is spoken instead.
+    const refined = await refinement;
+    if (token !== flowToken) return;
+    await speak(refined?.coachLine || outcome.coachLine, token);
     if (token !== flowToken) return;
   }
 
@@ -557,6 +591,10 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   fullPassed = false;
   let fullOutcome;
   do {
+    // Feature 116: `renderFull()` rebuilds the book white — drop every
+    // in-flight refinement (the previous full attempt, or a lingering
+    // fragment one whose line no longer exists) before the read starts.
+    lastAttemptId = null;
     setPhase("fullAnswer");
     renderFull();
     await speak(fullLine, token);
@@ -570,6 +608,8 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     fullAttemptCount++;
     fullPassed = fullOutcome.passed || fullPassed;
     renderFeedback(fullOutcome, -1);
+    // Feature 116: same as the fragment loop — no await, repainted on arrival.
+    const refinement = startRefinement(fullOutcome, -1, token);
 
     if (fullOutcome.passed) {
       // Feature 110: pass → chime, then close the session without the spoken
@@ -583,7 +623,11 @@ async function runQuestionLoop(token, { resume = false } = {}) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
-    await speak(fullOutcome.coachLine, token);
+    // Overlapped with the replay since the paint; capped, and falling back to
+    // the deterministic coachLine on timeout / dead provider / blank input.
+    const refined = await refinement;
+    if (token !== flowToken) return;
+    await speak(refined?.coachLine || fullOutcome.coachLine, token);
     if (token !== flowToken) return;
   } while (!fullOutcome.passed);
 
@@ -1287,6 +1331,9 @@ function attemptParams(target, kind) {
 function outcomeFromJson(json, target, kind) {
   return {
     kind,
+    // Feature 116: handle of the background LLM refinement (absent for a
+    // blank transcript — that path answers exactly as before, no refinement).
+    attemptId: typeof json.attemptId === "string" && json.attemptId ? json.attemptId : null,
     score: json.score ?? 0,
     verdict: json.verdict ?? "retry",
     passed: json.score >= passThreshold,
@@ -1316,6 +1363,84 @@ function timedOutOutcome(target, kind) {
     added: [],
     coachLine: "I didn't hear you. Let's try that again.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// LLM refinement (feature 116): background feedback + forced-amber recolor
+// ---------------------------------------------------------------------------
+
+/**
+ * Request the LLM refinement of the attempt just painted, raced against the
+ * REFINE_WAIT_MS cap.
+ *
+ * Fired WITHOUT `await` right after `renderFeedback`, so the request overlaps
+ * the user's own replay; only the FAIL path awaits the raced promise, just
+ * before speaking (PASS never waits — the recolor simply lands whenever it
+ * arrives). Never rejects: network errors, a 404 (expired/unknown id) and
+ * `refined: false` (LLM down / server timeout) all resolve to null, which
+ * means "keep the deterministic state and coach line".
+ *
+ * @param {{ attemptId?: string|null }} outcome - the attempt just painted
+ * @param {number} lineIndex - fragment index, or `-1` for the full answer
+ * @param {number} token - flow cancellation token
+ * @returns {Promise<object|null>} the refinement payload, or null
+ */
+function startRefinement(outcome, lineIndex, token) {
+  if (!outcome.attemptId) return Promise.resolve(null);
+  // The deadline starts at the PAINT, not at the await: the cap is spent
+  // mostly under the replay, so the wait right before speak is the remainder.
+  return Promise.race([
+    fetchRefinement(outcome.attemptId, lineIndex, token),
+    sleep(REFINE_WAIT_MS).then(() => null),
+  ]);
+}
+
+/**
+ * Long-poll GET /api/attempt/:id/feedback and apply the refinement when it
+ * lands. Every await re-checks `flowToken`, so a refinement of a session that
+ * was left mid-flight is dropped instead of repainting.
+ *
+ * @param {string} attemptId - id returned by POST /api/attempt (116)
+ * @param {number} lineIndex - fragment index, or `-1` for the full answer
+ * @param {number} token - flow cancellation token
+ * @returns {Promise<object|null>} the refinement, or null (never throws)
+ */
+async function fetchRefinement(attemptId, lineIndex, token) {
+  try {
+    const res = await fetch(`/api/attempt/${encodeURIComponent(attemptId)}/feedback`);
+    if (token !== flowToken) return null;
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (token !== flowToken) return null;
+    if (!data || data.refined !== true) return null;
+    applyRefinement(attemptId, lineIndex, data, token);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apply a landed refinement to the attempt on screen (feature 116): repaint
+ * the line with the forced-amber words and refresh the outcome's coach line
+ * (so a later `rebuildBook()` restores the refined colors too).
+ *
+ * Guarded by attemptId + flowToken + line index: a refinement of an attempt
+ * that is no longer the one displayed — or whose line was cleared for a new
+ * capture/read — is dropped and the deterministic paint stays.
+ *
+ * @param {string} attemptId
+ * @param {number} lineIndex
+ * @param {{ words?: Array<object>, coachLine?: string }} data
+ * @param {number} token - flow cancellation token
+ */
+function applyRefinement(attemptId, lineIndex, data, token) {
+  if (token !== flowToken) return;
+  if (attemptId !== lastAttemptId || lineIndex !== lastAttemptLineIndex) return;
+  if (!lastAttempt) return;
+  if (Array.isArray(data.words)) lastAttempt.words = data.words;
+  if (typeof data.coachLine === "string" && data.coachLine) lastAttempt.coachLine = data.coachLine;
+  colorWords(lastAttempt, lineIndex);
 }
 
 // ---------------------------------------------------------------------------
@@ -1501,6 +1626,9 @@ function colorWords(outcome, lineIndex) {
 /** FEEDBACK phase: color the evaluated line + show the feedback chip. */
 function renderFeedback(outcome, lineIndex) {
   lastAttemptLineIndex = lineIndex;
+  // Feature 116: the refinement guard — only the refinement of THIS attempt
+  // may recolor the line (blank transcripts / timed-out turns have none).
+  lastAttemptId = outcome.attemptId ?? null;
   colorWords(outcome, lineIndex);
   const passed = outcome.passed;
   const missingFocus = (outcome.missing ?? []).slice(0, 2).join(", ");

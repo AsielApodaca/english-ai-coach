@@ -44,6 +44,8 @@ Abre http://localhost:3000.
 - `GET /api/health` — estado de proveedores LLM + Whisper.
 - `POST /api/practice/new` — genera un set de práctica `{ category?, level?, provider?, personalized? }`.
 - `POST /api/evaluate` — evalúa un intento `{ target, userText, question?, level?, sessionId?, fragmentId? }`.
+- `POST /api/attempt` — evalúa una repetición (audio WAV o `mode=text`): responde al instante con la evaluación determinista + `attemptId`.
+- `GET /api/attempt/:id/feedback` — long-poll del refinamiento LLM del intento (`{ refined: true, ... }` o `{ refined: false }`).
 - `POST /api/session/save` — guarda la sesión y calcula next step.
 - `GET /api/history` · `GET /api/profile` · `GET /api/next-step` — historial, perfil y siguiente paso.
 - `POST /api/transcribe` — transcripción local con whisper.cpp.

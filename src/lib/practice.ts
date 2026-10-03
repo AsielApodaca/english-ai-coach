@@ -267,35 +267,28 @@ Do not invent errors; if the user's speech is basically correct, return few or z
 export interface LLMFeedback {
   issues: FeedbackIssue[];
   tips: string[];
-  naturalness: number;
+  /**
+   * 0-100 naturalness as reported by the model. Absent when the model omitted
+   * it: `mergeLLMFeedback` then falls back to the lexical score (feature 116).
+   */
+  naturalness?: number;
 }
 
-export async function evaluateFragment(
-  candidates: Candidate[],
-  params: { target: string; userText: string; question: string; level: Level },
-): Promise<{ evaluation: Evaluation; provider: string; feedback: LLMFeedback }> {
-  const lexical = wordMatch(params.target, params.userText);
-  const userPrompt = `TARGET: "${params.target}"\nUSER SAID: "${params.userText}"\nQUESTION: "${params.question}"\nLEVEL: ${params.level}`;
-  const options: CompleteOptions = { temperature: 0.3, maxTokens: 4096 };
-  let feedback: LLMFeedback = { issues: [], tips: [], naturalness: lexical.score };
-  let provider = "none";
-  try {
-    const res = await chatJSON<LLMFeedback>(candidates, { system: SYSTEM_EVALUATE, user: userPrompt, options });
-    provider = res.provider;
-    const d = res.data;
-    feedback = {
-      issues: Array.isArray(d.issues) ? d.issues.slice(0, 4) : [],
-      tips: Array.isArray(d.tips) ? d.tips.slice(0, 3) : [],
-      naturalness: typeof d.naturalness === "number" ? Math.max(0, Math.min(100, d.naturalness)) : lexical.score,
-    };
-  } catch {
-    // keep deterministic feedback when LLM is unavailable
-  }
-  const score = Math.round(0.75 * lexical.score + 0.25 * feedback.naturalness);
-  const issues: FeedbackIssue[] = [...feedback.issues];
-  // Deterministic issues derived from the lexical match, listed first. Messages
-  // deliberately avoid double quotes: forcedAmberWordsFromIssues() reads quoted
-  // spans as target words to downgrade, and added words are not target words.
+/** Result of the LLM-free evaluation of one attempt (feature 116). */
+export interface DeterministicEvaluation {
+  /** Evaluation built from the lexical match alone (score = lexical score). */
+  evaluation: Evaluation;
+  /** Raw word match behind it — the input the LLM feedback is merged into. */
+  lexical: WordMatch;
+}
+
+/**
+ * Issues derived from the lexical match (added and missing words), listed
+ * before the LLM's own issues. Messages deliberately avoid double quotes:
+ * `forcedAmberWordsFromIssues()` (align.ts) reads quoted spans as target words
+ * to downgrade, and added words are not target words.
+ */
+function deriveIssues(lexical: WordMatch): FeedbackIssue[] {
   const derived: FeedbackIssue[] = [];
   const added = lexical.extra.filter((w) => !isFiller(w));
   if (added.length > 0) {
@@ -313,20 +306,93 @@ export async function evaluateFragment(
       fix: `Listen again and pronounce: ${lexical.missing.join(", ")}`,
     });
   }
-  issues.unshift(...derived);
+  return derived;
+}
+
+/**
+ * Merge LLM feedback into the deterministic word match (pure, feature 116):
+ * score = 0.75·lexical + 0.25·naturalness (naturalness defaults to the lexical
+ * score when absent, so a dead LLM still scores like the fast path), derived
+ * issues first then the LLM's own (capped at 5), verdict and `next` from the
+ * blended score.
+ */
+export function mergeLLMFeedback(lexical: WordMatch, feedback: LLMFeedback): Evaluation {
+  const naturalness =
+    typeof feedback.naturalness === "number" && Number.isFinite(feedback.naturalness)
+      ? Math.max(0, Math.min(100, feedback.naturalness))
+      : lexical.score;
+  const score = Math.round(0.75 * lexical.score + 0.25 * naturalness);
+  const issues: FeedbackIssue[] = [...feedback.issues];
+  issues.unshift(...deriveIssues(lexical));
   const verdict: Evaluation["verdict"] = score >= 70 ? "great" : score >= 50 ? "almost" : "retry";
   return {
-    provider,
-    evaluation: {
-      score,
-      verdict,
-      matched: lexical.matched,
-      missing: lexical.missing,
-      extra: lexical.extra,
-      issues: issues.slice(0, 5),
-      tips: feedback.tips,
-      next: score >= 70,
-    },
-    feedback,
+    score,
+    verdict,
+    matched: lexical.matched,
+    missing: lexical.missing,
+    extra: lexical.extra,
+    issues: issues.slice(0, 5),
+    tips: feedback.tips,
+    next: score >= 70,
   };
+}
+
+/**
+ * Deterministic evaluation of an attempt: lexical match + derived issues, NO
+ * LLM call (feature 116 — the fast path of `POST /api/attempt`).
+ *
+ * Its score equals what the composed evaluation yields when the LLM is
+ * unavailable (0.75·L + 0.25·L = L), so the immediate response and the
+ * deterministic fallback of `evaluateFragment` always agree.
+ */
+export function evaluateFragmentDeterministic(params: { target: string; userText: string }): DeterministicEvaluation {
+  const lexical = wordMatch(params.target, params.userText);
+  return { lexical, evaluation: mergeLLMFeedback(lexical, { issues: [], tips: [] }) };
+}
+
+/**
+ * LLM refinement of an attempt (feature 116): the exact SYSTEM_EVALUATE
+ * context the composed evaluation has always sent (target, user text,
+ * question, level). REJECTS when every candidate fails, so callers can tell
+ * "no refinement" (→ `refined: false`) from a successful one.
+ */
+export async function refineWithLLM(
+  candidates: Candidate[],
+  params: { target: string; userText: string; question: string; level: Level },
+): Promise<{ feedback: LLMFeedback; provider: string }> {
+  const userPrompt = `TARGET: "${params.target}"\nUSER SAID: "${params.userText}"\nQUESTION: "${params.question}"\nLEVEL: ${params.level}`;
+  const options: CompleteOptions = { temperature: 0.3, maxTokens: 4096 };
+  const res = await chatJSON<LLMFeedback>(candidates, { system: SYSTEM_EVALUATE, user: userPrompt, options });
+  const d = res.data;
+  return {
+    provider: res.provider,
+    feedback: {
+      issues: Array.isArray(d.issues) ? d.issues.slice(0, 4) : [],
+      tips: Array.isArray(d.tips) ? d.tips.slice(0, 3) : [],
+      naturalness: typeof d.naturalness === "number" ? d.naturalness : undefined,
+    },
+  };
+}
+
+/**
+ * Composed evaluation (feature 001 contract, still serving `POST /api/evaluate`
+ * and its tests): deterministic match refined by the LLM, falling back to the
+ * pure deterministic evaluation when every provider fails (feature 116 split —
+ * `POST /api/attempt` uses the pieces directly so it can answer without the LLM).
+ */
+export async function evaluateFragment(
+  candidates: Candidate[],
+  params: { target: string; userText: string; question: string; level: Level },
+): Promise<{ evaluation: Evaluation; provider: string; feedback: LLMFeedback }> {
+  const { lexical } = evaluateFragmentDeterministic(params);
+  let feedback: LLMFeedback = { issues: [], tips: [], naturalness: lexical.score };
+  let provider = "none";
+  try {
+    const refined = await refineWithLLM(candidates, params);
+    provider = refined.provider;
+    feedback = { ...refined.feedback, naturalness: refined.feedback.naturalness ?? lexical.score };
+  } catch {
+    // keep deterministic feedback when LLM is unavailable
+  }
+  return { evaluation: mergeLLMFeedback(lexical, feedback), provider, feedback };
 }
