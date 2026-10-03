@@ -40,16 +40,31 @@
 - `src/lib/learner.ts` — resumen del aprendiz, métricas de progreso, motor de "next step".
 - `src/lib/storage.ts` — carga/guardado de `data/profile.json` y `data/sessions/*.json`.
 - `src/lib/whisper.ts` — subprocess `whisper-cli` para transcripción local (modos texto plano y word-timestamps JSON).
-- `public/` — frontend vanilla SPA: `index.html` (shell cockpit: sidebar + top bar + stage), `styles.css` (design system), `app.js` (router SPA), `ui/` (componentes), `speech/` (browser-stt, browser-tts, recorder-wave, stt-pick).
+- `src/lib/refinement.ts` — refino LLM en background tras la respuesta rápida de `/api/attempt` (registro en memoria TTL 60 s / cap 100) — feature `116`.
+- `src/lib/align.ts` — alineación determinista de palabras vs. fragmento (LCS ponderada → green/amber/red, extras, contracciones).
+- `src/lib/cu2.ts` — máquina de estados pura de la práctica karaoke + líneas habladas (CU2).
+- `src/lib/continuous.ts` — preguntas continuas Q1→Q∞ y dificultad adaptativa (`computeAdaptive` con clamps).
+- `src/lib/session-start.ts` / `src/lib/session-payload.ts` — arranque de sesión y contrato de `GET /api/session/:id`.
+- `src/lib/settings.ts` — settings del perfil: tipos, defaults y merge con precedencia snapshot > local > perfil > defaults.
+- `src/lib/prosody.ts` — partidor de cláusulas servidor (pausas 220/400/650 ms, contrato `pausesMs[i]`).
+- `src/lib/tts-cache.ts` — caché LRU de síntesis en `data/tmp/tts-cache/` (100/50 MB, TTL 24 h).
+- `src/lib/piper.ts` / `src/lib/edge-tts.ts` — motores TTS (local subprocess / online).
+- `src/lib/lookup.ts` — pipeline híbrido de diccionario del popover léxico (`GET /api/lookup`).
+- `src/lib/extract.ts` — extracción de texto de PDF/DOCX/TXT/MD para el contexto de sesión.
+- `public/` — frontend vanilla SPA: `index.html` (shell cockpit), `styles.css` (design system), `app.js` (router SPA), `ui/` (componentes), `speech/` (browser-stt, browser-tts, ptt, chime, prosody, level, recorder-wave, stt-pick).
+- `models/` — modelos locales: `ggml-small.en.bin` (whisper.cpp) y voces Piper.
+- `spec/use-cases/` — CU1 (configuración), CU2 (práctica), CU3 (historial); `spec/design/` — design-system, screens, ui-flow.
 - `scripts/setup.sh` — instalador de whisper.cpp, Piper y edge-tts.
 
 ## Comandos
 
 - `npm install` — instala dependencias
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
-- `npm start` — arranca el servidor local
-- `npm run check` — comprobación de sintaxis (type stripping) + health check
-- `npm test` — suite con `node:test`
+- `npm start` — arranca el servidor local (watch) en http://localhost:3000
+- `npm run check` — comprobación de sintaxis de cada archivo TS/JS (type stripping, sin build)
+- `npm test` — suite con `node:test` (`tests/*.test.ts`, 34 archivos)
+
+No hay lint ni formatter configurados: el gate de calidad es `npm run check` + `npm test`.
 
 ## Modelo de datos / dominio
 
@@ -60,6 +75,7 @@
   - `status` permite sesiones continuas reanudables (CU3 / `109`).
 - `practiceSet` (generación): `{ question, context, fragments: [{ id, stage, text }] }` (el stage se generaliza: en karaoke corresponde al índice de fragmento).
 - `feedback` (evaluación): `{ score, verdict, matched, missing[], extra[], issues: [{ category, message, fix }], tips[], next }`
+- `data/tmp/` — audio temporal, caché de TTS (`tts-cache/`) y archivos de contexto (`context/`); ignorada por git, nunca se commitea.
 
 ## Convenciones
 
