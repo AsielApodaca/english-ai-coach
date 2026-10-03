@@ -39,19 +39,29 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - `scripts/setup.sh` — instalador de whisper.cpp, Piper y edge-tts.
 
 ## Convenciones
+El código se escribe para que un agente IA lo lea completo sin contexto prevo: nada depende de "estar en la rama correcta" ni de un historial de conversación para entenderlo.
 - camelCase para variables y funciones; UpperCamelCase para tipos.
+- Módulos pequeños (<~300 líneas) con una responsabilidad por archivo; si un archivo crece, se parte por dominio, no por tipo de código.
 - Funciones puras en `lib/`; efectos (I/O, red) acotados a una capa fina.
-- El código escrito debe llevar documentación (comentarios/JSDoc en funciones no triviales); la documentación debe ser en inglés.
+- Contratos explícitos al inicio del archivo: firmas con tipos, `interface`s de datos y el shape JSON de entrada/salida de `/api/*`. Nada de inferencia opaca ni `any` sin justificarlo.
+- Comportamiento determinista: mismas entradas → mismas salidas; sin estado oculto entre módulos ni side effects en import time.
+- Nombres que expliquen el "porqué" (`evaluateFragmentDeterministic`, no `handleThing2`); constantes con nombre para magic numbers (umbrales, timeouts, límites).
+- Tests en `tests/*.test.ts` junto a la lógica que cubren: son la especificación ejecutable que un agente lee antes de tocar código; una feature nueva llega con su test.
+- El código escrito debe llevar documentación (comentarios/JSDoc en funciones no triviales): qué hace, parámetros y casos límite, en inglés. El "porqué" de una decisión va en el JSDoc o en `spec/`, no solo en el commit.
 - Toda salida de LLM se asume texto ≥ JSON; extraer JSON robusto (tolera code fences y ruido) antes de usar.
 - Errores de red LLM: envolver en `ProviderError` y dejar que la cadena de fallback pruebe el siguiente proveedor.
 - La llave de Cloudflare se auto-descubre desde `~/.local/share/opencode/auth.json` (fallback: `CLOUDFLARE_API_TOKEN` env) y la de Gemini desde `GEMINI_API_KEY`. Nunca hardcodear llaves.
 - Peticiones a `/api/*` con body JSON; errores como `{ error: string }` con status HTTP coherente.
+- Si un cambio toca un contrato (`/api/*`, shape de sesión, settings), actualiza `spec/` en el mismo cambio.
 - UI: la región central de la pantalla (toda la vista sin sidebar ni top bar) se llama **`main-area`**; es el contenedor de las vistas de CU (config y práctica). Sinónimo obsoleto: "central stage". Ver `spec/design/screens.md`.
 ## No hagas
 - No subir `.env*` ni `data/` al repositorio (secreto + datos personales de práctica). Están en `.gitignore`.
 - No instalar dependencias npm sin avisar. Objetivo: mínimo absoluto (Express únicamente).
 - No almacenar audio del usuario en el repositorio; usar `data/tmp/` (ignorada).
 - No usar `any` en TypeScript sin justificarlo.
+- No escribir metaprogramming, generación dinámica de código, monkey-patching ni abstracciones "clever"; prefiere código literal aunque sea más largo — es legible para una IA y para una persona.
+- No dejar efectos ocultos (estado global, side effects en import time, mutación compartida): un agente que lea un módulo debe poder razonar sobre él aislado.
+- No cambiar un contrato sin su documentación: si se modifica `/api/*`, el shape de sesión o settings y `spec/` no se actualiza, el cambio está incompleto.
 - No llamar al LLM sin incluir el bloque "Learner memory" disponible en el momento (memoria del aprendiz).
 - Después de un cambio importante en el sistema, evaluar si es necesario actualizar el `README.md` y actualizarlo si aplica.
 
