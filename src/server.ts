@@ -7,8 +7,8 @@ import { dirname } from "node:path";
 
 import { buildProviders, completeWithFallback, providerById, providerStatus, warmProviders, warmupEnabled } from "./lib/providers/index.ts";
 import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
-import { CATEGORY_STAGES, type Candidate, type Category, type Level } from "./lib/practice.ts";
-import { evaluateFragment, generatePracticeSet, isBlankTranscript, isFiller, normalize, tokenize } from "./lib/practice.ts";
+import { CATEGORY_STAGES, type Candidate, type Category, type Evaluation, type Level } from "./lib/practice.ts";
+import { evaluateFragment, evaluateFragmentDeterministic, generatePracticeSet, isBlankTranscript, isFiller, normalize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
 import { checkWhisper, transcribeWav, transcribeWords, downloadModel, type WhisperWord } from "./lib/whisper.ts";
 import { alignWords, alignTextWords } from "./lib/align.ts";
@@ -25,6 +25,12 @@ import {
   validateLookupText,
 } from "./lib/lookup.ts";
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
+import {
+  createRefinementRegistry,
+  DEFAULT_REFINE_TIMEOUT_MS,
+  handleAttemptFeedbackRequest,
+  refineAttempt,
+} from "./lib/refinement.ts";
 import { buildSessionPayload } from "./lib/session-payload.ts";
 import { applyProfileSettings, parseProfileSettings } from "./lib/settings.ts";
 import { checkPiper, isVoiceReady, synthesizeSegments as piperSynthesizeSegments, DEFAULT_VOICE, SUPPORTED_VOICES } from "./lib/piper.ts";
@@ -39,7 +45,6 @@ import {
   groupSessionsByRecency,
   isLevel,
   type AttemptWord,
-  type FeedbackIssue,
   type Profile,
   type SessionEval,
   type SessionV2,
@@ -635,28 +640,61 @@ app.get("/api/whisper/status", (_req, res) => {
   res.json(checkWhisper(WHISPER_MODEL, rootDir));
 });
 
+// ---------------------------------------------------------------------------
+// Attempt refinement (feature 116): background LLM pass + long-poll registry
+// ---------------------------------------------------------------------------
+
 /**
- * Collect words the LLM evaluator flagged so the aligner can downgrade them to
- * amber: quoted words in any issue's fix/message, plus words mentioned in
- * pronunciation issues that are actually part of the target fragment.
+ * In-memory registry of the background refinements launched by
+ * `POST /api/attempt`. TTL-purged on access (60 s) and capped, so a long
+ * practice session can never grow it without bound; entries live only in
+ * memory — restarting the server makes pending ids 404 (the client keeps its
+ * deterministic paint).
  */
-function forcedAmberWordsFromIssues(issues: FeedbackIssue[], target: string): string[] {
-  const targetTokens = new Set(tokenize(target));
-  const words = new Set<string>();
-  for (const issue of issues) {
-    const texts = [issue.fix, issue.message].filter((t): t is string => typeof t === "string" && t.length > 0);
-    for (const t of texts) {
-      for (const quoted of t.match(/"[^"]+"/g) ?? []) {
-        for (const w of tokenize(quoted)) words.add(w);
-      }
-      if (issue.category === "pronunciation") {
-        for (const w of tokenize(t)) {
-          if (targetTokens.has(w)) words.add(w);
-        }
-      }
-    }
+const refinements = createRefinementRegistry();
+
+/** Server long-poll cap for `GET /api/attempt/:id/feedback` (env override). */
+const REFINE_TIMEOUT_MS = Number(env.REFINE_TIMEOUT_MS ?? DEFAULT_REFINE_TIMEOUT_MS) || DEFAULT_REFINE_TIMEOUT_MS;
+
+/**
+ * Patch `question.eval` of a FULL attempt with the refined evaluation (116).
+ *
+ * The fast response persists the DURABLE deterministic eval first, so the
+ * review panel has something even when the LLM is down; when the refinement
+ * lands, the LLM-owned fields move to their pre-116 values (combined score,
+ * verdict, tips, derived+LLM issues). `next` keeps the align-based pass
+ * decision written by `persistAttempt` — the pass/fail flow never re-reads it
+ * and must stay byte-identical to the synchronous behaviour.
+ *
+ * The profile is recomputed right after the patch (same aggregation as
+ * `persistAttempt`): `computeStats` reads `q.eval.issues` for `weakErrors`
+ * (learner.ts), so without it the learner memory would keep the fast
+ * evaluation's derived-only issues until some future attempt persisted.
+ *
+ * Wrapped in try/catch (here and again in `refineAttempt`): persistence must
+ * never break the response nor the long-poll awaiting the refinement.
+ */
+function patchFullEval(sessionId: string | undefined, isFull: boolean, merged: Evaluation): void {
+  if (!isFull || !sessionId) return;
+  try {
+    const session = storage.loadSession(sessionId);
+    if (!session) return;
+    const question = session.questions.at(-1);
+    if (!question?.eval) return;
+    question.eval = {
+      ...question.eval,
+      score: merged.score,
+      verdict: merged.verdict,
+      issues: merged.issues,
+      tips: merged.tips,
+    };
+    storage.saveSession(session);
+    const profile = storage.loadProfile();
+    updateProfile(profile, storage.loadAllSessions());
+    storage.saveProfile(profile);
+  } catch {
+    // v1 session file or disk error: the refinement itself must still land.
   }
-  return [...words];
 }
 
 /**
@@ -672,6 +710,15 @@ function forcedAmberWordsFromIssues(issues: FeedbackIssue[], target: string): st
  *
  * Response adds `coachLine`: the spoken feedback the coach reads after the
  * attempt (built from the same score/missing/tips the view renders).
+ *
+ * Feature 116 (fast paint): the LLM does NOT gate this response anymore. The
+ * evaluation is deterministic (lexical match + derived issues — no LLM call),
+ * `score`/`passed` keep their exact pre-116 values (they were always
+ * `align.score`), and `provider` reports `"none"` because no LLM ran yet. The
+ * LLM refinement (issues/tips/verdict/coachLine + forced-amber re-alignment)
+ * launches BEFORE the response goes out, is registered under the returned
+ * `attemptId` and is served by `GET /api/attempt/:id/feedback`.
+ * A blank transcript answers exactly as before: no attemptId, no refinement.
  */
 app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
   const buf = req.body as Buffer | undefined;
@@ -749,19 +796,20 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
   }
 
   try {
-    const { evaluation } = await evaluateFragment(candidates(), {
-      target,
-      userText: text,
-      question,
-      level,
-    });
-    const forcedAmberWords = evaluation.provider === "none" ? [] : forcedAmberWordsFromIssues(evaluation.issues, target);
-    const align = words.length > 0 ? alignWords(words, target, { forcedAmberWords }) : alignTextWords(text, target);
+    // Feature 116: no LLM on the critical path — lexical match + derived
+    // issues + align answer immediately (score/passed unchanged), and the
+    // LLM refinement is launched below in background.
+    const { evaluation } = evaluateFragmentDeterministic({ target, userText: text });
+    // No LLM issues yet → no forced amber on the fast paint; the refinement
+    // re-aligns with them (see `refineAttempt`).
+    const align = words.length > 0 ? alignWords(words, target) : alignTextWords(text, target);
     const passed = align.score >= passThreshold;
     // Real words said outside the fragment (natural fillers excluded): they
     // lower align.score and are what the coach asks the user to drop. Display
     // form is normalized so "chocolate," reads as "chocolate".
     const addedWords = [...new Set(align.extra.map((w) => normalize(w)).filter((w) => w.length > 0 && !isFiller(w)))];
+    // Durability first: the deterministic evaluation is persisted before we
+    // respond, exactly like the pre-116 flow.
     persistAttempt({
       evaluation,
       sessionId,
@@ -773,6 +821,24 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       full: isFull,
       passed,
     });
+
+    // Launch the LLM refinement BEFORE responding: it registers the promise
+    // for `GET /api/attempt/:id/feedback` and patches question.eval of a full
+    // attempt when it lands. The noop catch keeps an unpolled rejection (LLM
+    // down, client gone) from becoming an unhandled rejection.
+    const attemptId = randomUUID();
+    const pendingRefinement = refineAttempt(candidates(), {
+      target,
+      userText: text,
+      question,
+      level,
+      spokenWords: words,
+      passed,
+      onRefined: (merged) => patchFullEval(sessionId, isFull, merged),
+    });
+    pendingRefinement.catch(() => {});
+    refinements.set(attemptId, pendingRefinement);
+
     res.json({
       text,
       words: align.words,
@@ -785,7 +851,9 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
       verdict: evaluation.verdict,
       next: evaluation.next,
       tips: evaluation.tips,
-      provider: evaluation.provider,
+      // No LLM ran yet: the refinement (and its provider) arrives via
+      // GET /api/attempt/:id/feedback.
+      provider: "none",
       durationMs,
       coachLine: buildFeedbackText({
         score: align.score,
@@ -794,10 +862,26 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
         extra: addedWords,
         tips: evaluation.tips,
       }),
+      attemptId,
     });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
+});
+
+/**
+ * GET /api/attempt/:id/feedback — long-poll for the LLM refinement (116).
+ *
+ * Waits on the registered promise (bounded by REFINE_TIMEOUT_MS, default 20 s):
+ *   resolved → 200 { refined: true, issues, tips, verdict, score, next,
+ *                    coachLine, words (re-aligned with forced amber), provider }
+ *   LLM down or timeout → 200 { refined: false } — the client keeps the
+ *   deterministic state it already painted and speaks the deterministic line.
+ *   Unknown/expired id → 404 { error }.
+ */
+app.get("/api/attempt/:id/feedback", async (req, res) => {
+  const { status, json } = await handleAttemptFeedbackRequest(refinements, req.params.id, REFINE_TIMEOUT_MS);
+  res.status(status).json(json);
 });
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { countExtraWords, isFiller, normalize, penalizedScore, tokenize } from "./practice.ts";
+import type { FeedbackIssue } from "./storage.ts";
 import type { WhisperWord } from "./whisper.ts";
 
 /** One colored word of the karaoke line (target words + trailing extras). */
@@ -141,6 +142,37 @@ function alignTokens(
     }
   }
   return { targetMatch, spokenMatch, targetQuality };
+}
+
+/**
+ * Collect words the LLM evaluator flagged so the aligner can downgrade them to
+ * amber: quoted words in any issue's fix/message, plus words mentioned in
+ * pronunciation issues that are actually part of the target fragment.
+ *
+ * Moved out of `server.ts` by feature 116 so the forced-amber merge of a
+ * refinement is unit-testable next to `alignWords`.
+ *
+ * @param issues evaluator issues (derived + LLM, when the LLM ran)
+ * @param target the fragment the attempt was scored against
+ * @returns normalized candidate words for `alignWords({ forcedAmberWords })`
+ */
+export function forcedAmberWordsFromIssues(issues: FeedbackIssue[], target: string): string[] {
+  const targetTokens = new Set(tokenize(target));
+  const words = new Set<string>();
+  for (const issue of issues) {
+    const texts = [issue.fix, issue.message].filter((t): t is string => typeof t === "string" && t.length > 0);
+    for (const t of texts) {
+      for (const quoted of t.match(/"[^"]+"/g) ?? []) {
+        for (const w of tokenize(quoted)) words.add(w);
+      }
+      if (issue.category === "pronunciation") {
+        for (const w of tokenize(t)) {
+          if (targetTokens.has(w)) words.add(w);
+        }
+      }
+    }
+  }
+  return [...words];
 }
 
 /**

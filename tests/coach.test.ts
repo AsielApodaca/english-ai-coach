@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chatJSON, completeWithFallback, ProviderError } from "../src/lib/providers/index.ts";
 import type { Candidate } from "../src/lib/practice.ts";
-import { generatePracticeSet, evaluateFragment } from "../src/lib/practice.ts";
+import { generatePracticeSet, evaluateFragment, evaluateFragmentDeterministic, mergeLLMFeedback, type LLMFeedback, type WordMatch } from "../src/lib/practice.ts";
 
 function fake(id: string, reply: string | ((messages: unknown[]) => string)): Candidate {
   return {
@@ -148,4 +148,65 @@ test("evaluateFragment: invented words are reported as an issue and lower the sc
   assert.equal(evaluation.score, 40);
   assert.equal(evaluation.verdict, "retry");
   assert.equal(evaluation.next, false);
+});
+
+// ---------------------------------------------------------------------------
+// Feature 116 — the split: LLM-free evaluation + the merge it feeds
+// ---------------------------------------------------------------------------
+
+test("evaluateFragmentDeterministic: lexical score and derived issues, no LLM involved", () => {
+  const perfect = evaluateFragmentDeterministic({
+    target: "I handled the situation well.",
+    userText: "I handled the situation well.",
+  });
+  assert.equal(perfect.evaluation.score, 100);
+  assert.equal(perfect.evaluation.verdict, "great");
+  assert.equal(perfect.evaluation.next, true);
+  assert.deepEqual(perfect.evaluation.issues, [], "a clean repetition derives no issues");
+
+  const imperfect = evaluateFragmentDeterministic({
+    target: "I handled the situation well.",
+    userText: "I like chocolate, I handled the situation.", // extra words + missing "well"
+  });
+  // Derived issues (no quotes for added words) come straight from the match.
+  const added = imperfect.evaluation.issues.find((i) => i.category === "other");
+  assert.ok(added && added.message.includes("like") && added.message.includes("chocolate"));
+  const missing = imperfect.evaluation.issues.find((i) => i.category === "pronunciation");
+  assert.ok(missing && missing.message.includes("well"));
+  assert.ok(imperfect.evaluation.score < 100);
+});
+
+test("evaluateFragmentDeterministic: equals evaluateFragment when every provider is down", async () => {
+  const params = { target: "I handled the situation well.", userText: "I handled the situation." };
+  const { evaluation } = await evaluateFragment([failing("amber"), failing("gemini")], { ...params, question: "q", level: "B2" });
+  assert.deepEqual(evaluateFragmentDeterministic(params).evaluation, evaluation);
+});
+
+test("mergeLLMFeedback: naturalness blends 0.75·lexical + 0.25·naturalness", () => {
+  const lexical: WordMatch = { score: 100, matched: ["a"], missing: [], extra: [] };
+  const merged = mergeLLMFeedback(lexical, { issues: [], tips: ["Slow down"], naturalness: 60 } satisfies LLMFeedback);
+  assert.equal(merged.score, 90);
+  assert.equal(merged.verdict, "great");
+  assert.equal(merged.next, true);
+});
+
+test("mergeLLMFeedback: missing naturalness falls back to the lexical score", () => {
+  const lexical: WordMatch = { score: 40, matched: ["a"], missing: ["b"], extra: [] };
+  const merged = mergeLLMFeedback(lexical, { issues: [], tips: [] });
+  assert.equal(merged.score, 40, "a dead LLM scores exactly like the fast path");
+  assert.equal(merged.verdict, "retry");
+  assert.equal(merged.next, false);
+});
+
+test("mergeLLMFeedback: derived issues first, then the LLM's, capped at 5", () => {
+  const lexical: WordMatch = { score: 40, matched: ["a"], missing: ["b"], extra: ["c"] };
+  const llmIssues = [1, 2, 3, 4, 5, 6].map((n) => ({ category: "other" as const, message: `issue ${n}`, fix: `fix ${n}` }));
+  const merged = mergeLLMFeedback(lexical, { issues: llmIssues, tips: [], naturalness: 40 });
+  assert.equal(merged.issues.length, 5);
+  // Derived: the added word (no quotes → never forced amber) and the missing one.
+  assert.match(merged.issues[0].message, /added words.*c/i);
+  assert.match(merged.issues[1].message, /Missing word/);
+  assert.equal(merged.issues[2].message, "issue 1");
+  assert.deepEqual(merged.missing, ["b"]);
+  assert.deepEqual(merged.extra, ["c"]);
 });
