@@ -343,9 +343,12 @@ test("handleExtractRequest: happy path extracts, persists and returns metadata",
     data: Buffer.from("hello context", "utf8").toString("base64"),
   });
   assert.equal(res.status, 200);
-  assert.equal(res.json.file.name, "notes.txt");
-  assert.equal(res.json.file.kind, "txt");
-  assert.equal(res.json.file.textRef, "txt-1.txt");
+  // Narrow the `Record<string, unknown>` body to the success shape documented
+  // in handleExtractRequest (file metadata lives under `file`).
+  const file = res.json.file as { name: string; kind: string; textRef: string };
+  assert.equal(file.name, "notes.txt");
+  assert.equal(file.kind, "txt");
+  assert.equal(file.textRef, "txt-1.txt");
   assert.equal(res.json.text, "hello context");
   assert.equal(res.json.chars, 13);
   assert.equal(res.json.truncated, false);

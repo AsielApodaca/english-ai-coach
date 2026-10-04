@@ -396,7 +396,7 @@ export function alignTextWords(spokenText: string, target: string): TextAlignRes
   // invariant as alignWords: never missing AND extra at once). Track spoken
   // tokens by INDEX (not by normalized value) so genuine duplicates of an
   // already-consumed word still surface as extra.
-  const reconciled = new Array<number>(targetNorms.length).fill(false);
+  const reconciled = new Array<boolean>(targetNorms.length).fill(false);
   const usedSpoken = new Set<number>(matchedSpoken);
   for (let si = 0; si < spokenNorms.length; si++) {
     if (usedSpoken.has(si)) continue;

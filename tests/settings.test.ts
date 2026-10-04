@@ -172,7 +172,7 @@ test("settings: mergeSettings precedence snapshot > local > profile > defaults",
 test("settings: mergeSettings deep-merges adaptive", () => {
   const merged = mergeSettings({
     snapshot: { version: 1, overrides: { adaptive: { enabled: false } } },
-    profile: { adaptive: { up: 85, down: 60 } },
+    profile: { adaptive: { enabled: true, up: 85, down: 60 } },
   });
   assert.equal(merged.adaptive.enabled, false);
   assert.equal(merged.adaptive.up, 85);
