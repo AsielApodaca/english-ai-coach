@@ -13,121 +13,32 @@
 // prompt, focusPhonemes) live in `profile.json`. The server reads the profile
 // to build the session snapshot at creation time (103); the frontend keeps the
 // device prefs in localStorage.
+//
+// Feature 117 split: the enums/types/defaults live in `settings-types.ts`
+// (re-exported below), this file holds the guards, the parsers, the merge and
+// the snapshot/profile writers.
 // ---------------------------------------------------------------------------
 
 import { isLevel, type Profile, type ProfileSettings, type SettingsSnapshot } from "./storage.ts";
+import {
+  DEFAULT_SETTINGS,
+  FILLER_LEVELS,
+  MAX_VOLUME,
+  MIN_VOLUME,
+  PROVIDER_CHOICES,
+  RIGOR_LEVELS,
+  RIGOR_THRESHOLDS,
+  STT_CHOICES,
+  TEMPO_CHOICES,
+  WHISPER_MODELS,
+  type AdaptiveSettings,
+  type AppSettings,
+  type FillerLevel,
+  type RigorLevel,
+  type SttChoice,
+} from "./settings-types.ts";
 
-// ---------------------------------------------------------------------------
-// Enums / choices
-// ---------------------------------------------------------------------------
-
-export const RIGOR_LEVELS = ["Flexible", "Balanceado", "Estricto"] as const;
-export type RigorLevel = (typeof RIGOR_LEVELS)[number];
-
-/** F1 pass threshold per rigor level (spec 108: Flexible >65 / Balanceado >82 / Estricto >93). */
-export const RIGOR_THRESHOLDS: Record<RigorLevel, number> = {
-  Flexible: 65,
-  Balanceado: 82,
-  Estricto: 93,
-};
-
-export const FILLER_LEVELS = ["Relajado", "Moderado", "Sensible", "Tolerancia Cero"] as const;
-export type FillerLevel = (typeof FILLER_LEVELS)[number];
-
-export const STT_CHOICES = ["auto", "whisper", "browser"] as const;
-export type SttChoice = (typeof STT_CHOICES)[number];
-
-export const TEMPO_CHOICES = [0.75, 1, 1.25] as const;
-
-export const PROVIDER_CHOICES = ["auto", "zen", "gemini", "cloudflare", "ollama"] as const;
-
-/** Whisper models supported by whisper.cpp (mirrors src/lib/whisper.ts). */
-export const WHISPER_MODELS = [
-  "tiny.en",
-  "base.en",
-  "small.en",
-  "medium.en",
-  "tiny",
-  "base",
-  "small",
-  "medium",
-] as const;
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export interface AdaptiveSettings {
-  enabled: boolean;
-  /** Average of the last 3 scores that triggers a step up (default 90). */
-  up: number;
-  /** Average below which the difficulty steps down (default 65). */
-  down: number;
-}
-
-/** The full settings surface (device prefs + training + persona). */
-export interface AppSettings {
-  mic: string;
-  volume: number;
-  showIpa: boolean;
-  autoAdvance: boolean;
-  liveHighlight: boolean;
-  stt: SttChoice;
-  rigor: RigorLevel;
-  fillers: FillerLevel;
-  tempo: number;
-  adaptive: AdaptiveSettings;
-  provider: string;
-  whisperModel: string;
-  voice: string;
-  offlineMode: boolean;
-  personaName: string;
-  targetLevel: string;
-  bio: string;
-  prompt: string;
-  focusPhonemes: string[];
-}
-
-export const DEFAULT_SETTINGS: AppSettings = {
-  mic: "",
-  volume: 100,
-  showIpa: true,
-  autoAdvance: false,
-  liveHighlight: true,
-  stt: "auto",
-  rigor: "Balanceado",
-  fillers: "Moderado",
-  tempo: 1,
-  adaptive: { enabled: true, up: 90, down: 65 },
-  provider: "auto",
-  whisperModel: "small.en",
-  voice: "auto",
-  offlineMode: false,
-  personaName: "",
-  targetLevel: "B2",
-  bio: "",
-  prompt: "",
-  focusPhonemes: [],
-};
-
-/** Lowest coach volume (percent) the UI allows — a silent coach is useless. */
-export const MIN_VOLUME = 10;
-
-/** Highest coach volume (percent). */
-export const MAX_VOLUME = 100;
-
-/** localStorage keys for the device prefs (documented in spec 108). */
-export const LOCAL_SETTINGS_KEYS: Record<string, string> = {
-  mic: "engcoach.mic",
-  volume: "engcoach.volume",
-  showIpa: "engcoach.showIpa",
-  autoAdvance: "engcoach.autoAdvance",
-  liveHighlight: "engcoach.liveHighlight",
-  stt: "engcoach.stt",
-  tempo: "engcoach.tempo",
-  whisperModel: "engcoach.whisperModel",
-  voice: "engcoach.voice",
-};
+export * from "./settings-types.ts";
 
 // ---------------------------------------------------------------------------
 // Guards
