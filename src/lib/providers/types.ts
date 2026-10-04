@@ -19,6 +19,27 @@ export interface ProviderInfo {
 
 export type ProviderId = "gemini" | "cloudflare" | "ollama" | "ollama-fast" | "mock";
 
+/**
+ * Every known provider id (feature 117), the runtime list behind
+ * `isProviderId`. The union above is the compile-time contract; this array is
+ * its runtime mirror typed as `readonly ProviderId[]`, so a typo here fails
+ * `tsc`, and the guard itself is pinned by `tests/api-validation.test.ts`.
+ */
+export const PROVIDER_IDS: readonly ProviderId[] = ["gemini", "cloudflare", "ollama", "ollama-fast", "mock"];
+
+/**
+ * Type guard for a client/env-supplied provider id (feature 117).
+ *
+ * `/api/practice/new`, `/api/evaluate` and `/api/chat` take an optional
+ * `provider` from the JSON body and `LLM_PROVIDER` from the env — both are
+ * untrusted strings. Anything unknown (typo, future model name, non-string)
+ * returns false and the caller falls back to the documented default primary
+ * instead of casting it to `ProviderId` blindly.
+ */
+export function isProviderId(v: unknown): v is ProviderId {
+  return typeof v === "string" && (PROVIDER_IDS as readonly string[]).includes(v);
+}
+
 export interface Provider {
   readonly id: ProviderId;
   readonly name: string;

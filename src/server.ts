@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 import { buildProviders, completeWithFallback, providerById, providerStatus, warmProviders, warmupEnabled } from "./lib/providers/index.ts";
-import { type ChatMessage, type ProviderId } from "./lib/providers/types.ts";
+import { PROVIDER_IDS, type ChatMessage, type ProviderId, isProviderId } from "./lib/providers/types.ts";
 import { CATEGORY_STAGES, type Candidate, type Category, type Evaluation, type Level } from "./lib/practice.ts";
 import { evaluateFragment, evaluateFragmentDeterministic, generatePracticeSet, isBlankTranscript, isFiller, normalize } from "./lib/practice.ts";
 import { buildLearnerMemory, buildNextStep, computeStats, updateProfile } from "./lib/learner.ts";
@@ -44,18 +44,30 @@ import {
   DEFAULT_SETTINGS_SNAPSHOT,
   fallbackTitle,
   groupSessionsByRecency,
+  isAttemptWords,
   isLevel,
+  isValidSessionId,
+  isSessionEval,
   type AttemptWord,
   type Profile,
-  type SessionEval,
   type SessionV2,
 } from "./lib/storage.ts";
+import { isWavBuffer } from "./lib/wav.ts";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = process.env as NodeJS.ProcessEnv;
 
 const providers = buildProviders(env as never);
-const primaryProviderId = env.LLM_PROVIDER ?? (env.MOCK_LLM ? "mock" : "cloudflare");
+/**
+ * Primary provider: `LLM_PROVIDER` when it names a real provider, otherwise
+ * the mock (MOCK_LLM=1) or the documented default `cloudflare` (feature 117 —
+ * a bogus env value falls back instead of poisoning the chain).
+ */
+const primaryProviderId: ProviderId = isProviderId(env.LLM_PROVIDER)
+  ? env.LLM_PROVIDER
+  : env.MOCK_LLM
+    ? "mock"
+    : "cloudflare";
 
 /**
  * Single in-flight warm batch, shared by server boot and `POST /api/warmup`:
@@ -98,9 +110,16 @@ const MOCK_LLM = Boolean(env.MOCK_LLM);
 const storage = createStorage(rootDir);
 const WHISPER_MODEL = env.WHISPER_MODEL ?? "small.en";
 
-/** Ordered LLM candidates, primary first for fallback. */
+/**
+ * Ordered LLM candidates, primary first for fallback (feature 117).
+ *
+ * `providerRequested` comes from the client body and is untrusted: an unknown
+ * id (or a non-string) falls back to `primaryProviderId` — the old code cast
+ * it `as ProviderId` blindly, which made `providerById` miss and reordered the
+ * chain to the registry default.
+ */
 function candidates(providerRequested?: string): Candidate[] {
-  const primary = (providerRequested ?? primaryProviderId) as ProviderId;
+  const primary: ProviderId = isProviderId(providerRequested) ? providerRequested : primaryProviderId;
   const viaId = providerById(providers, primary);
   // Mock LLM (MOCK_LLM=1) always leads the chain so every practice call
   // short-circuits instantly, regardless of any requested provider.
@@ -125,6 +144,19 @@ const OFFLINE_MODE = env.OFFLINE_MODE === "1" || env.OFFLINE_MODE === "true";
 
 function isCategory(v: unknown): v is Category {
   return typeof v === "string" && v in CATEGORY_STAGES;
+}
+
+/**
+ * Validate an optional client-supplied session/fragment id (feature 117).
+ *
+ * Absent (undefined/null/"") is valid — it only means "do not persist".
+ * Anything else must be a string of the /^[a-zA-Z0-9-]+$/ family, the exact
+ * criterion `storage.sessionFile()` enforces: a path-escaping id would make
+ * `loadSession`/`saveSession` throw (500) instead of failing validation (400).
+ */
+function isValidOptionalId(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return true;
+  return typeof v === "string" && isValidSessionId(v);
 }
 
 /**
@@ -184,8 +216,9 @@ app.post("/api/warmup", async (_req, res) => {
  *
  * Body: { category? = "interviews", level? = "B2", provider?, personalized? = false }
  *   category — key of CATEGORY_STAGES; level — A1..C2; provider — id of the LLM
- *   to prefer (falls through the fallback chain when unknown); personalized —
- *   whether the learner memory may steer the set.
+ *   to prefer (feature 117: unknown ids fall back to the primary provider
+ *   instead of reordering the chain); personalized — whether the learner
+ *   memory may steer the set.
  * 200 → { set: PracticeSet, provider: ProviderId } — the chosen provider is
  *   echoed so the UI can show which model answered.
  * 400 { error } → invalid category or level (nothing is generated).
@@ -223,7 +256,9 @@ app.post("/api/practice/new", async (req, res) => {
  *   LLM id; sessionId + fragmentId — persistence coordinates (see below).
  * 200 → { evaluation: Evaluation, provider: ProviderId } (deterministic +
  *   LLM-merged evaluation: score, verdict, matched/missing/extra, issues, tips).
- * 400 { error } → missing/empty target|userText, or invalid level.
+ * 400 { error } → missing/empty target|userText, invalid level, or an
+ *   invalid sessionId/fragmentId (must be /[a-zA-Z0-9-]+/ — feature 117;
+ *   absent still simply disables persistence).
  * 502 { error } → every provider in the chain failed.
  * Side effect: when sessionId names an existing session AND fragmentId names a
  *   fragment of its LAST question, the attempt is appended to that fragment and
@@ -235,6 +270,8 @@ app.post("/api/evaluate", async (req, res) => {
     return res.status(400).json({ error: "target and userText are required." });
   }
   if (!isLevel(level)) return res.status(400).json({ error: "Invalid level." });
+  if (!isValidOptionalId(sessionId)) return res.status(400).json({ error: "Invalid sessionId." });
+  if (!isValidOptionalId(fragmentId)) return res.status(400).json({ error: "Invalid fragmentId." });
   try {
     const { evaluation, provider } = await evaluateFragment(candidates(providerReq), {
       target,
@@ -324,30 +361,51 @@ function persistAttempt(params: {
 }
 
 /**
+ * Whether `fullAnswer` matches the accepted answer shape (feature 117):
+ * a string (stored as-is), an object whose optional `text` is a string, or
+ * absent/null (empty answer). Numbers, arrays and `{ text: 42 }` are contract
+ * violations → the route answers 400 before persisting anything.
+ */
+function isValidFullAnswer(v: unknown): boolean {
+  if (v === undefined || v === null || typeof v === "string") return true;
+  if (typeof v !== "object" || Array.isArray(v)) return false;
+  const text = (v as Record<string, unknown>).text;
+  return text === undefined || typeof text === "string";
+}
+
+/**
  * POST /api/session/save — persist a completed practice session as ONE
  * question (legacy endpoint: the current frontend uses /api/session/start +
  * /api/session/checkpoint; this route serves curl/external clients).
  *
- * Body: { id?, category? = "free", level? = "B2", provider? = "unknown",
- *         question? = "", context? = "", fragments?, fullAnswer? }
- *   question/context feed topicPrompt + title; fragments is the optional list
- *   of { id?, text?, attempts?, passed? } scored chunks; fullAnswer (string or
- *   { text }) is stored as the question answer.
- * 200 → { id, nextStep } — id is the stored session id (the client id is used
- *   when it is a non-empty string, else a fresh randomUUID) and nextStep is
- *   the freshly recomputed learner suggestion persisted on the profile.
+ * Body: { id? (IGNORED), category? = "free", level? = "B2",
+ *         provider? = "unknown", question? = "", context? = "", fragments?,
+ *         fullAnswer? }
+ *   The client `id` is ignored — the stored id is ALWAYS a fresh randomUUID
+ *   generated server-side, so no client can overwrite an existing session
+ *   file (feature 117). question/context must be strings when present and
+ *   fullAnswer a string or { text?: string }.
+ * 200 → { id, nextStep } — id is the generated session id; nextStep is the
+ *   freshly recomputed learner suggestion persisted on the profile.
  * 200 → { id, nextStep: null, warning } when the next-step LLM call fails:
  *   the session is already saved, so the client keeps the id (spec 117 keeps
  *   this degraded success shape unchanged).
- * 500 { error } → the session could not be persisted (e.g. unsafe id or a
- *   legacy v1 file), reported as JSON by the global /api middleware (117).
+ * 400 { error } → question/context/fullAnswer with the wrong type.
+ * 500 { error } → the session could not be persisted (e.g. a legacy v1 file).
  */
 app.post("/api/session/save", async (req, res) => {
-  const { id, category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer } =
+  const { category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer } =
     req.body ?? {};
+  if (typeof question !== "string") return res.status(400).json({ error: "question must be a string." });
+  if (typeof context !== "string") return res.status(400).json({ error: "context must be a string." });
+  if (!isValidFullAnswer(fullAnswer)) {
+    return res.status(400).json({ error: "fullAnswer must be a string or { text?: string }." });
+  }
   const now = new Date().toISOString();
   const session: SessionV2 = {
-    id: typeof id === "string" && id ? id : randomUUID(),
+    // Feature 117: always server-generated — a client-supplied id could point
+    // at (and overwrite) any existing session file.
+    id: randomUUID(),
     status: "completed",
     createdAt: now,
     updatedAt: now,
@@ -387,7 +445,14 @@ app.post("/api/session/save", async (req, res) => {
       },
     ],
   };
-  storage.saveSession(session);
+  // Persistence inside its own try (feature 117): a legacy v1 file or a disk
+  // error must answer 500 { error } — never Express' HTML page, and never the
+  // 200 { warning } below (that one is only for the non-fatal next-step LLM).
+  try {
+    storage.saveSession(session);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
   try {
     const { nextStep } = await buildNextStep(candidates(), storage.loadProfile(), storage.loadAllSessions());
     const profile = storage.loadProfile();
@@ -480,10 +545,33 @@ app.get("/api/session/:id", (req, res) => {
  * the session completed (or leaves it active), stores the full-answer attempt
  * and its consolidated evaluation on the LAST question (continuous sessions
  * grow questions[], feature 107). Returns { id }.
+ *
+ * Validation (feature 117): `id` must be a generated session id
+ * (/^[a-zA-Z0-9-]+$/), `fullAttempt.words` (when present) an AttemptWord[]
+ * of { word, status, startMs?, endMs? } and `eval` (when present) a full
+ * SessionEval — anything else is rejected BEFORE anything is persisted.
+ * Errors: 400 { error } invalid id/words/eval shape; 404 { error } unknown
+ * session; 500 { error } the session file could not be written.
  */
 app.post("/api/session/checkpoint", (req, res) => {
   const { id, status, fullAttempt, eval: evalValue } = req.body ?? {};
-  if (typeof id !== "string" || !id) return res.status(400).json({ error: "id is required." });
+  if (typeof id !== "string" || !isValidSessionId(id)) {
+    return res.status(400).json({ error: "id is required and must be a session id (letters, digits, dashes)." });
+  }
+  if (fullAttempt !== undefined && fullAttempt !== null) {
+    if (typeof fullAttempt !== "object" || Array.isArray(fullAttempt)) {
+      return res.status(400).json({ error: "fullAttempt must be an object." });
+    }
+    const words = (fullAttempt as Record<string, unknown>).words;
+    if (words !== undefined && words !== null && !isAttemptWords(words)) {
+      return res
+        .status(400)
+        .json({ error: "fullAttempt.words must be an array of { word, status, startMs?, endMs? }." });
+    }
+  }
+  if (evalValue !== undefined && evalValue !== null && !isSessionEval(evalValue)) {
+    return res.status(400).json({ error: "eval does not match the SessionEval shape." });
+  }
   const session = storage.loadSession(id);
   if (!session) return res.status(404).json({ error: "Session not found." });
   if (status === "completed" || status === "active") session.status = status;
@@ -498,12 +586,18 @@ app.post("/api/session/checkpoint", (req, res) => {
         durationMs: Number(fullAttempt.durationMs ?? 0),
       };
     }
-    if (evalValue && typeof evalValue === "object") {
-      question.eval = evalValue as SessionEval;
+    if (isSessionEval(evalValue)) {
+      question.eval = evalValue;
     }
   }
   session.updatedAt = new Date().toISOString();
-  storage.saveSession(session);
+  // Inside a try (feature 117): a v1 file or disk error answers 500 { error }
+  // instead of bubbling to Express' default HTML handler.
+  try {
+    storage.saveSession(session);
+  } catch (err) {
+    return res.status(500).json({ error: (err as Error).message });
+  }
   res.json({ id: session.id });
 });
 
@@ -703,9 +797,11 @@ app.get("/api/export", (_req, res) => {
  *   query `words=1|true` to also return word-level timestamps.
  * 200 → { text, durationMs }  |  { text, words: WhisperWord[], durationMs }
  *        (words only with `words=1`).
- * 400 { error } → empty body, whisper binary not installed (message = hint),
- *   or the model had just been downloaded — this last answer carries
- *   `code: "MODEL_DOWNLOADED"` (spec 002) and the client must record again.
+ * 400 { error } → empty body, a body that is not a RIFF/WAVE file (checked
+ *   BEFORE anything touches the disk — feature 117), whisper binary not
+ *   installed (message = hint), or the model had just been downloaded — this
+ *   last answer carries `code: "MODEL_DOWNLOADED"` (spec 002) and the client
+ *   must record again.
  * 500 { error } → model download failed, or the transcription itself failed.
  * The temp WAV is written under data/tmp/ with a random name and always
  * removed (finally), success or failure.
@@ -713,6 +809,7 @@ app.get("/api/export", (_req, res) => {
 app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
   const buf = req.body as Buffer | undefined;
   if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
+  if (!isWavBuffer(buf)) return res.status(400).json({ error: "Body is not a RIFF/WAVE (WAV) audio file." });
   const whisper = checkWhisper(WHISPER_MODEL, rootDir);
   if (!whisper.available) return res.status(400).json({ error: whisper.hint });
   if (!whisper.modelReady) {
@@ -836,6 +933,10 @@ function patchFullEval(sessionId: string | undefined, isFull: boolean, merged: E
  * launches BEFORE the response goes out, is registered under the returned
  * `attemptId` and is served by `GET /api/attempt/:id/feedback`.
  * A blank transcript answers exactly as before: no attemptId, no refinement.
+ *
+ * Validation: 400 { error } for a missing target, an invalid level, or an
+ * invalid sessionId/fragmentId (must match /^[a-zA-Z0-9-]+$/ when present —
+ * feature 117); 400 when the audio/text payload is missing.
  */
 app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
   const buf = req.body as Buffer | undefined;
@@ -850,6 +951,10 @@ app.post("/api/attempt", express.raw({ type: "audio/*", limit: "80mb" }), async 
 
   if (!target) return res.status(400).json({ error: "target is required." });
   if (!isLevel(level)) return res.status(400).json({ error: "Invalid level." });
+  // Persistence coordinates are untrusted (feature 117): only ids in the
+  // storage.sessionFile() format may reach persistAttempt.
+  if (!isValidOptionalId(sessionId)) return res.status(400).json({ error: "Invalid sessionId." });
+  if (!isValidOptionalId(fragmentId)) return res.status(400).json({ error: "Invalid fragmentId." });
 
   let text: string;
   let words: WhisperWord[] = [];
@@ -1279,24 +1384,35 @@ app.get("/api/lookup", async (req, res) => {
   }
 });
 
+/** Hard cap on a chat message (feature 117): the JSON body limit is 25 MB. */
+const CHAT_MAX_CHARS = 4000;
+
 /**
  * POST /api/chat — free-form coach chat over the LLM (feature 003).
  *
  * Body: { message: string, provider? }
- *   message — non-empty user text; provider — preferred LLM id (falls through
- *   the fallback chain when unknown).
+ *   message — non-empty user text, at most CHAT_MAX_CHARS (4000) characters;
+ *   provider — preferred LLM id; absent/null keeps the default chain, any
+ *   other unknown value is rejected (feature 117).
  * The learner memory (profile + sessions) is always injected as the system
  *   context — the chat never runs without it (AGENTS.md rule).
  * 200 → { reply: string, provider: ProviderId }.
  * 200 → { reply: string, provider: "local", offline: true } when every provider
  *   failed: a canned fallback (email-phrasing aware) keeps the conversation
  *   usable offline — deliberately a 200, the client renders it as-is.
- * 400 { error } → message missing/empty.
+ * 400 { error } → message missing/empty, message longer than CHAT_MAX_CHARS,
+ *   or an unknown provider id.
  */
 app.post("/api/chat", async (req, res) => {
   const { message, provider: providerReq } = req.body ?? {};
   if (typeof message !== "string" || message.trim().length === 0) {
     return res.status(400).json({ error: "message is required." });
+  }
+  if (message.length > CHAT_MAX_CHARS) {
+    return res.status(400).json({ error: `message exceeds ${CHAT_MAX_CHARS} characters.` });
+  }
+  if (providerReq !== undefined && providerReq !== null && !isProviderId(providerReq)) {
+    return res.status(400).json({ error: `Unknown provider. Expected one of: ${PROVIDER_IDS.join(", ")}.` });
   }
   const profile = storage.loadProfile();
   const sessions = storage.loadAllSessions();
