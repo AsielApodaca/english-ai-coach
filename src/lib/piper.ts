@@ -14,6 +14,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { renameSync } from "node:fs";
 import { join } from "node:path";
+import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "./subprocess.ts";
 // Shared with the client gain (public/speech/level.js): one MAX_BOOST for
 // both normalizers so server WAV and edge MP3 behave identically (review #3).
 import { MAX_BOOST } from "../../public/speech/level.js";
@@ -474,12 +475,12 @@ export async function synthesize(
     const res = spawnSync(piper.binary!, args, {
       input: text, // piper reads the speech text from stdin
       encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 10 * 1024 * 1024,
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      maxBuffer: SUBPROCESS_MAX_BUFFER,
     });
 
     if (res.error) throw new Error(`piper failed to start: ${res.error.message}`);
-    if (res.status !== 0) throw new Error(`piper exited ${res.status}: ${(res.stderr ?? "").slice(0, 500)}`);
+    if (res.status !== 0) throw new Error(`piper exited ${res.status}: ${snip(res.stderr)}`);
 
     if (!existsSync(tmpWav)) {
       throw new Error("piper produced no output file");

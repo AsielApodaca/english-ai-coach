@@ -25,6 +25,7 @@
 
 import { completeWithFallback, extractJSON } from "./providers/index.ts";
 import type { Provider } from "./providers/types.ts";
+import { MS_PER_MIN } from "./time.ts";
 
 /** Hard cap on the queried text (spec 112: this is not a free-translation API). */
 export const LOOKUP_MAX_CHARS = 60;
@@ -329,7 +330,7 @@ export function createDictionaryLookup(
   opts: { timeoutMs?: number; cooldownMs?: number; now?: () => number } = {},
 ): (word: string) => Promise<DictionaryHit | null> {
   const timeoutMs = opts.timeoutMs ?? HTTP_TIMEOUT_MS;
-  const cooldownMs = opts.cooldownMs ?? 60_000;
+  const cooldownMs = opts.cooldownMs ?? MS_PER_MIN;
   const now = opts.now ?? Date.now;
   let openUntil = 0;
   return async (word: string): Promise<DictionaryHit | null> => {

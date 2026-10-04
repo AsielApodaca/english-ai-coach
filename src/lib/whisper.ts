@@ -1,6 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "./subprocess.ts";
+import { MS_PER_MIN, MS_PER_S } from "./time.ts";
 
 const MODELS: Record<string, string> = {
   "tiny.en": "ggml-tiny.en.bin",
@@ -83,7 +85,6 @@ export async function downloadModel(model: string, baseDir: string): Promise<str
   const tmp = `${target}.downtmp`;
   writeFileSync(tmp, buf);
   rmSync(target, { force: true });
-  const { renameSync } = await import("node:fs");
   renameSync(tmp, target);
   return target;
 }
@@ -107,9 +108,13 @@ export async function transcribeWav(
   mkdirSync(outDir, { recursive: true });
   const outPrefix = join(outDir, `whisper-${Date.now()}`);
   const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-otxt", "-of", outPrefix, "-nt", "-np"];
-  const res = spawnSync(binary, args, { encoding: "utf8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+  const res = spawnSync(binary, args, {
+    encoding: "utf8",
+    timeout: SUBPROCESS_TIMEOUT_MS,
+    maxBuffer: SUBPROCESS_MAX_BUFFER,
+  });
   if (res.error) throw new Error(`whisper-cli failed to start: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${res.stderr.slice(0, 500)}`);
+  if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${snip(res.stderr)}`);
   const txtPath = `${outPrefix}.txt`;
   const text = existsSync(txtPath) ? readFileSync(txtPath, "utf8").trim() : "";
   rmSync(`${outPrefix}.txt`, { force: true });
@@ -129,7 +134,7 @@ export interface TranscribeWordsResult extends TranscribeResult {
 /** Convert a seconds float to rounded milliseconds. */
 function secondsToMs(value: unknown): number {
   const n = Number(value);
-  return Number.isFinite(n) ? Math.round(n * 1000) : 0;
+  return Number.isFinite(n) ? Math.round(n * MS_PER_S) : 0;
 }
 
 /**
@@ -141,14 +146,14 @@ function secondsToMs(value: unknown): number {
 function timestampToMs(value: unknown): number {
   if (typeof value !== "string") return 0;
   const bare = Number(value);
-  if (Number.isFinite(bare) && value.trim() !== "") return Math.round(bare * 1000);
+  if (Number.isFinite(bare) && value.trim() !== "") return Math.round(bare * MS_PER_S);
   const m = value.match(/^(?:(\d+):)?(\d{1,2}):(\d{1,2})[,.](\d{1,3})$/);
   if (!m) return 0;
   const h = Number(m[1] ?? 0);
   const min = Number(m[2]);
   const s = Number(m[3]);
   const ms = Number(m[4].padEnd(3, "0"));
-  return h * 3_600_000 + min * 60_000 + s * 1000 + ms;
+  return h * 3_600_000 + min * MS_PER_MIN + s * MS_PER_S + ms;
 }
 
 /**
@@ -280,9 +285,13 @@ export async function transcribeWords(
   // " end" + "-" + "to"), which downstream word matching reports as
   // missing/extra words.
   const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-oj", "-ml", "1", "-sow", "-of", outPrefix, "-nt", "-np"];
-  const res = spawnSync(binary, args, { encoding: "utf8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 });
+  const res = spawnSync(binary, args, {
+    encoding: "utf8",
+    timeout: SUBPROCESS_TIMEOUT_MS,
+    maxBuffer: SUBPROCESS_MAX_BUFFER,
+  });
   if (res.error) throw new Error(`whisper-cli failed to start: ${res.error.message}`);
-  if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${res.stderr.slice(0, 500)}`);
+  if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${snip(res.stderr)}`);
   const jsonPath = `${outPrefix}.json`;
   let words: WhisperWord[] = [];
   let text = "";

@@ -15,6 +15,7 @@ import type { Express } from "express";
 import { CATEGORY_STAGES, type Category } from "../practice.ts";
 import { evaluateFragment, generatePracticeSet } from "../practice.ts";
 import { buildLearnerMemory, buildNextStep } from "../learner.ts";
+import { readPassThreshold } from "../cu2.ts";
 import { isLevel, isValidOptionalSessionId } from "../storage.ts";
 import { persistAttempt } from "../attempt-persist.ts";
 import { candidates } from "./chain.ts";
@@ -93,11 +94,18 @@ export function registerPracticeRoutes(app: Express, deps: AppDeps): void {
     if (!isValidOptionalSessionId(sessionId)) return res.status(400).json({ error: "Invalid sessionId." });
     if (!isValidOptionalSessionId(fragmentId)) return res.status(400).json({ error: "Invalid fragmentId." });
     try {
+      // Feature 117: verdict/next follow the SESSION's configured pass
+      // threshold when this evaluation belongs to a session; otherwise the
+      // documented fallback (DEFAULT_PASS_THRESHOLD) applies inside the merge.
+      const sessionIdStr = typeof sessionId === "string" && sessionId.length > 0 ? sessionId : undefined;
+      const session = sessionIdStr ? deps.storage.loadSession(sessionIdStr) : undefined;
+      const passThreshold = session ? readPassThreshold(session.config.settingsSnapshot) : undefined;
       const { evaluation, provider } = await evaluateFragment(candidates(deps, providerReq), {
         target,
         userText,
         question: typeof question === "string" ? question : "",
         level,
+        passThreshold,
       });
 
       persistAttempt(deps.storage, { evaluation, sessionId, fragmentId, userText, target });

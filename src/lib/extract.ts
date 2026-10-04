@@ -25,14 +25,25 @@ export interface ExtractLimits {
   maxChars: number;
 }
 
-/** Default per-file size limit: 10 MB. */
-export const DEFAULT_MAX_BYTES = 10 * 1024 * 1024;
+/** One mebibyte in bytes, so size limits read as multiples of a unit. */
+const MIB = 1024 * 1024;
+
+/** Default per-file size limit: 10 MiB. */
+export const DEFAULT_MAX_BYTES = 10 * MIB;
 /** Default per-file character budget after extraction. */
 export const DEFAULT_MAX_CHARS = 40_000;
 /** Prompt-injection budget for the DOCUMENT CONTEXT block (16k chars). */
 export const CONTEXT_BUDGET = 16_000;
 /** Bucket used when no session exists yet (CU1 dropzone happens pre-session). */
 export const DEFAULT_CONTEXT_BUCKET = "draft";
+/** Words below this make the soft language detector answer "unknown" (feature 104). */
+export const MIN_LANG_WORDS = 10;
+/** Hard cap of document text sent to the summarizer prompt (chars, feature 104). */
+export const DOC_CHAR_BUDGET = 100_000;
+/** Sampling temperature of the context summarizer (factual, low-creativity text). */
+export const EXTRACT_LLM_TEMPERATURE = 0.2;
+/** Response budget of the context summarizer (tokens). */
+export const EXTRACT_LLM_MAX_TOKENS = 4096;
 
 const SUPPORTED_EXTENSIONS: Record<string, FileKind> = {
   ".pdf": "pdf",
@@ -205,7 +216,7 @@ const STOPWORDS: Record<string, string[]> = {
  */
 export function detectLanguage(text: string): string {
   const words = text.toLowerCase().match(/[a-zà-ÿ]+/g) ?? [];
-  if (words.length < 10) return "unknown";
+  if (words.length < MIN_LANG_WORDS) return "unknown";
   let best = "unknown";
   let bestScore = 0;
   for (const [lang, stops] of Object.entries(STOPWORDS)) {
@@ -233,14 +244,14 @@ export function createLLMSummarizer(candidates: Candidate[], opts: { learnerMemo
       "Do not add commentary outside the summary.";
     const user =
       `Summarize the following document in English. Keep the summary under ${budget} characters.\n` +
-      `Detected document language: ${lang}.${memoryLine}\n\nDOCUMENT:\n${trimToBudget(text, 100_000)}`;
+      `Detected document language: ${lang}.${memoryLine}\n\nDOCUMENT:\n${trimToBudget(text, DOC_CHAR_BUDGET)}`;
     const res = await completeWithFallback(
       candidates,
       [
         { role: "system", content: system },
         { role: "user", content: user },
       ],
-      { temperature: 0.2, maxTokens: 4096 },
+      { temperature: EXTRACT_LLM_TEMPERATURE, maxTokens: EXTRACT_LLM_MAX_TOKENS },
     );
     return res.text;
   };

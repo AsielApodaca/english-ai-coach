@@ -23,6 +23,7 @@ import { alignTextWords, alignWords, forcedAmberWordsFromIssues } from "./align.
 import { buildFeedbackText } from "./cu2.ts";
 import { updateProfile } from "./learner.ts";
 import { evaluateFragmentDeterministic, isFiller, mergeLLMFeedback, normalize, refineWithLLM } from "./practice.ts";
+import { MS_PER_MIN } from "./time.ts";
 import type { AttemptStorage } from "./attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
 import type { AttemptWord, FeedbackIssue, Level } from "./storage.ts";
@@ -59,6 +60,12 @@ export interface RefineAttemptParams {
   /** Pass decision of the fast response (align score vs pass threshold). */
   passed: boolean;
   /**
+   * Session pass threshold the fast response used (feature 117: the merged
+   * `verdict`/`next` must agree with that decision). Absent → the default
+   * threshold of `DEFAULT_PASS_THRESHOLD`.
+   */
+  passThreshold?: number;
+  /**
    * Hook run after a successful refinement — e.g. patching `question.eval` of
    * a full attempt (`patchFullEval` below). Guarded here: a throwing hook can
    * never break the refinement nor the long-poll that awaits it.
@@ -80,7 +87,7 @@ export interface RefineAttemptParams {
 export async function refineAttempt(candidates: Candidate[], params: RefineAttemptParams): Promise<AttemptRefinement> {
   const { lexical } = evaluateFragmentDeterministic({ target: params.target, userText: params.userText });
   const { feedback, provider } = await refineWithLLM(candidates, params);
-  const merged = mergeLLMFeedback(lexical, feedback);
+  const merged = mergeLLMFeedback(lexical, feedback, { passThreshold: params.passThreshold });
 
   const forcedAmberWords = forcedAmberWordsFromIssues(merged.issues, params.target);
   const aligned =
@@ -185,7 +192,7 @@ export interface RefinementRegistry {
 }
 
 /** Entries older than this are dropped on access (spec 116: ~60 s). */
-export const REFINEMENT_TTL_MS = 60_000;
+export const REFINEMENT_TTL_MS = MS_PER_MIN;
 /** Hard ceiling on registry entries (oldest dropped first). */
 export const REFINEMENT_MAX_ENTRIES = 100;
 /** Server long-poll cap for `GET /api/attempt/:id/feedback` (env override). */

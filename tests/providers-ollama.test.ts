@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { createOllamaProvider, pingOllama, OLLAMA_DEFAULT_MODEL } from "../src/lib/providers/ollama.ts";
-import { ProviderError, type ChatMessage } from "../src/lib/providers/types.ts";
+import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TEMPERATURE, ProviderError, type ChatMessage } from "../src/lib/providers/types.ts";
 
 // ---------------------------------------------------------------------------
 // Feature 117 — specification tests for the local Ollama provider. The chat
@@ -67,7 +67,7 @@ test("complete(): ping then native /api/chat, with think:false and the baked num
     messages: MSGS,
     stream: false,
     think: false,
-    temperature: 0.4,
+    temperature: LLM_DEFAULT_TEMPERATURE,
     options: { num_predict: 64, num_ctx: 32768 },
   });
 });
@@ -99,7 +99,7 @@ test("complete(): custom base URL, provider id and numCtx are honoured", async (
   assert.ok(chat);
   assert.equal(chat.url, "http://127.0.0.1:2222/api/chat");
   assert.equal(chat.body?.model, "phi4-mini");
-  assert.deepEqual(chat.body?.options, { num_predict: 2048, num_ctx: 8192 });
+  assert.deepEqual(chat.body?.options, { num_predict: LLM_DEFAULT_MAX_TOKENS, num_ctx: 8192 });
 });
 
 test("complete(): chat status mapping — 5xx retryable, 4xx not", async (t) => {

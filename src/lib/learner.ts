@@ -3,6 +3,12 @@ import { chatJSON } from "./providers/index.ts";
 import { tokenize, type Candidate } from "./practice.ts";
 import { fallbackTitle, LEVELS, type CategoryStats, type Level, type NextStep, type Profile, type SessionV2 } from "./storage.ts";
 
+/** Average score at/above which `estimateLevel` promotes the learner a level. */
+export const LEVEL_UP_AVG = 80;
+
+/** Average score below which `estimateLevel` demotes the learner a level. */
+export const LEVEL_DOWN_AVG = 50;
+
 export interface LearnerStats {
   sessions: number;
   avg: number;
@@ -71,8 +77,8 @@ export function estimateLevel(profile: Profile, stats: LearnerStats): Level {
   const avg = stats.avg;
   const idx = LEVELS.indexOf(profile.level);
   const base = idx === -1 ? LEVELS.indexOf("B2") : idx;
-  if (avg >= 80) return LEVELS[Math.min(LEVELS.length - 1, base + 1)];
-  if (avg < 50) return LEVELS[Math.max(0, base - 1)];
+  if (avg >= LEVEL_UP_AVG) return LEVELS[Math.min(LEVELS.length - 1, base + 1)];
+  if (avg < LEVEL_DOWN_AVG) return LEVELS[Math.max(0, base - 1)];
   return LEVELS[base];
 }
 

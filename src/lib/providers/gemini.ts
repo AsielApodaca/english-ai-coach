@@ -1,5 +1,5 @@
 import type { ChatMessage, Provider, CompleteOptions } from "./types.ts";
-import { ProviderError } from "./types.ts";
+import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TEMPERATURE, ProviderError } from "./types.ts";
 
 const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta";
 export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash";
@@ -29,7 +29,7 @@ export function createGeminiProvider(apiKey: string | undefined, defaultModel = 
 
       const body: Record<string, unknown> = {
         contents: history,
-        generationConfig: { temperature: options.temperature ?? 0.4, maxOutputTokens: options.maxTokens ?? 2048 },
+        generationConfig: { temperature: options.temperature ?? LLM_DEFAULT_TEMPERATURE, maxOutputTokens: options.maxTokens ?? LLM_DEFAULT_MAX_TOKENS },
       };
       if (system.length > 0) body.systemInstruction = { parts: system.map((text) => ({ text })) };
 

@@ -1,11 +1,30 @@
 import type { CompleteOptions, Provider } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
+import { DEFAULT_PASS_THRESHOLD } from "./cu2.ts";
 import type { FeedbackIssue, Level } from "./storage.ts";
 
 export type Candidate = Pick<Provider, "id" | "available" | "complete">;
 
 export type Category = "interviews" | "star" | "daily" | "free";
 export type { Level };
+
+/**
+ * Share of the combined score taken from the lexical match (feature 116).
+ * Together with {@link NATURALNESS_WEIGHT} it blends the fast deterministic
+ * score with the LLM's naturalness — the two must always sum to 1.
+ */
+export const LEXICAL_WEIGHT = 0.75;
+
+/** Share of the combined score taken from the LLM naturalness (feature 116). */
+export const NATURALNESS_WEIGHT = 0.25;
+
+/**
+ * Score below which the verdict drops from "almost" to "retry". The PASS
+ * boundary is NOT this constant: it is the session's `passThreshold` when the
+ * caller can supply one, else {@link DEFAULT_PASS_THRESHOLD} (the single
+ * source shared with cu2.ts).
+ */
+export const ALMOST_MIN_SCORE = 50;
 
 export interface PracticeFragment {
   id: string;
@@ -311,20 +330,33 @@ function deriveIssues(lexical: WordMatch): FeedbackIssue[] {
 
 /**
  * Merge LLM feedback into the deterministic word match (pure, feature 116):
- * score = 0.75·lexical + 0.25·naturalness (naturalness defaults to the lexical
- * score when absent, so a dead LLM still scores like the fast path), derived
- * issues first then the LLM's own (capped at 5), verdict and `next` from the
- * blended score.
+ * score = {@link LEXICAL_WEIGHT}·lexical + {@link NATURALNESS_WEIGHT}·naturalness
+ * (naturalness defaults to the lexical score when absent, so a dead LLM still
+ * scores like the fast path), derived issues first then the LLM's own (capped
+ * at 5), verdict and `next` from the blended score.
+ *
+ * @param lexical - deterministic word match the feedback is merged into
+ * @param feedback - LLM issues/tips/naturalness (possibly empty)
+ * @param opts.passThreshold - score that counts as a pass for `verdict`/`next`;
+ *   defaults to {@link DEFAULT_PASS_THRESHOLD} (70). Callers that know the
+ *   session's configured threshold (routes/attempt, routes/evaluate) pass it
+ *   so pass/fail never diverges from the session settings.
  */
-export function mergeLLMFeedback(lexical: WordMatch, feedback: LLMFeedback): Evaluation {
+export function mergeLLMFeedback(
+  lexical: WordMatch,
+  feedback: LLMFeedback,
+  opts: { passThreshold?: number } = {},
+): Evaluation {
+  const passThreshold = opts.passThreshold ?? DEFAULT_PASS_THRESHOLD;
   const naturalness =
     typeof feedback.naturalness === "number" && Number.isFinite(feedback.naturalness)
       ? Math.max(0, Math.min(100, feedback.naturalness))
       : lexical.score;
-  const score = Math.round(0.75 * lexical.score + 0.25 * naturalness);
+  const score = Math.round(LEXICAL_WEIGHT * lexical.score + NATURALNESS_WEIGHT * naturalness);
   const issues: FeedbackIssue[] = [...feedback.issues];
   issues.unshift(...deriveIssues(lexical));
-  const verdict: Evaluation["verdict"] = score >= 70 ? "great" : score >= 50 ? "almost" : "retry";
+  const verdict: Evaluation["verdict"] =
+    score >= passThreshold ? "great" : score >= ALMOST_MIN_SCORE ? "almost" : "retry";
   return {
     score,
     verdict,
@@ -333,7 +365,7 @@ export function mergeLLMFeedback(lexical: WordMatch, feedback: LLMFeedback): Eva
     extra: lexical.extra,
     issues: issues.slice(0, 5),
     tips: feedback.tips,
-    next: score >= 70,
+    next: score >= passThreshold,
   };
 }
 
@@ -342,12 +374,20 @@ export function mergeLLMFeedback(lexical: WordMatch, feedback: LLMFeedback): Eva
  * LLM call (feature 116 — the fast path of `POST /api/attempt`).
  *
  * Its score equals what the composed evaluation yields when the LLM is
- * unavailable (0.75·L + 0.25·L = L), so the immediate response and the
+ * unavailable (LEXICAL_WEIGHT·L + NATURALNESS_WEIGHT·L = L), so the immediate response and the
  * deterministic fallback of `evaluateFragment` always agree.
  */
-export function evaluateFragmentDeterministic(params: { target: string; userText: string }): DeterministicEvaluation {
+export function evaluateFragmentDeterministic(params: {
+  target: string;
+  userText: string;
+  /** Session pass threshold; defaults to `DEFAULT_PASS_THRESHOLD`. */
+  passThreshold?: number;
+}): DeterministicEvaluation {
   const lexical = wordMatch(params.target, params.userText);
-  return { lexical, evaluation: mergeLLMFeedback(lexical, { issues: [], tips: [] }) };
+  return {
+    lexical,
+    evaluation: mergeLLMFeedback(lexical, { issues: [], tips: [] }, { passThreshold: params.passThreshold }),
+  };
 }
 
 /**
@@ -382,7 +422,7 @@ export async function refineWithLLM(
  */
 export async function evaluateFragment(
   candidates: Candidate[],
-  params: { target: string; userText: string; question: string; level: Level },
+  params: { target: string; userText: string; question: string; level: Level; passThreshold?: number },
 ): Promise<{ evaluation: Evaluation; provider: string; feedback: LLMFeedback }> {
   const { lexical } = evaluateFragmentDeterministic(params);
   let feedback: LLMFeedback = { issues: [], tips: [], naturalness: lexical.score };
@@ -394,5 +434,9 @@ export async function evaluateFragment(
   } catch {
     // keep deterministic feedback when LLM is unavailable
   }
-  return { evaluation: mergeLLMFeedback(lexical, feedback), provider, feedback };
+  return {
+    evaluation: mergeLLMFeedback(lexical, feedback, { passThreshold: params.passThreshold }),
+    provider,
+    feedback,
+  };
 }

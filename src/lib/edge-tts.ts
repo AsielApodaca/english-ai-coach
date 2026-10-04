@@ -14,6 +14,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "./subprocess.ts";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -133,13 +134,13 @@ export async function synthesizeEdge(
     }
     const res = spawnSync(edge.binary, args, {
       encoding: "utf8",
-      timeout: 60_000,
-      maxBuffer: 10 * 1024 * 1024,
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      maxBuffer: SUBPROCESS_MAX_BUFFER,
     });
 
     if (res.error) throw new Error(`edge-tts failed to start: ${res.error.message}`);
     if (res.status !== 0) {
-      throw new Error(`edge-tts exited ${res.status}: ${(res.stderr ?? "").slice(0, 500)}`);
+      throw new Error(`edge-tts exited ${res.status}: ${snip(res.stderr)}`);
     }
     if (!existsSync(outPath)) {
       throw new Error("edge-tts produced no output file");

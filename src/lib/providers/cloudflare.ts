@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ChatMessage, Provider, CompleteOptions } from "./types.ts";
-import { ProviderError } from "./types.ts";
+import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TEMPERATURE, ProviderError } from "./types.ts";
 
 const CLOUDFLARE_API = "https://api.cloudflare.com/client/v4";
 /** GLM-4.7-flash: free on Workers Free plan as of Sep 2026 (frontier GLM-5.x require paid). */
@@ -58,8 +58,8 @@ export function createCloudflareProvider(
         body: JSON.stringify({
           model,
           messages,
-          temperature: options.temperature ?? 0.4,
-          max_tokens: options.maxTokens ?? 2048,
+          temperature: options.temperature ?? LLM_DEFAULT_TEMPERATURE,
+          max_tokens: options.maxTokens ?? LLM_DEFAULT_MAX_TOKENS,
         }),
         signal: options.signal,
       });

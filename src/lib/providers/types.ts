@@ -1,5 +1,22 @@
 export type Role = "system" | "user" | "assistant";
 
+/**
+ * Default sampling temperature applied when a caller passes none (feature 117).
+ * Shared by every HTTP provider so "no option given" behaves identically
+ * whichever provider answers first.
+ */
+export const LLM_DEFAULT_TEMPERATURE = 0.4;
+
+/** Default response budget in tokens when a caller passes none (feature 117). */
+export const LLM_DEFAULT_MAX_TOKENS = 2048;
+
+/**
+ * Characters of a raw model reply kept in error messages (feature 117).
+ * Replies are "text ≥ JSON": on extraction failure the message quotes only
+ * this prefix instead of the whole (possibly huge) reply.
+ */
+export const REPLY_SNIP_LEN = 200;
+
 export interface ChatMessage {
   role: Role;
   content: string;

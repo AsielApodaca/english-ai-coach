@@ -156,7 +156,7 @@ export function registerAttemptRoutes(app: Express, deps: AppDeps): void {
       // Feature 116: no LLM on the critical path — lexical match + derived
       // issues + align answer immediately (score/passed unchanged), and the
       // LLM refinement is launched below in background.
-      const { evaluation } = evaluateFragmentDeterministic({ target, userText: text });
+      const { evaluation } = evaluateFragmentDeterministic({ target, userText: text, passThreshold });
       // No LLM issues yet → no forced amber on the fast paint; the refinement
       // re-aligns with them (see `refineAttempt`).
       const align = words.length > 0 ? alignWords(words, target) : alignTextWords(text, target);
@@ -191,6 +191,7 @@ export function registerAttemptRoutes(app: Express, deps: AppDeps): void {
         level,
         spokenWords: words,
         passed,
+        passThreshold,
         onRefined: (merged) => patchFullEval(deps.storage, sessionId, isFull, merged),
       });
       pendingRefinement.catch(() => {});
