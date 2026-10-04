@@ -11,12 +11,14 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 ## Comandos
 - `npm start` — arranca el servidor local en http://localhost:3000 (con watch)
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
-- `npm run check` — verificación de sintaxis TS (type stripping) + health check local
+- `npm run check` — gate de tipos (`tsc --noEmit`) + verificación de sintaxis TS (type stripping)
 - `npm test` — suite de tests (deben pasar antes de cada commit)
 - No hay lint ni formatter configurados: el gate de calidad es `npm run check` + `npm test`.
 
 ## Estructura del proyecto
-- `src/server.ts` — Express: sirve `public/` y expone `/api/*`.
+- `src/server.ts` — punto de entrada: env → singletons → `createApp` → `listen` (único módulo que abre puerto).
+- `src/lib/app.ts` — `createApp(deps)`: middleware JSON/static, registro de rutas y errores globales `/api/*` (sin efectos al importar; lo usan los tests HTTP).
+- `src/lib/routes/` — registradores por dominio (`registerXxxRoutes`): health, practice, attempt, session, sessions, profile, audio, chat, lookup, files.
 - `src/lib/providers/` — capa LLM (gemini, cloudflare, ollama, mock) + registry con fallback.
 - `src/lib/practice.ts` — generación de sets de práctica y evaluación híbrida (determinista + LLM).
 - `src/lib/refinement.ts` — refino LLM en background para el pintado incremental (feature 116).
@@ -35,7 +37,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - `models/` — modelos locales (whisper.cpp `ggml-small.en.bin`, voces Piper).
 - `data/` — `profile.json`, `sessions/*.json`, `tmp/` (audio y caché; ignorada por git).
 - `spec/` — `constitution/` (misión, stack, roadmap), `features/` por carpeta, `use-cases/` (CU1–CU3), `design/`.
-- `tests/` — tests de `node:test` (`*.test.ts`, 34 archivos).
+- `tests/` — tests de `node:test` (`*.test.ts`, 44 archivos).
 - `scripts/setup.sh` — instalador de whisper.cpp, Piper y edge-tts.
 
 ## Convenciones

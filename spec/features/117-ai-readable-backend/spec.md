@@ -1,6 +1,6 @@
 # 117 · Backend legible para IA (refactor de convenciones)
 
-**Estado:** proposed 📝 (especificado, sin implementar)
+**Estado:** done ✅ (implementado en la rama `refactor/117-ai-readable-backend`, 16 commits; ver *Verificación final* al final del documento)
 
 ## Contexto
 
@@ -84,18 +84,18 @@ Refactor del backend en **7 fases internas** (cada fase es un commit en la misma
 
 ## Criterios de aceptación
 
-- [ ] `npx tsc --noEmit` → 0 errores; `npm test` → todos en verde; `npm run check` incluye `tsc --noEmit`.
-- [ ] `grep -rn ": any\|as any\|@ts-ignore" src/ tests/` → 0 coincidencias (sin `any` para tapar los 9 errores).
-- [ ] Ningún archivo `src/**/*.ts` con >300 líneas (`wc -l` ordenado descendente).
-- [ ] Las 28 rutas `/api/*` tienen JSDoc con shape de entrada/salida/errores (10 nuevas, 18 ya existentes intactas).
-- [ ] Middleware de errores: body JSON malformado, excepción no capturada y ruta `/api/*` desconocida responden JSON `{ error }` con status (nunca HTML).
-- [ ] `POST /api/session/save` con `{"id":"otra-sesión"}` no sobrescribe la sesión existente (id ignorado server-side); `saveSession` roto → 500 `{ error }`.
-- [ ] `POST /api/session/checkpoint` rechaza `eval`/`words` con shape inválido (400 `{ error }`); `POST /api/chat` con message > `CHAT_MAX_CHARS` → 400.
-- [ ] Tests de los 5 providers pasan (`available`, `complete`, `ProviderError`, `extractJSON` tolerante); tests HTTP de comportamiento sobre `createApp(deps)` sin abrir puerto en import.
-- [ ] `warmInFlight` ya no es `let` de módulo; importar el módulo de app no llama `app.listen` (test puede importarlo sin puerto).
-- [ ] `60_000` / `10 * 1024 * 1024` solo aparecen en `subprocess.ts`; el umbral de pass `70` vive en una constante nombrada única; no hay dynamic import sin razón en `whisper.ts`.
-- [ ] Sin dependencias npm nuevas; `npm test` y `npm run check` siguen siendo los únicos gates.
-- [ ] `spec/constitution/roadmap.md` → 117 en "Hecho ✅"; este `spec.md` en estado `done` (mismo PR).
+- [x] `npx tsc --noEmit` → 0 errores; `npm test` → todos en verde (586 pass / 0 fail / 2 skipped); `npm run check` incluye `tsc --noEmit`.
+- [x] `grep -rn ": any\|as any\|@ts-ignore" src/ tests/` → 0 coincidencias (sin `any` para tapar los 9 errores).
+- [x] Ningún archivo `src/**/*.ts` con >300 líneas (`wc -l` ordenado descendente) — lista en *Verificación final*.
+- [x] Las 28 rutas `/api/*` tienen JSDoc con shape de entrada/salida/errores (10 nuevas, 18 ya existentes intactas).
+- [x] Middleware de errores: body JSON malformado, excepción no capturada y ruta `/api/*` desconocida responden JSON `{ error }` con status (nunca HTML) — verificado en el smoke de *Verificación final*.
+- [x] `POST /api/session/save` con `{"id":"otra-sesión"}` no sobrescribe la sesión existente (id ignorado server-side); `saveSession` roto → 500 `{ error }`.
+- [x] `POST /api/session/checkpoint` rechaza `eval`/`words` con shape inválido (400 `{ error }`); `POST /api/chat` con message > `CHAT_MAX_CHARS` → 400.
+- [x] Tests de los 5 providers pasan (`available`, `complete`, `ProviderError`, `extractJSON` tolerante); tests HTTP de comportamiento sobre `createApp(deps)` sin abrir puerto en import.
+- [x] `warmInFlight` ya no es `let` de módulo; importar el módulo de app no llama `app.listen` (test puede importarlo sin puerto).
+- [x] `60_000` / `10 * 1024 * 1024` solo aparecen en `subprocess.ts`; el umbral de pass `70` vive en una constante nombrada única (`DEFAULT_PASS_THRESHOLD`, `cu2-lines.ts`); no hay dynamic import sin razón en `whisper.ts` (grep `await import` → 0 en `src/`).
+- [x] Sin dependencias npm nuevas (`express`, `mammoth`, `pdf-parse` + sus `@types`/`typescript`); `npm test` y `npm run check` siguen siendo los únicos gates.
+- [x] `spec/constitution/roadmap.md` → 117 en "Hecho ✅"; este `spec.md` en estado `done` (mismo PR).
 
 ## Fuera de alcance
 
@@ -114,3 +114,104 @@ Refactor del backend en **7 fases internas** (cada fase es un commit en la misma
 - Tests rojos de referencia: `tests/coach.test.ts`, `tests/cu2.test.ts`, `tests/storage.test.ts`.
 - Features relacionadas: `116-fast-fragment-eval` (split de `practice.ts`), `102-session-model-v2` (tipos de sesión), `112-word-popover-dictionary` (contrato `ok:false` de lookup).
 - Plan detallado: `plan.md`; checklist de ejecución: `tasks.md`.
+
+## Verificación final (2026-10-03, rama `refactor/117-ai-readable-backend`)
+
+**Gates** (ejecutados tras cada commit de la rama):
+
+```
+npx tsc --noEmit         → 0 errores
+npm test                 → 588 tests · 586 pass · 0 fail · 2 skipped
+npm run check            → verde (tsc --noEmit + node --check de la lista explícita)
+grep ": any|as any|@ts-ignore" src/ tests/ → 0 coincidencias
+```
+
+**Smoke manual** (`node src/server.ts`, solo GET, sin escribir `data/`):
+
+| Request | Resultado |
+| --- | --- |
+| `GET /api/health` | 200 `{ok:true, providers, whisper, tts, dataDir}` |
+| `GET /api/profile` | 200 |
+| `GET /api/history` | 200 |
+| `GET /api/does-not-exist` | 404 `{error:"Unknown API route: …"}` (JSON, no HTML) |
+| `POST /api/chat` body malformado | 500 `{error:"Expected property name…"}` (JSON, no HTML; ver *Elección deliberada* en `http-errors.ts`) |
+
+**Recuento `wc -l` de `src/**/*.ts` (descendente, 73 archivos, 8812 líneas) — ninguno >300:**
+
+```
+   300 src/lib/refinement.ts
+   299 src/lib/storage-session.ts
+   297 src/lib/whisper.ts
+   294 src/lib/align-words.ts
+   272 src/lib/tts-cache.ts
+   271 src/lib/wav.ts
+   267 src/lib/session-types.ts
+   265 src/lib/lookup-providers.ts
+   262 src/lib/routes/session.ts
+   259 src/lib/extract-parse.ts
+   248 src/lib/settings.ts
+   246 src/lib/routes/audio.ts
+   244 src/lib/routes/attempt.ts
+   233 src/lib/lookup-resolve.ts
+   215 src/lib/cu2-state.ts
+   208 src/lib/providers/index.ts
+   203 src/lib/practice-eval.ts
+   184 src/lib/piper-voices.ts
+   184 src/lib/learner.ts
+   165 src/lib/session-start.ts
+   156 src/lib/edge-tts.ts
+   154 src/lib/piper.ts
+   145 src/lib/cu2-transitions.ts
+   137 src/lib/routes/practice.ts
+   137 src/lib/continuous-handler.ts
+   131 src/lib/lookup-validate.ts
+   129 src/lib/session-guards.ts
+   124 src/lib/practice-text.ts
+   121 src/lib/settings-types.ts
+   120 src/lib/routes/health.ts
+   117 src/lib/practice-generate.ts
+   117 src/lib/align-text.ts
+   116 src/lib/attempt-persist.ts
+   112 src/lib/routes/sessions.ts
+   112 src/lib/routes/profile.ts
+   111 src/lib/storage.ts
+   111 src/lib/lookup-types.ts
+   106 src/lib/tts-status.ts
+   106 src/lib/providers/ollama.ts
+    97 src/lib/app.ts
+    91 src/lib/continuous-generate.ts
+    89 src/lib/continuous-adaptive.ts
+    82 src/lib/routes/lookup.ts
+    79 src/lib/providers/types.ts
+    77 src/lib/providers/cloudflare.ts
+    75 src/server.ts
+    72 src/lib/providers/mock.ts
+    71 src/lib/storage-context.ts
+    71 src/lib/routes/chat.ts
+    70 src/lib/extract-handler.ts
+    66 src/lib/align.ts
+    54 src/lib/cu2-lines.ts
+    52 src/lib/session-payload.ts
+    52 src/lib/routes/chain.ts
+    52 src/lib/providers/gemini.ts
+    52 src/lib/http-errors.ts
+    50 src/lib/practice.ts
+    44 src/lib/prosody.ts
+    37 src/lib/routes/files.ts
+    36 src/lib/storage-profile.ts
+    34 src/lib/lookup.ts
+    33 src/lib/subprocess.ts
+    30 src/lib/cu2.ts
+    21 src/lib/continuous.ts
+    19 src/lib/json-file.ts
+    14 src/lib/time.ts
+    14 src/lib/extract.ts
+```
+
+Antes del refactor: `server.ts` 1199 · `lookup.ts` 698 · `storage.ts` 653 · `piper.ts` 542 · `align.ts` 438 · `cu2.ts` 405 · `practice.ts` 397 · `settings.ts` 337 · `continuous.ts` 310 · `extract.ts` 301 — hoy ninguno supera 300.
+
+**Desviaciones del plan registradas durante la implementación:**
+
+- Fase 6: los splits requirieron módulos de apoyo que el plan no enumeraba (`json-file.ts` para el ciclo de escritura atómica de `storage`, `session-guards.ts`/`storage-context.ts` para evitar ciclos, `continuous-generate.ts` porque dejar la generación en `continuous.ts` habría hecho que el handler importara el barrel → ciclo en runtime). Los nombres siguen los ya existentes (`practice-generate.ts`, `piper-voices.ts`).
+- Fase 6: `whisper.ts` (305) y `refinement.ts` (303) no estaban en el checklist (no superaban 300 cuando se escribió el plan; Fase 5 los empujó). Al ser responsabilidades únicas y cohesivas se compactó su JSDoc en lugar de partirlos.
+- Fase 1: el body JSON malformado responde 500 `{error}` (no 400): decisión deliberada y documentada en `src/lib/http-errors.ts`, cubierta por `tests/http-errors.test.ts`.

@@ -31,7 +31,10 @@
 
 ## Archivos / módulos clave
 
-- `src/server.ts` — Express: sirve `public/`, expone `/api/*`.
+- `src/server.ts` — punto de entrada (75 líneas): env → singletons → `createApp` → `listen`; el ÚNICO módulo que abre puerto.
+- `src/lib/app.ts` — `createApp(deps)`: middleware JSON/static, registro de rutas y contratos globales de error; import sin efectos secundarios (lo usan los tests HTTP).
+- `src/lib/routes/*.ts` — registradores por dominio (`registerXxxRoutes(app, deps)`): health, practice, attempt, session, sessions, profile, audio, chat, lookup, files.
+- `src/lib/http-errors.ts` — `apiNotFound` (404 `{ error }`) + `apiErrorHandler` (500 `{ error }`, nunca HTML) para `/api/*`.
 - `src/lib/providers/index.ts` — registro de proveedores, selección y cadena de fallback.
 - `src/lib/providers/gemini.ts` — cliente Generative Language API.
 - `src/lib/providers/cloudflare.ts` — cliente Workers AI.
@@ -61,10 +64,10 @@
 - `npm install` — instala dependencias
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
 - `npm start` — arranca el servidor local (watch) en http://localhost:3000
-- `npm run check` — comprobación de sintaxis de cada archivo TS/JS (type stripping, sin build)
-- `npm test` — suite con `node:test` (`tests/*.test.ts`, 34 archivos)
+- `npm run check` — `tsc --noEmit` (gate de tipos, feature 117) + `node --check` de cada archivo TS/JS (type stripping, sin build)
+- `npm test` — suite con `node:test` (`tests/*.test.ts`, 44 archivos)
 
-No hay lint ni formatter configurados: el gate de calidad es `npm run check` + `npm test`.
+No hay lint ni formatter configurados: el gate de calidad es `npm run check` (incluye el type gate) + `npm test`. Convención de tamaño (117): ningún `src/**/*.ts` supera 300 líneas; los módulos grandes de la lista anterior son el punto de entrada que recompone archivos más pequeños (`storage.ts` → `session-types`/`storage-session`/…, `practice.ts` → `practice-generate`/`practice-text`/`practice-eval`, etc.).
 
 ## Modelo de datos / dominio
 
