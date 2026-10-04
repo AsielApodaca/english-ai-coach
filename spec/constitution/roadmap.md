@@ -34,6 +34,8 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` (110, 111, 112, 113, 114 y 115 ya están en "Hecho ✅"). Pueden implementarse como PRs independientes sobre la base previa:
 
+- **117 · Backend legible para IA (refactor de convenciones)** — refactor de `src/` para cumplir las reglas de `AGENTS.md` (módulos <~300 líneas, contratos explícitos, sin efectos ocultos, tests como spec): gate `tsc --noEmit` en `npm run check`, middleware de errores `{ error }` + JSDoc en las 28 rutas, validación de `session/save`/`checkpoint`/`chat`/`provider`, `server.ts` → `createApp(deps)` + `routes/` por dominio con inyección de dependencias, tests de providers y de comportamiento HTTP, constantes nombradas (timeouts/umbrales duplicados) y split de los 9 módulos >300 líneas. *(Especificada en `../features/117-ai-readable-backend/spec.md`; solo backend — frontend fuera de alcance.)*
+
 ## Backlog 💡
 
 - **004 · Evaluación fonética por audio** — sidecar Python (parselmouth/librosa) que analiza fonemas, estrés, ritmo y entonación del audio. Feeds la precisión del ámbar/rojo de 106 y añade métricas reales de pronunciación; degrada a transcripción. *(Depende de 106; refina la feature, no la bloquea.)*

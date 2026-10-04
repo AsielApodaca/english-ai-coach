@@ -73,4 +73,5 @@ El código se escribe para que un agente IA lo lea completo sin contexto prevo: 
 
 ## Documentación
 - Especificaciones en `spec/` (constitution + features). Ver `spec/constitution/roadmap.md` para el estado.
+- Al documentar una feature nueva en `spec/features/`, seguir la plantilla base `spec/features/001-ejemplo/` (`spec.md`, `plan.md`, `tasks.md`): misma estructura de secciones, nivel de detalle y estilo de criterios verificables.
 - Casos de uso en `spec/use-cases/` (CU1 configuración, CU2 práctica, CU3 historial) y diseño en `spec/design/` (design-system, screens, ui-flow).
