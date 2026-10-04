@@ -25,6 +25,7 @@ import {
   validateLookupText,
 } from "./lib/lookup.ts";
 import { handleNextQuestionRequest } from "./lib/continuous.ts";
+import { apiErrorHandler, apiNotFound } from "./lib/http-errors.ts";
 import {
   createRefinementRegistry,
   DEFAULT_REFINE_TIMEOUT_MS,
@@ -126,6 +127,21 @@ function isCategory(v: unknown): v is Category {
   return typeof v === "string" && v in CATEGORY_STAGES;
 }
 
+/**
+ * GET /api/health — boot snapshot of every subsystem (features 002/007/113).
+ *
+ * No input. 200 →
+ *   { ok: true,
+ *     providers: Record<providerId, boolean>,   // availability probed live
+ *     primary: string,                          // configured primary provider
+ *     notes: { gemini, cloudflare },            // setup hints for the UI
+ *     whisper: { available, modelReady, model, hint },
+ *     tts: TtsStatus,                           // same shape as GET /api/tts/status
+ *     dataDir: string }                         // absolute path of data/
+ * The frontend polls it on load (STT/TTS engine choice, provider badges).
+ * Errors: only an unexpected failure of the status probes → 500 { error }
+ * (global /api middleware, feature 117).
+ */
 app.get("/api/health", async (_req, res) => {
   const status = await providerStatus(providers);
   const whisper = checkWhisper(WHISPER_MODEL, rootDir);
@@ -163,6 +179,19 @@ app.post("/api/warmup", async (_req, res) => {
   res.json({ ok: Object.values(warmed).every(Boolean), warmed });
 });
 
+/**
+ * POST /api/practice/new — generate a fresh practice set (feature 001).
+ *
+ * Body: { category? = "interviews", level? = "B2", provider?, personalized? = false }
+ *   category — key of CATEGORY_STAGES; level — A1..C2; provider — id of the LLM
+ *   to prefer (falls through the fallback chain when unknown); personalized —
+ *   whether the learner memory may steer the set.
+ * 200 → { set: PracticeSet, provider: ProviderId } — the chosen provider is
+ *   echoed so the UI can show which model answered.
+ * 400 { error } → invalid category or level (nothing is generated).
+ * 502 { error } → every provider in the chain failed (LLM error message).
+ * The learner memory (profile + all sessions) is always built and passed in.
+ */
 app.post("/api/practice/new", async (req, res) => {
   const { category = "interviews", level = "B2", provider: providerReq, personalized = false } = req.body ?? {};
   if (!isCategory(category) || !isLevel(level)) {
@@ -184,6 +213,22 @@ app.post("/api/practice/new", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/evaluate — score a free-text answer against a target (feature 001).
+ *
+ * Body: { target: string, userText: string, question? = "", level? = "B2",
+ *         provider?, sessionId?, fragmentId? }
+ *   target   — the text to compare against; userText — what the learner said
+ *   (both required, userText non-empty); level — A1..C2; provider — preferred
+ *   LLM id; sessionId + fragmentId — persistence coordinates (see below).
+ * 200 → { evaluation: Evaluation, provider: ProviderId } (deterministic +
+ *   LLM-merged evaluation: score, verdict, matched/missing/extra, issues, tips).
+ * 400 { error } → missing/empty target|userText, or invalid level.
+ * 502 { error } → every provider in the chain failed.
+ * Side effect: when sessionId names an existing session AND fragmentId names a
+ *   fragment of its LAST question, the attempt is appended to that fragment and
+ *   the profile is re-aggregated (persistAttempt); otherwise nothing persists.
+ */
 app.post("/api/evaluate", async (req, res) => {
   const { target, userText, question, level = "B2", provider: providerReq, sessionId, fragmentId } = req.body ?? {};
   if (typeof target !== "string" || typeof userText !== "string" || userText.trim().length === 0) {
@@ -278,6 +323,25 @@ function persistAttempt(params: {
   }
 }
 
+/**
+ * POST /api/session/save — persist a completed practice session as ONE
+ * question (legacy endpoint: the current frontend uses /api/session/start +
+ * /api/session/checkpoint; this route serves curl/external clients).
+ *
+ * Body: { id?, category? = "free", level? = "B2", provider? = "unknown",
+ *         question? = "", context? = "", fragments?, fullAnswer? }
+ *   question/context feed topicPrompt + title; fragments is the optional list
+ *   of { id?, text?, attempts?, passed? } scored chunks; fullAnswer (string or
+ *   { text }) is stored as the question answer.
+ * 200 → { id, nextStep } — id is the stored session id (the client id is used
+ *   when it is a non-empty string, else a fresh randomUUID) and nextStep is
+ *   the freshly recomputed learner suggestion persisted on the profile.
+ * 200 → { id, nextStep: null, warning } when the next-step LLM call fails:
+ *   the session is already saved, so the client keeps the id (spec 117 keeps
+ *   this degraded success shape unchanged).
+ * 500 { error } → the session could not be persisted (e.g. unsafe id or a
+ *   legacy v1 file), reported as JSON by the global /api middleware (117).
+ */
 app.post("/api/session/save", async (req, res) => {
   const { id, category = "free", level = "B2", provider = "unknown", question = "", context = "", fragments = [], fullAnswer } =
     req.body ?? {};
@@ -335,6 +399,13 @@ app.post("/api/session/save", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/next-step — recompute and persist the learner's next step (103).
+ *
+ * No body. 200 → { nextStep: string | null } — persisted on the profile
+ *   before answering, so GET /api/profile and the sidebar pick it up later.
+ * 502 { error } → the LLM call failed; the profile keeps its previous nextStep.
+ */
 app.post("/api/next-step", async (_req, res) => {
   try {
     const { nextStep } = await buildNextStep(candidates(), storage.loadProfile(), storage.loadAllSessions());
@@ -508,6 +579,18 @@ app.get("/api/sessions/:id/export", (req, res) => {
   res.json(session);
 });
 
+/**
+ * GET /api/history — flat session list for the history view (CU3).
+ *
+ * No input. 200 → { sessions: [{ id, date, category, level, question, title,
+ *   status, avgScore, nextStep }] }
+ *   date      — session updatedAt; question — first question (title fallback);
+ *   avgScore  — rounded mean of the session's fragment scores, null when the
+ *               session has no attempts;
+ *   nextStep  — the profile's current suggestion (same value on every row).
+ * Bodies stay light: no topicPrompt, no fragments (cheap listing NFR).
+ * Errors: none in the happy path; unexpected storage failures → 500 { error }.
+ */
 app.get("/api/history", (_req, res) => {
   const sessions = storage.loadAllSessions();
   const profile = storage.loadProfile();
@@ -526,6 +609,16 @@ app.get("/api/history", (_req, res) => {
   });
 });
 
+/**
+ * GET /api/profile — learner profile plus computed stats (features 108 / CU3).
+ *
+ * No input. 200 → { profile: Profile, stats }
+ *   stats = { sessions, avg, byCategory, weakErrorsTop, vocabGaps,
+ *             recentTopics, trend }
+ *   trend — last 30 fragment scores across all sessions, oldest→newest, for
+ *   the progress chart. Read-only: nothing is persisted here.
+ * Errors: unexpected storage failure → 500 { error } (global middleware).
+ */
 app.get("/api/profile", async (_req, res) => {
   const profile = storage.loadProfile();
   const sessions = storage.loadAllSessions();
@@ -603,6 +696,20 @@ app.get("/api/export", (_req, res) => {
   });
 });
 
+/**
+ * POST /api/transcribe — whisper transcription of a raw WAV (feature 002).
+ *
+ * Input: raw binary body (Content-Type audio/*, ≤ 80 MB) — NOT JSON; optional
+ *   query `words=1|true` to also return word-level timestamps.
+ * 200 → { text, durationMs }  |  { text, words: WhisperWord[], durationMs }
+ *        (words only with `words=1`).
+ * 400 { error } → empty body, whisper binary not installed (message = hint),
+ *   or the model had just been downloaded — this last answer carries
+ *   `code: "MODEL_DOWNLOADED"` (spec 002) and the client must record again.
+ * 500 { error } → model download failed, or the transcription itself failed.
+ * The temp WAV is written under data/tmp/ with a random name and always
+ * removed (finally), success or failure.
+ */
 app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
   const buf = req.body as Buffer | undefined;
   if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
@@ -636,6 +743,16 @@ app.post("/api/transcribe", express.raw({ type: "audio/*", limit: "80mb" }), asy
   }
 });
 
+/**
+ * GET /api/whisper/status — whisper readiness for the STT picker (feature 002).
+ *
+ * No input. 200 → { available: boolean, binary: string | null,
+ *   modelName, modelFile, modelReady: boolean, modelPath: string | null,
+ *   hint: string }.
+ * Total by design: a missing binary or model is reported as available:false /
+ * modelReady:false with the install hint, never as an error status. The same
+ * payload (minus binary/modelPath) is embedded in GET /api/health.
+ */
 app.get("/api/whisper/status", (_req, res) => {
   res.json(checkWhisper(WHISPER_MODEL, rootDir));
 });
@@ -1162,6 +1279,20 @@ app.get("/api/lookup", async (req, res) => {
   }
 });
 
+/**
+ * POST /api/chat — free-form coach chat over the LLM (feature 003).
+ *
+ * Body: { message: string, provider? }
+ *   message — non-empty user text; provider — preferred LLM id (falls through
+ *   the fallback chain when unknown).
+ * The learner memory (profile + sessions) is always injected as the system
+ *   context — the chat never runs without it (AGENTS.md rule).
+ * 200 → { reply: string, provider: ProviderId }.
+ * 200 → { reply: string, provider: "local", offline: true } when every provider
+ *   failed: a canned fallback (email-phrasing aware) keeps the conversation
+ *   usable offline — deliberately a 200, the client renders it as-is.
+ * 400 { error } → message missing/empty.
+ */
 app.post("/api/chat", async (req, res) => {
   const { message, provider: providerReq } = req.body ?? {};
   if (typeof message !== "string" || message.trim().length === 0) {
@@ -1190,6 +1321,16 @@ function avgSessionScore(s: SessionV2): number | null {
   const scores = s.questions.flatMap((q) => q.fragments.flatMap((f) => f.attempts.map((a) => a.score)));
   return scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : null;
 }
+
+// ---------------------------------------------------------------------------
+// Global /api error contracts (feature 117): registered AFTER every /api
+// route, so `apiNotFound` only sees routes that fell through (404 { error })
+// and `apiErrorHandler` only sees exceptions nobody caught — including the
+// malformed-JSON body-parse error of express.json(). Both answer JSON, never
+// Express' HTML page. See src/lib/http-errors.ts for the shape rule.
+// ---------------------------------------------------------------------------
+app.use("/api", apiNotFound);
+app.use("/api", apiErrorHandler);
 
 const port = Number(env.PORT ?? 3000);
 const server = app.listen(port, () => {
