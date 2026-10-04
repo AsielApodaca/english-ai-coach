@@ -22,7 +22,14 @@ import { buildSessionPayload } from "../src/lib/session-payload.ts";
 import type { SessionV2 } from "../src/lib/storage.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const reducerSrc = readFileSync(join(repoRoot, "src", "lib", "cu2.ts"), "utf8");
+// Feature 117 split the reducer into cu2.ts (barrel) + cu2-state /
+// cu2-transitions / cu2-lines. The "must be gone"/"authoritative union"
+// checks below are about the MODULE as a whole, so they run over every file
+// it is recomposed from — joined, the regexes see exactly the same code they
+// saw when it lived in one file.
+const reducerSrc = ["cu2.ts", "cu2-state.ts", "cu2-transitions.ts", "cu2-lines.ts"]
+  .map((file) => readFileSync(join(repoRoot, "src", "lib", file), "utf8"))
+  .join("\n");
 const sessionRoutesSrc = readFileSync(join(repoRoot, "src", "lib", "routes", "session.ts"), "utf8");
 const viewSrc = readFileSync(join(repoRoot, "public", "ui", "practice-view.js"), "utf8");
 
