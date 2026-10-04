@@ -60,9 +60,8 @@ export interface RefineAttemptParams {
   /** Pass decision of the fast response (align score vs pass threshold). */
   passed: boolean;
   /**
-   * Session pass threshold the fast response used (feature 117: the merged
-   * `verdict`/`next` must agree with that decision). Absent → the default
-   * threshold of `DEFAULT_PASS_THRESHOLD`.
+   * Session pass threshold the fast response used; the merged `verdict`/`next`
+   * must agree with that decision (feature 117). Absent → DEFAULT_PASS_THRESHOLD.
    */
   passThreshold?: number;
   /**
@@ -141,7 +140,6 @@ export async function refineAttempt(candidates: Candidate[], params: RefineAttem
  * `persistAttempt`): `computeStats` reads `q.eval.issues` for `weakErrors`
  * (learner.ts), so without it the learner memory would keep the fast
  * evaluation's derived-only issues until some future attempt persisted.
- *
  * Wrapped in try/catch (here and again in `refineAttempt`): persistence must
  * never break the response nor the long-poll awaiting the refinement.
  *
@@ -249,13 +247,12 @@ export type RefinementWaitResult =
   | { status: "timeout" };
 
 /**
- * Await a registered refinement with a server-side cap.
+ * Await a registered refinement with a server-side cap. Resolves "refined"
+ * when the promise fulfils, "failed" when it rejects (LLM chain down) and
+ * "timeout" after `timeoutMs` — the timer is always cleared, so a settled
+ * wait leaks no handle; this never rejects.
  *
- * Resolves `"refined"` when the promise fulfils, `"failed"` when it rejects
- * (LLM chain down) and `"timeout"` after `timeoutMs` — the timer is always
- * cleared, so a settled wait leaks no handle. Never rejects.
- *
- * @param entry registry entry (already looked up, TTL not re-checked here)
+ * @param entry registry entry (already looked up; TTL not re-checked here)
  * @param timeoutMs maximum wait in ms
  */
 export async function awaitRefinement(entry: RefinementEntry, timeoutMs: number): Promise<RefinementWaitResult> {

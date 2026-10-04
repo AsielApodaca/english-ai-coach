@@ -138,10 +138,9 @@ function secondsToMs(value: unknown): number {
 }
 
 /**
- * Convert a whisper timestamp value to milliseconds.
- * Accepts the two shapes whisper.cpp emits:
- *  - bare float-seconds strings, e.g. `"1.00"` → 1000
- *  - `HH:MM:SS,mmm` strings, e.g. `"00:00:01,120"` → 1120
+ * Convert a whisper timestamp value to milliseconds. Accepts the two shapes
+ * whisper.cpp emits: bare float-seconds strings (`"1.00"` → 1000) and
+ * `HH:MM:SS,mmm` strings (`"00:00:01,120"` → 1120).
  */
 function timestampToMs(value: unknown): number {
   if (typeof value !== "string") return 0;
@@ -157,8 +156,8 @@ function timestampToMs(value: unknown): number {
 }
 
 /**
- * Treat a whisper `offsets` value as integral milliseconds (the unit whisper.cpp
- * actually emits in `-oj` output; NOT seconds — do not apply `secondsToMs`).
+ * Treat a whisper `offsets` value as integral milliseconds (the unit
+ * whisper.cpp emits in `-oj` output; NOT seconds — do not use `secondsToMs`).
  */
 function offsetsToMs(value: unknown): number {
   const n = Number(value);
@@ -176,11 +175,10 @@ function stripAnnotations(text: string): string {
 /**
  * Extract a single word from a whisper segment object (any timestamp shape).
  * Annotation-only segments ([BLANK_AUDIO] on a silent recording) return null
- * so they never reach word matching as phantom words.
- * Timestamp resolution order:
- *   1. numeric `start`/`end` (seconds) — used by the old v1 JSON layouts
- *   2. `timestamps` (HH:MM:SS,mmm or bare-second strings) — unambiguous, preferred over `offsets`
- *   3. `offsets` (milliseconds) — the unit whisper.cpp `-oj`/`-ml 1` emits
+ * so they never reach word matching as phantom words. Timestamp resolution
+ * order: 1. numeric `start`/`end` (seconds, old v1 layouts); 2. `timestamps`
+ * (HH:MM:SS,mmm or bare-second strings, preferred over `offsets`); 3.
+ * `offsets` (milliseconds, the unit whisper.cpp `-oj`/`-ml 1` emits).
  */
 function segmentToWord(seg: unknown): WhisperWord | null {
   if (!seg || typeof seg !== "object") return null;
@@ -215,10 +213,10 @@ function findWordArray(obj: Record<string, unknown>): unknown[] | null {
 
 /**
  * Parse a whisper-cli JSON transcript into word-level entries plus the full
- * text. Robust to the output shape variants of whisper.cpp (`segments` with
- * `start`/`end` in seconds, `transcription` with `offsets`/`timestamps`, etc.).
- * Whisper annotations ([BLANK_AUDIO], [MUSIC], …) are stripped from both the
- * words and the text: a silent recording transcribes to `{ words: [], text: "" }`.
+ * text, robust to the output shape variants of whisper.cpp (`segments` with
+ * `start`/`end` in seconds, `transcription` with `offsets`/`timestamps`).
+ * Annotations ([BLANK_AUDIO], [MUSIC], …) are stripped from both words and
+ * text: a silent recording transcribes to `{ words: [], text: "" }`.
  */
 export function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: string } {
   let data: unknown;
@@ -255,18 +253,12 @@ export function parseWhisperJSON(raw: string): { words: WhisperWord[]; text: str
   return { words, text };
 }
 
-/**
- * Parse a whisper-cli JSON transcript into word-level entries.
- * Pure helper (no binary required) so it can be unit-tested in isolation.
- */
+/** Word-level entries of a whisper-cli JSON transcript (pure, unit-testable). */
 export function parseWhisperWordsJSON(raw: string): WhisperWord[] {
   return parseWhisperJSON(raw).words;
 }
 
-/**
- * Transcribe a 16kHz mono WAV file with whisper-cli, emitting one word per
- * segment with per-word timestamps (milliseconds).
- */
+/** Transcribe with whisper-cli emitting one word per segment (-oj -ml 1 -sow). */
 export async function transcribeWords(
   wavPath: string,
   modelFile: string,
