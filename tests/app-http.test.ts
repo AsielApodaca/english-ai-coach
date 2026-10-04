@@ -14,6 +14,7 @@ import { createTtsCache } from "../src/lib/tts-cache.ts";
 import { createRefinementRegistry } from "../src/lib/refinement.ts";
 import { createLookupCache } from "../src/lib/lookup.ts";
 import { CHAT_MAX_CHARS } from "../src/lib/routes/chat.ts";
+import { evaluateFragmentDeterministic } from "../src/lib/practice-eval.ts";
 import type { Provider } from "../src/lib/providers/types.ts";
 
 // ---------------------------------------------------------------------------
@@ -41,13 +42,14 @@ const offlineProvider: Provider = {
 
 let tmpDir: string;
 let storage: ReturnType<typeof createStorage>;
+let deps: AppDeps;
 let server: Server;
 let base = "";
 
 before(async () => {
   tmpDir = mkdtempSync(join(tmpdir(), "coach-app-http-"));
   storage = createStorage(tmpDir);
-  const deps: AppDeps = {
+  deps = {
     storage,
     providers: [offlineProvider],
     primaryProviderId: "mock",
@@ -178,4 +180,97 @@ test("POST /api/session/checkpoint: invalid eval → 400 before anything is pers
   });
   assert.equal(res.status, 400);
   assert.match(String(json.error), /SessionEval/);
+});
+
+test("POST /api/session/save: a storage failure answers 500 { error } JSON, never HTML", async () => {
+  // The persistence try must sit INSIDE the route (feature 117, spec
+  // criterion "saveSession roto → 500 { error }"): before it, the exception
+  // escaped to Express' default handler and the client got an HTML page.
+  const brokenDeps: AppDeps = {
+    ...deps,
+    storage: { ...deps.storage, saveSession() { throw new Error("disk full (test double)"); } },
+  };
+  const brokenServer: Server = await new Promise((resolve) => {
+    const s = createApp(brokenDeps).listen(0, () => resolve(s));
+  });
+  try {
+    const brokenBase = `http://127.0.0.1:${(brokenServer.address() as AddressInfo).port}`;
+    const res = await fetch(`${brokenBase}/api/session/save`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ question: "Will this ever hit the disk?" }),
+    });
+    assert.equal(res.status, 500);
+    assert.match(String(res.headers.get("content-type")), /application\/json/);
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.deepEqual(Object.keys(body), ["error"]);
+    assert.match(String(body.error), /disk full/);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      brokenServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
+});
+
+test("POST /api/evaluate: invalid sessionId/fragmentId → 400 before any evaluation", async () => {
+  const badSession = await postJson("/api/evaluate", {
+    target: "hello there",
+    userText: "hello",
+    sessionId: "../../escape",
+  });
+  assert.equal(badSession.res.status, 400);
+  assert.match(String(badSession.json.error), /sessionId/);
+
+  const badFragment = await postJson("/api/evaluate", {
+    target: "hello there",
+    userText: "hello",
+    fragmentId: "../../escape",
+  });
+  assert.equal(badFragment.res.status, 400);
+  assert.match(String(badFragment.json.error), /fragmentId/);
+});
+
+test("POST /api/attempt: invalid sessionId → 400 before whisper or persistence", async () => {
+  // The guards run before the mode/body checks (routes/attempt.ts), so an
+  // empty JSON body still reaches them: no whisper, no temp file, no storage.
+  const { res, json } = await postJson("/api/attempt?target=hello&sessionId=..%2Fescape", {});
+  assert.equal(res.status, 400);
+  assert.match(String(json.error), /sessionId/);
+});
+
+test("POST /api/evaluate: verdict/next follow the session's passThreshold, not the default 70", async () => {
+  // A partial answer scores 57 on this pair (deterministic, no LLM): below the
+  // default threshold (70 → next:false) but above the custom one we install on
+  // the session (52 → next:true). If the route ignored the snapshot, both calls
+  // would agree.
+  const target = "I led the migration of our billing service to the new platform last quarter";
+  const userText = "I led the migration of our billing service";
+  const { evaluation: baseline } = evaluateFragmentDeterministic({ target, userText });
+  const score = baseline.score;
+  assert.ok(score > 5 && score < 70, `crafted pair must land in (5, 70), got ${score}`);
+
+  const saved = await postJson("/api/session/save", { question: target });
+  assert.equal(saved.res.status, 200);
+  const sessionId = String(saved.json.id);
+  const session = storage.loadSession(sessionId);
+  assert.ok(session);
+  session.config.settingsSnapshot = {
+    ...session.config.settingsSnapshot,
+    overrides: { ...session.config.settingsSnapshot.overrides, passThreshold: score - 5 },
+  };
+  storage.saveSession(session);
+
+  interface EvalBody { evaluation: { score: number; next: boolean; verdict: string } }
+  const withSession = await postJson("/api/evaluate", { target, userText, sessionId });
+  assert.equal(withSession.res.status, 200);
+  const sessionEval = (withSession.json as unknown as EvalBody).evaluation;
+  assert.equal(sessionEval.score, score, "the offline path is fully deterministic");
+  assert.equal(sessionEval.next, true, "session threshold (score-5) must be applied");
+  assert.equal(sessionEval.verdict, "great");
+
+  const withoutSession = await postJson("/api/evaluate", { target, userText });
+  assert.equal(withoutSession.res.status, 200);
+  const defaultEval = (withoutSession.json as unknown as EvalBody).evaluation;
+  assert.equal(defaultEval.next, false, "no session → the documented 70 fallback applies");
+  assert.equal(defaultEval.verdict, "almost");
 });

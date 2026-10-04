@@ -8,7 +8,7 @@
  * path-escaping id would throw 500 instead of failing validation with 400).
  */
 
-import type { AttemptWord, FeedbackIssue, SessionEval, WordStatus } from "./session-types.ts";
+import type { AttemptWord, SessionEval, WordStatus } from "./session-types.ts";
 
 // ---------------------------------------------------------------------------
 // Client-body guards (feature 117): a /api JSON payload must match the type

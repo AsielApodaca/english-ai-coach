@@ -64,7 +64,7 @@
 - `npm install` — instala dependencias
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
 - `npm start` — arranca el servidor local (watch) en http://localhost:3000
-- `npm run check` — `tsc --noEmit` (gate de tipos, feature 117) + `node --check` de cada archivo TS/JS (type stripping, sin build)
+- `npm run check` — `tsc --noEmit` (gate de tipos, feature 117) sobre `src/` + `tests/`, y `node --check` de los módulos backend listados y de **todos** los ficheros JS de `public/` (type stripping, sin build)
 - `npm test` — suite con `node:test` (`tests/*.test.ts`, 44 archivos)
 
 No hay lint ni formatter configurados: el gate de calidad es `npm run check` (incluye el type gate) + `npm test`. Convención de tamaño (117): ningún `src/**/*.ts` supera 300 líneas; los módulos grandes de la lista anterior son el punto de entrada que recompone archivos más pequeños (`storage.ts` → `session-types`/`storage-session`/…, `practice.ts` → `practice-generate`/`practice-text`/`practice-eval`, etc.).

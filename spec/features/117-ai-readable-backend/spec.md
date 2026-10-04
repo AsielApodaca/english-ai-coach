@@ -1,6 +1,6 @@
 # 117 · Backend legible para IA (refactor de convenciones)
 
-**Estado:** done ✅ (implementado en la rama `refactor/117-ai-readable-backend`, 16 commits; ver *Verificación final* al final del documento)
+**Estado:** done ✅ (implementado en la rama `refactor/117-ai-readable-backend`, 18 commits; ver *Verificación final* al final del documento)
 
 ## Contexto
 
@@ -84,7 +84,7 @@ Refactor del backend en **7 fases internas** (cada fase es un commit en la misma
 
 ## Criterios de aceptación
 
-- [x] `npx tsc --noEmit` → 0 errores; `npm test` → todos en verde (586 pass / 0 fail / 2 skipped); `npm run check` incluye `tsc --noEmit`.
+- [x] `npx tsc --noEmit` → 0 errores; `npm test` → todos en verde (591 pass / 0 fail / 2 skipped); `npm run check` incluye `tsc --noEmit`.
 - [x] `grep -rn ": any\|as any\|@ts-ignore" src/ tests/` → 0 coincidencias (sin `any` para tapar los 9 errores).
 - [x] Ningún archivo `src/**/*.ts` con >300 líneas (`wc -l` ordenado descendente) — lista en *Verificación final*.
 - [x] Las 28 rutas `/api/*` tienen JSDoc con shape de entrada/salida/errores (10 nuevas, 18 ya existentes intactas).
@@ -121,10 +121,17 @@ Refactor del backend en **7 fases internas** (cada fase es un commit en la misma
 
 ```
 npx tsc --noEmit         → 0 errores
-npm test                 → 588 tests · 586 pass · 0 fail · 2 skipped
+npm test                 → 593 tests · 591 pass · 0 fail · 2 skipped
 npm run check            → verde (tsc --noEmit + node --check de la lista explícita)
 grep ": any|as any|@ts-ignore" src/ tests/ → 0 coincidencias
 ```
+
+**Ronda de review posterior a la implementación (findings corregidos en el commit final de la rama):**
+
+- Código muerto del split (`lookup-types.ts` duplicaba tres constantes) e import sin usar (`session-guards.ts`).
+- Cifras de este documento y del `tech-stack.md` desalineadas con la realidad.
+- Los 5 ficheros JS de `public/` que no estaban en el script `check` (`app.js`, `ui/dom.js`, `ui/router.js`, `ui/store.js`, `speech/recorder-wave.js`), con test que falla si la lista vuelve a quedarse corta (`tests/type-gate.test.ts`).
+- Tests que faltaban para criterios ya tildados: `saveSession` roto → 500 `{error}`, `evaluate`/`attempt` con ids inválidos → 400, y cableado de `readPassThreshold` en `POST /api/evaluate`.
 
 **Smoke manual** (`node src/server.ts`, solo GET, sin escribir `data/`):
 
@@ -136,7 +143,7 @@ grep ": any|as any|@ts-ignore" src/ tests/ → 0 coincidencias
 | `GET /api/does-not-exist` | 404 `{error:"Unknown API route: …"}` (JSON, no HTML) |
 | `POST /api/chat` body malformado | 500 `{error:"Expected property name…"}` (JSON, no HTML; ver *Elección deliberada* en `http-errors.ts`) |
 
-**Recuento `wc -l` de `src/**/*.ts` (descendente, 73 archivos, 8812 líneas) — ninguno >300:**
+**Recuento `wc -l` de `src/**/*.ts` (descendente, 67 archivos, 8802 líneas) — ninguno >300:**
 
 ```
    300 src/lib/refinement.ts
@@ -175,7 +182,7 @@ grep ": any|as any|@ts-ignore" src/ tests/ → 0 coincidencias
    112 src/lib/routes/sessions.ts
    112 src/lib/routes/profile.ts
    111 src/lib/storage.ts
-   111 src/lib/lookup-types.ts
+   101 src/lib/lookup-types.ts
    106 src/lib/tts-status.ts
    106 src/lib/providers/ollama.ts
     97 src/lib/app.ts

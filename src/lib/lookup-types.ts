@@ -31,16 +31,6 @@ export const LOOKUP_DEADLINE_MS = 9000;
 /** Default capacity of the server LRU cache (good entries have no TTL). */
 export const LOOKUP_CACHE_MAX = 256;
 
-/**
- * Per-call network budgets (ms) so a stuck source can never block a hover.
- * dictionaryapi.dev is unreachable from this network (it always times out),
- * so the HTTP budget is capped at 2.5 s — the maximum stall a hover pays
- * before the pipeline falls through to the next source.
- */
-const HTTP_TIMEOUT_MS = 2500;
-const LLM_TIMEOUT_MS = 12000;
-const LLM_MAX_TOKENS = 400;
-
 /** Degraded message returned when every source failed (client renders it). */
 export const LOOKUP_UNAVAILABLE = "Meaning not available right now.";
 

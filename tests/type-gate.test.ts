@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
@@ -33,4 +33,29 @@ test("check script runs tsc before the syntax checks", () => {
     tscAt < syntaxAt,
     "`tsc --noEmit` must run first so type errors surface before syntax checks",
   );
+});
+
+/** Every .js file under `public/`, as a repo-relative POSIX path. */
+function listPublicJs(dir: string): string[] {
+  const entries = readdirSync(dir, { withFileTypes: true });
+  return entries.flatMap((entry) => {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) return listPublicJs(full);
+    return entry.isFile() && entry.name.endsWith(".js")
+      ? [relative(repoRoot, full).split("\\").join("/")]
+      : [];
+  });
+}
+
+test("check syntax-checks every frontend JS file (frontend has no tsc)", () => {
+  // The frontend is plain JS (outside tsconfig), so `node --check` is its ONLY
+  // gate: a file missing from the script ships unchecked (review finding,
+  // feature 117). Backend TS is covered by tsc --noEmit above.
+  const check = pkg.scripts.check;
+  for (const file of listPublicJs(join(repoRoot, "public"))) {
+    assert.ok(
+      check.includes(`node --check ${file}`),
+      `check must syntax-check ${file} — frontend JS has no other gate`,
+    );
+  }
 });
