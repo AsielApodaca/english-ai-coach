@@ -15,6 +15,13 @@ const MODELS: Record<string, string> = {
 
 const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
+/**
+ * Whisper model used when the `WHISPER_MODEL` env var is unset — the single
+ * source for the default previously inlined as `"small.en"` in server.ts
+ * (feature 117: the route modules read the env with this constant).
+ */
+export const DEFAULT_WHISPER_MODEL = "small.en";
+
 function findBinary(): string | null {
   const candidates = ["whisper-cli", "whisper"];
   for (const name of candidates) {

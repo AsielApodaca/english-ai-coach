@@ -21,7 +21,9 @@
 
 import { alignTextWords, alignWords, forcedAmberWordsFromIssues } from "./align.ts";
 import { buildFeedbackText } from "./cu2.ts";
+import { updateProfile } from "./learner.ts";
 import { evaluateFragmentDeterministic, isFiller, mergeLLMFeedback, normalize, refineWithLLM } from "./practice.ts";
+import type { AttemptStorage } from "./attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
 import type { AttemptWord, FeedbackIssue, Level } from "./storage.ts";
 import type { WhisperWord } from "./whisper.ts";
@@ -58,8 +60,8 @@ export interface RefineAttemptParams {
   passed: boolean;
   /**
    * Hook run after a successful refinement — e.g. patching `question.eval` of
-   * a full attempt (server.ts). Guarded here: a throwing hook can never break
-   * the refinement nor the long-poll that awaits it.
+   * a full attempt (`patchFullEval` below). Guarded here: a throwing hook can
+   * never break the refinement nor the long-poll that awaits it.
    */
   onRefined?: (merged: Evaluation) => void;
 }
@@ -112,6 +114,56 @@ export async function refineAttempt(candidates: Candidate[], params: RefineAttem
     words: aligned.words,
     provider,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Patching the durable eval of a FULL attempt
+// ---------------------------------------------------------------------------
+
+/**
+ * Patch `question.eval` of a FULL attempt with the refined evaluation (116).
+ *
+ * The fast response persists the DURABLE deterministic eval first, so the
+ * review panel has something even when the LLM is down; when the refinement
+ * lands, the LLM-owned fields move to their pre-116 values (combined score,
+ * verdict, tips, derived+LLM issues). `next` keeps the align-based pass
+ * decision written by `persistAttempt` — the pass/fail flow never re-reads it
+ * and must stay byte-identical to the synchronous behaviour.
+ *
+ * The profile is recomputed right after the patch (same aggregation as
+ * `persistAttempt`): `computeStats` reads `q.eval.issues` for `weakErrors`
+ * (learner.ts), so without it the learner memory would keep the fast
+ * evaluation's derived-only issues until some future attempt persisted.
+ *
+ * Wrapped in try/catch (here and again in `refineAttempt`): persistence must
+ * never break the response nor the long-poll awaiting the refinement.
+ *
+ * @param storage - session/profile persistence surface (createStorage)
+ * @param sessionId - session of the attempt; absent → no-op
+ * @param isFull - true only when the attempt was persisted as the full answer
+ * @param merged - the refined evaluation to write onto `question.eval`
+ */
+export function patchFullEval(storage: AttemptStorage, sessionId: string | undefined, isFull: boolean, merged: Evaluation): void {
+  if (!isFull || !sessionId) return;
+  try {
+    const session = storage.loadSession(sessionId);
+    if (!session) return;
+    const question = session.questions.at(-1);
+    if (!question?.eval) return;
+    question.eval = {
+      ...question.eval,
+      score: merged.score,
+      verdict: merged.verdict,
+      issues: merged.issues,
+      tips: merged.tips,
+    };
+    storage.saveSession(session);
+    const profile = storage.loadProfile();
+    updateProfile(profile, storage.loadAllSessions());
+    storage.saveProfile(profile);
+  } catch {
+    // v1 session file or disk error: the refinement itself must still land.
+  }
 }
 
 // ---------------------------------------------------------------------------

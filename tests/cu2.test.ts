@@ -23,7 +23,7 @@ import type { SessionV2 } from "../src/lib/storage.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const reducerSrc = readFileSync(join(repoRoot, "src", "lib", "cu2.ts"), "utf8");
-const serverSrc = readFileSync(join(repoRoot, "src", "server.ts"), "utf8");
+const sessionRoutesSrc = readFileSync(join(repoRoot, "src", "lib", "routes", "session.ts"), "utf8");
 const viewSrc = readFileSync(join(repoRoot, "public", "ui", "practice-view.js"), "utf8");
 
 /**
@@ -445,7 +445,7 @@ test("full question walk: question → model → repeatingFragment → … → d
 test("GET /api/session/:id payload: exact shape, no intro/explainLine, fullLine present", () => {
   const payload = buildSessionPayload(payloadSession());
   // Exact contract: the route returns exactly this object (it delegates to
-  // buildSessionPayload — no second copy of the shape living in server.ts).
+  // buildSessionPayload — no second copy of the shape living in the route).
   assert.deepEqual(Object.keys(payload).sort(), [
     "autoAdvance",
     "fullLine",
@@ -464,7 +464,7 @@ test("GET /api/session/:id payload: exact shape, no intro/explainLine, fullLine 
   assert.equal("explainLine" in payload, false);
   assert.equal("introText" in payload, false);
   // The route handler is a thin wrapper over the pure helper.
-  assert.match(serverSrc, /res\.json\(buildSessionPayload\(session\)\)/);
+  assert.match(sessionRoutesSrc, /res\.json\(buildSessionPayload\(session\)\)/);
 });
 
 test("buildFeedbackText: passed → positive with tip; failed → focus on missing", () => {

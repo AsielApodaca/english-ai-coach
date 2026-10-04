@@ -250,25 +250,26 @@ test("attempt feedback: server timeout → 200 { refined: false }", async () => 
 });
 
 // ---------------------------------------------------------------------------
-// Wiring — server.ts and practice-view.js honour the contract
+// Wiring — routes/attempt.ts and practice-view.js honour the contract
 // ---------------------------------------------------------------------------
 
 const repoRoot = join(fileURLToPath(new URL(".", import.meta.url)), "..");
-const serverSrc = readFileSync(join(repoRoot, "src", "server.ts"), "utf8");
+// The attempt pipeline moved from routes/practice.ts to routes/attempt.ts
+// (feature 117 split); the contract it must keep is asserted on this file.
+const practiceRoutesSrc = readFileSync(join(repoRoot, "src", "lib", "routes", "attempt.ts"), "utf8");
 const viewSrc = readFileSync(join(repoRoot, "public", "ui", "practice-view.js"), "utf8");
 
-test("wiring: server registers the refinement before answering and exposes the long-poll", () => {
-  assert.match(serverSrc, /app\.get\("\/api\/attempt\/:id\/feedback"/);
-  // Scope everything to the POST /api/attempt handler (the file also holds
-  // /api/evaluate, which keeps the synchronous composed evaluation).
-  const start = serverSrc.indexOf('app.post("/api/attempt"');
-  const end = serverSrc.indexOf('app.get("/api/attempt/:id/feedback"');
+test("wiring: the route registers the refinement before answering and exposes the long-poll", () => {
+  assert.match(practiceRoutesSrc, /app\.get\("\/api\/attempt\/:id\/feedback"/);
+  // Scope everything to the POST /api/attempt handler.
+  const start = practiceRoutesSrc.indexOf('app.post("/api/attempt"');
+  const end = practiceRoutesSrc.indexOf('app.get("/api/attempt/:id/feedback"');
   assert.ok(start > -1 && end > start);
-  const handlerSrc = serverSrc.slice(start, end);
-  assert.match(handlerSrc, /refinements\.set\(attemptId, pendingRefinement\)/);
+  const handlerSrc = practiceRoutesSrc.slice(start, end);
+  assert.match(handlerSrc, /deps\.refinements\.set\(attemptId, pendingRefinement\)/);
   assert.match(handlerSrc, /attemptId = randomUUID\(\)/);
   // Persisted (durable, deterministic) BEFORE the response goes out.
-  const persistAt = handlerSrc.indexOf("persistAttempt({");
+  const persistAt = handlerSrc.indexOf("persistAttempt(deps.storage, {");
   const respondAt = handlerSrc.indexOf("attemptId,");
   assert.ok(persistAt > -1 && respondAt > -1 && persistAt < respondAt);
   // The blank transcript answers exactly as before: no attemptId at all.

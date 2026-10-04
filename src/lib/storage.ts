@@ -377,6 +377,20 @@ export function isValidSessionId(id: string): boolean {
   return /^[a-zA-Z0-9-]+$/.test(id);
 }
 
+/**
+ * Validate an optional client-supplied session/fragment id (feature 117).
+ *
+ * Absent (undefined/null/"") is valid — it only means "do not persist".
+ * Anything else must match `isValidSessionId` (the exact criterion
+ * `sessionFile()` enforces): a path-escaping id would make
+ * `loadSession`/`saveSession` throw (500) instead of failing validation (400).
+ * Shared by `/api/evaluate`, `/api/attempt` and `/api/session/*`.
+ */
+export function isValidOptionalSessionId(v: unknown): boolean {
+  if (v === undefined || v === null || v === "") return true;
+  return typeof v === "string" && isValidSessionId(v);
+}
+
 /** Context buckets are session ids or the "draft" bucket; never path-escape. */
 function isValidBucket(bucket: string): boolean {
   return /^[a-zA-Z0-9-]+$/.test(bucket);
