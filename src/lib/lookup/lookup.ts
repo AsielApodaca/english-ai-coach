@@ -25,8 +25,8 @@
 
 /**
  * Implementation lives in the split modules below (feature 117); this file
- * is the public entry point and re-exports the whole contract, so existing
- * `from "./lookup.ts"` imports keep resolving unchanged.
+ * is the public entry point and re-exports the whole contract, so callers
+ * only ever import `lib/lookup/lookup.ts` (feature 118).
  */
 export * from "./lookup-types.ts";
 export * from "./lookup-validate.ts";

@@ -8,7 +8,7 @@
  * (`FetchLike`) and the server cache interface. No behaviour lives here.
  */
 
-import type { Provider } from "./providers/types.ts";
+import type { Provider } from "../providers/types.ts";
 
 /** Hard cap on the queried text (spec 112: this is not a free-translation API). */
 export const LOOKUP_MAX_CHARS = 60;

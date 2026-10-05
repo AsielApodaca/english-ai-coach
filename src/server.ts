@@ -18,7 +18,7 @@ import { createApp } from "./lib/app.ts";
 import { buildProviders } from "./lib/providers/index.ts";
 import { isProviderId, type ProviderId } from "./lib/providers/types.ts";
 import { createRefinementRegistry } from "./lib/practice/refinement.ts";
-import { createLookupCache } from "./lib/lookup.ts";
+import { createLookupCache } from "./lib/lookup/lookup.ts";
 import { createStorage } from "./lib/session/storage.ts";
 import { createTtsCache } from "./lib/audio/tts-cache.ts";
 import { checkWhisper, DEFAULT_WHISPER_MODEL } from "./lib/audio/whisper.ts";

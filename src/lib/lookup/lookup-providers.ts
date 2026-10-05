@@ -9,8 +9,8 @@
  * next source.
  */
 
-import { completeWithFallback, extractJSON } from "./providers/index.ts";
-import { MS_PER_MIN } from "./time.ts";
+import { completeWithFallback, extractJSON } from "../providers/index.ts";
+import { MS_PER_MIN } from "../time.ts";
 import {
   GLOSS_MAX_CHARS,
   type DictionaryHit,
