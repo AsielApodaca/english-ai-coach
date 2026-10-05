@@ -16,9 +16,9 @@
 
 import type { Express } from "express";
 
-import { checkWhisper, DEFAULT_WHISPER_MODEL } from "../whisper.ts";
+import { checkWhisper, DEFAULT_WHISPER_MODEL } from "../audio/whisper.ts";
 import { providerStatus, warmProviders, warmupEnabled } from "../providers/index.ts";
-import { ttsStatus } from "../tts-status.ts";
+import { ttsStatus } from "../audio/tts-status.ts";
 import type { AppDeps } from "../app.ts";
 
 /**

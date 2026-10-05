@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // ---------------------------------------------------------------------------
@@ -35,27 +35,39 @@ test("check script runs tsc before the syntax checks", () => {
   );
 });
 
-/** Every .js file under `public/`, as a repo-relative POSIX path. */
-function listPublicJs(dir: string): string[] {
-  const entries = readdirSync(dir, { withFileTypes: true });
-  return entries.flatMap((entry) => {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) return listPublicJs(full);
-    return entry.isFile() && entry.name.endsWith(".js")
-      ? [relative(repoRoot, full).split("\\").join("/")]
-      : [];
-  });
-}
-
-test("check syntax-checks every frontend JS file (frontend has no tsc)", () => {
+test("check syntax-checks src and public through a find sweep", () => {
   // The frontend is plain JS (outside tsconfig), so `node --check` is its ONLY
-  // gate: a file missing from the script ships unchecked (review finding,
-  // feature 117). Backend TS is covered by tsc --noEmit above.
+  // gate: a file the script does not reach ships unchecked (review finding,
+  // feature 117). Feature 118 replaced the ~60 explicit `node --check <path>`
+  // entries — a list that had to be re-edited on every file move and silently
+  // fell behind — with a `find` sweep over `src` + `public`. This test pins
+  // that sweep: it fails if the sweep is removed, narrowed to a single root
+  // (leaving the other tree unchecked) or dropped from `node --check`.
   const check = pkg.scripts.check;
-  for (const file of listPublicJs(join(repoRoot, "public"))) {
-    assert.ok(
-      check.includes(`node --check ${file}`),
-      `check must syntax-check ${file} — frontend JS has no other gate`,
-    );
-  }
+  assert.match(
+    check,
+    /find src public/,
+    "`check` must sweep both `src` and `public` (`find src public`)",
+  );
+  assert.match(
+    check,
+    /-name '\*\.ts'/,
+    "`find` must include `*.ts` so backend sources are syntax-checked",
+  );
+  assert.match(
+    check,
+    /-name '\*\.js'/,
+    "`find` must include `*.js` so frontend files are syntax-checked",
+  );
+  assert.match(
+    check,
+    /\\\( -name '\*\.ts' -o -name '\*\.js' \\\)/,
+    "the two `-name` patterns must be grouped (`\\( … \\)`) so `-o` precedence " +
+      "cannot silently drop one of the trees from the sweep",
+  );
+  assert.match(
+    check,
+    /-print0 \| xargs -0 .*node --check/,
+    "the sweep must pipe into `node --check` (NUL-separated, one file per run)",
+  );
 });

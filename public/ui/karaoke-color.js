@@ -4,13 +4,13 @@
  * DOM-free functions shared by the practice view and its unit tests. They own
  * the index mapping that caused the "painted words of another fragment" bug:
  * an aligned `words[]` is LOCAL to the target it was scored against (see
- * `src/lib/align.ts`), while the word spans of a karaoke line are LOCAL to
+ * `src/lib/practice/align.ts`), while the word spans of a karaoke line are LOCAL to
  * that line — the two only pair up one-to-one inside a single line.
  */
 
 /**
  * Split a line of text into the display words the karaoke book renders.
- * Same rules as the target tokenizer of `src/lib/align.ts`, so a line always
+ * Same rules as the target tokenizer of `src/lib/practice/align.ts`, so a line always
  * gets exactly one span per target word.
  *
  * @param {unknown} text - raw line text (null/undefined tolerated)

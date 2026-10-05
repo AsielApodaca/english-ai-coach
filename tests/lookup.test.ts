@@ -22,7 +22,7 @@ import {
   type LlmCandidate,
   type LookupResult,
   type LookupSuccess,
-} from "../src/lib/lookup.ts";
+} from "../src/lib/lookup/lookup.ts";
 import { ProviderError } from "../src/lib/providers/index.ts";
 import {
   isCompleteEntry,

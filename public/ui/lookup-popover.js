@@ -110,7 +110,7 @@ let selectionActive = false;
 const memoryCache = new Map();
 
 // ---------------------------------------------------------------------------
-// Normalization (mirror of `normalizeLookupText` in src/lib/lookup.ts — no
+// Normalization (mirror of `normalizeLookupText` in src/lib/lookup/lookup.ts — no
 // build step to share it, same rules so the cache keys line up)
 // ---------------------------------------------------------------------------
 

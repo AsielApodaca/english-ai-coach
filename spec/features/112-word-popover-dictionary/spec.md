@@ -119,4 +119,4 @@ El aprendiz se topa con vocabulario y phrasal verbs durante la práctica; salir 
 
 ## Recursos
 
-- `public/ui/practice-view.js` (`buildLine`, `renderKaraokeBook`, review `coloredWords`), `public/ui/karaoke-color.js`, `public/styles.css`, `src/server.ts` (nueva ruta `/api/lookup`), `src/lib/` (nuevo módulo puro de pipeline/caché, testeable), `tests/lookup.test.ts`, `spec/design/design-system.md`.
+- `public/ui/practice-view.js` (`buildLine`, `renderKaraokeBook`, review `coloredWords`), `public/ui/karaoke-color.js`, `public/styles.css`, `src/server.ts` (nueva ruta `/api/lookup`), `src/lib/lookup/` (nuevo módulo puro de pipeline/caché, testeable), `tests/lookup.test.ts`, `spec/design/design-system.md`.

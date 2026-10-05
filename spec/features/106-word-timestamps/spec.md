@@ -59,4 +59,4 @@ El color por palabra da feedback granular (dónde exactamente falló) y hace el 
 
 ## Recursos
 
-- `src/lib/whisper.ts`, `src/server.ts`, `tests/wordmatch.test.ts` (matching base a ampliar/reemplazar) y `spec/use-cases/CU2.md`.
+- `src/lib/audio/whisper.ts`, `src/server.ts`, `tests/wordmatch.test.ts` (matching base a ampliar/reemplazar) y `spec/use-cases/CU2.md`.

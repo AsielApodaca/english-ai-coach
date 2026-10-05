@@ -11,28 +11,30 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 ## Comandos
 - `npm start` — arranca el servidor local en http://localhost:3000 (con watch)
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
-- `npm run check` — gate de tipos (`tsc --noEmit`) + verificación de sintaxis TS (type stripping)
+- `npm run check` — gate de tipos (`tsc --noEmit`) + verificación de sintaxis (`node --check`) de **todo** `src/` y `public/` vía `find` (type stripping, sin lista explícita de paths)
 - `npm test` — suite de tests (deben pasar antes de cada commit)
 - No hay lint ni formatter configurados: el gate de calidad es `npm run check` + `npm test`.
 
 ## Estructura del proyecto
 - `src/server.ts` — punto de entrada: env → singletons → `createApp` → `listen` (único módulo que abre puerto).
 - `src/lib/app.ts` — `createApp(deps)`: middleware JSON/static, registro de rutas y errores globales `/api/*` (sin efectos al importar; lo usan los tests HTTP).
+- `src/lib/` está organizado por carpetas de dominio (`audio/ ingest/ lookup/ practice/ providers/ routes/ session/ settings/ util/`); en la raíz solo viven `app.ts` y `http-errors.ts`. Una feature nueva mete su módulo en la carpeta de su dominio.
 - `src/lib/routes/` — registradores por dominio (`registerXxxRoutes`): health, practice, attempt, session, sessions, profile, audio, chat, lookup, files.
 - `src/lib/providers/` — capa LLM (gemini, cloudflare, ollama, mock) + registry con fallback.
-- `src/lib/practice.ts` — generación de sets de práctica y evaluación híbrida (determinista + LLM).
-- `src/lib/refinement.ts` — refino LLM en background para el pintado incremental (feature 116).
-- `src/lib/learner.ts` — memoria: perfil, progreso, próximo paso.
-- `src/lib/storage.ts` — persistencia JSON de `data/profile.json` y `data/sessions/*.json`.
-- `src/lib/whisper.ts` — subprocess `whisper-cli` (STT local opcional).
-- `src/lib/align.ts` — alineación de palabras vs. fragmento (green/amber/red).
-- `src/lib/cu2.ts` — máquina de estados de la práctica karaoke (CU2).
-- `src/lib/continuous.ts` — preguntas continuas y dificultad adaptativa (107).
-- `src/lib/session-start.ts`, `session-payload.ts` — arranque y contrato de `GET /api/session/:id`.
-- `src/lib/settings.ts` — settings del perfil (precedencia snapshot > local > perfil > defaults).
-- `src/lib/prosody.ts`, `tts-cache.ts`, `edge-tts.ts`, `piper.ts` — cadena TTS (pausas, caché LRU, motores).
-- `src/lib/lookup.ts` — diccionario híbrido del popover léxico (112).
-- `src/lib/extract.ts` — ingesta de archivos de contexto PDF/DOCX/TXT/MD (104).
+- `src/lib/practice/practice.ts` — generación de sets de práctica y evaluación híbrida (determinista + LLM).
+- `src/lib/practice/refinement.ts` — refino LLM en background para el pintado incremental (feature 116).
+- `src/lib/practice/learner.ts` — memoria: perfil, progreso, próximo paso.
+- `src/lib/session/storage.ts` — persistencia JSON de `data/profile.json` y `data/sessions/*.json`.
+- `src/lib/audio/whisper.ts` — subprocess `whisper-cli` (STT local opcional).
+- `src/lib/practice/align.ts` — alineación de palabras vs. fragmento (green/amber/red).
+- `src/lib/practice/karaoke.ts` — máquina de estados de la práctica karaoke (CU2).
+- `src/lib/practice/continuous.ts` — preguntas continuas y dificultad adaptativa (107).
+- `src/lib/session/session-start.ts`, `session-payload.ts` — arranque y contrato de `GET /api/session/:id`.
+- `src/lib/settings/settings.ts` — settings del perfil (precedencia snapshot > local > perfil > defaults).
+- `src/lib/audio/prosody.ts`, `tts-cache.ts`, `edge-tts.ts`, `piper.ts` — cadena TTS (pausas, caché LRU, motores).
+- `src/lib/lookup/lookup.ts` — diccionario híbrido del popover léxico (112).
+- `src/lib/ingest/extract.ts` — ingesta de archivos de contexto PDF/DOCX/TXT/MD (104).
+- `src/lib/util/` — infraestructura compartida entre dominios: `subprocess.ts` (presupuestos de spawn + `snip()`) y `time.ts` (`MS_PER_S`, `MS_PER_MIN`).
 - `public/` — frontend vanilla: `index.html`, `styles.css`, `app.js`, `ui/` (componentes), `speech/` (voz).
 - `models/` — modelos locales (whisper.cpp `ggml-small.en.bin`, voces Piper).
 - `data/` — `profile.json`, `sessions/*.json`, `tmp/` (audio y caché; ignorada por git).

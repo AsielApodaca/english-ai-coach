@@ -15,10 +15,10 @@
 import type { Express } from "express";
 import { randomUUID } from "node:crypto";
 
-import { handleSessionStartRequest } from "../session-start.ts";
-import { handleNextQuestionRequest } from "../continuous.ts";
-import { buildSessionPayload } from "../session-payload.ts";
-import { buildNextStep } from "../learner.ts";
+import { handleSessionStartRequest } from "../session/session-start.ts";
+import { handleNextQuestionRequest } from "../practice/continuous.ts";
+import { buildSessionPayload } from "../session/session-payload.ts";
+import { buildNextStep } from "../practice/learner.ts";
 import {
   DEFAULT_ACCENT,
   DEFAULT_SETTINGS_SNAPSHOT,
@@ -28,8 +28,8 @@ import {
   isSessionEval,
   isValidSessionId,
   type SessionV2,
-} from "../storage.ts";
-import { candidates } from "./chain.ts";
+} from "../session/storage.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /**
@@ -169,7 +169,7 @@ export function registerSessionRoutes(app: Express, deps: AppDeps): void {
    * (feature 108). The opening speech fields (`intro`, `explainLine`) were
    * removed from this contract by feature 115: the session now starts at the
    * question and the model answer hands over directly to the first fragment.
-   * The body itself is built by `buildSessionPayload` (lib/session-payload.ts)
+   * The body itself is built by `buildSessionPayload` (lib/session/session-payload.ts)
    * so the contract is unit-testable without binding a port. The question
    * served is the LAST one — continuous sessions (feature 107) grow
    * questions[]. 404 when the session does not exist.

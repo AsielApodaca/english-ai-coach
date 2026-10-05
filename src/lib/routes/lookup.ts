@@ -15,9 +15,9 @@ import {
   isSameOriginLookupRequest,
   resolveLookup,
   validateLookupText,
-} from "../lookup.ts";
-import { buildLearnerMemory } from "../learner.ts";
-import { lookupCandidates } from "./chain.ts";
+} from "../lookup/lookup.ts";
+import { buildLearnerMemory } from "../practice/learner.ts";
+import { lookupCandidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /**
@@ -43,7 +43,7 @@ export function registerLookupRoutes(app: Express, deps: AppDeps): void {
    *            "Significado no disponible"). The practice flow is never blocked.
    *
    * The pipeline (cache → dictionaryapi.dev → MyMemory → LLM fallback through
-   * the provider registry) lives in `lib/lookup.ts` and never throws. Learner
+   * the provider registry) lives in `lib/lookup/lookup.ts` and never throws. Learner
    * memory is provided lazily, so cache hits don't touch storage at all.
    */
   app.get("/api/lookup", async (req, res) => {

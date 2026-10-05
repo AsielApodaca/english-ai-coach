@@ -14,9 +14,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ProviderError } from "../src/lib/providers/index.ts";
-import type { Candidate, Evaluation } from "../src/lib/practice.ts";
-import { tokenize } from "../src/lib/practice.ts";
-import type { WhisperWord } from "../src/lib/whisper.ts";
+import type { Candidate, Evaluation } from "../src/lib/practice/practice.ts";
+import { tokenize } from "../src/lib/practice/practice.ts";
+import type { WhisperWord } from "../src/lib/audio/whisper.ts";
 import {
   awaitRefinement,
   createRefinementRegistry,
@@ -27,7 +27,7 @@ import {
   DEFAULT_REFINE_TIMEOUT_MS,
   type AttemptRefinement,
   type RefineAttemptParams,
-} from "../src/lib/refinement.ts";
+} from "../src/lib/practice/refinement.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures

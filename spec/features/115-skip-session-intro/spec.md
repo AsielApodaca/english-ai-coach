@@ -87,4 +87,4 @@ Elimina las locuciones de apertura y de dinámica. Al entrar a la práctica (o r
 
 ## Recursos
 
-- `src/lib/cu2.ts`, `src/server.ts` (`GET /api/session/:id`), `public/ui/practice-view.js` (`runFlow`, `runQuestionLoop`), `tests/cu2.test.ts`, `spec/use-cases/CU2.md`, `spec/features/105-karaoke-practice-cu2/spec.md`.
+- `src/lib/practice/karaoke.ts`, `src/server.ts` (`GET /api/session/:id`), `public/ui/practice-view.js` (`runFlow`, `runQuestionLoop`), `tests/karaoke.test.ts`, `spec/use-cases/CU2.md`, `spec/features/105-karaoke-practice-cu2/spec.md`.

@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { persistAttempt, type AttemptStorage, type PersistAttemptParams } from "../src/lib/attempt-persist.ts";
-import type { Evaluation } from "../src/lib/practice.ts";
-import type { Profile, SessionFragmentV2, SessionQuestion, SessionV2 } from "../src/lib/storage.ts";
+import { persistAttempt, type AttemptStorage, type PersistAttemptParams } from "../src/lib/session/attempt-persist.ts";
+import type { Evaluation } from "../src/lib/practice/practice.ts";
+import type { Profile, SessionFragmentV2, SessionQuestion, SessionV2 } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------
 // Feature 117 — persistAttempt used to live inside server.ts and was only
 // covered indirectly (through HTTP flows). Extracting it into
-// lib/attempt-persist.ts made it unit-testable; this file is its executable
+// lib/session/attempt-persist.ts made it unit-testable; this file is its executable
 // contract: where an attempt lands (LAST question, named fragment or full
 // answer), which profile writes it triggers, which no-ops are silent, and
 // that a legacy v1 file (saveSession throwing) never breaks the caller.

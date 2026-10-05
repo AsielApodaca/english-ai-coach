@@ -7,7 +7,7 @@
 
 import type { Express } from "express";
 
-import { handleExtractRequest } from "../extract.ts";
+import { handleExtractRequest } from "../ingest/extract.ts";
 import type { AppDeps } from "../app.ts";
 
 /**

@@ -91,4 +91,4 @@ Rediseña la vista de Settings de una colección plana a un panel con **4 sub-ta
 
 ## Recursos
 
-- `spec/design/screens.md` §3–6, `spec/design/design-system.md` (componentes), `public/app.js` (keys existentes), `src/lib/settings.ts` (nuevo), `src/lib/provider/` para status.
+- `spec/design/screens.md` §3–6, `spec/design/design-system.md` (componentes), `public/app.js` (keys existentes), `src/lib/settings/settings.ts` (nuevo), `src/lib/provider/` para status.

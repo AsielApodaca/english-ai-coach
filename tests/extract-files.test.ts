@@ -22,8 +22,8 @@ import {
   type ContextStorage,
   type ExtractedFile,
   type SummarizeFn,
-} from "../src/lib/extract.ts";
-import { createStorage } from "../src/lib/storage.ts";
+} from "../src/lib/ingest/extract.ts";
+import { createStorage } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------
 // Minimal fixtures generated programmatically (no binaries committed)

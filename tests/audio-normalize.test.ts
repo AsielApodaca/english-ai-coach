@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWavHeader, normalizeWav, RMS_TARGET_DBFS, PEAK_CEILING_DBFS, FADE_MS } from "../src/lib/wav.ts";
+import { buildWavHeader, normalizeWav, RMS_TARGET_DBFS, PEAK_CEILING_DBFS, FADE_MS } from "../src/lib/audio/wav.ts";
 
 const FMT_MONO_16K = { sampleRate: 16000, bitsPerSample: 16, numChannels: 1 };
 

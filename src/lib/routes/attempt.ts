@@ -15,20 +15,20 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { evaluateFragmentDeterministic, isBlankTranscript, isFiller, normalize } from "../practice.ts";
-import { checkWhisper, DEFAULT_WHISPER_MODEL, downloadModel, transcribeWords, type WhisperWord } from "../whisper.ts";
-import { alignWords, alignTextWords } from "../align.ts";
-import { buildFeedbackText, buildNoSpeechText, DEFAULT_PASS_THRESHOLD } from "../cu2.ts";
-import { isLevel, isValidOptionalSessionId } from "../storage.ts";
+import { evaluateFragmentDeterministic, isBlankTranscript, isFiller, normalize } from "../practice/practice.ts";
+import { checkWhisper, DEFAULT_WHISPER_MODEL, downloadModel, transcribeWords, type WhisperWord } from "../audio/whisper.ts";
+import { alignWords, alignTextWords } from "../practice/align.ts";
+import { buildFeedbackText, buildNoSpeechText, DEFAULT_PASS_THRESHOLD } from "../practice/karaoke.ts";
+import { isLevel, isValidOptionalSessionId } from "../session/storage.ts";
 import {
   DEFAULT_REFINE_TIMEOUT_MS,
   handleAttemptFeedbackRequest,
   patchFullEval,
   refineAttempt,
-} from "../refinement.ts";
-import { persistAttempt } from "../attempt-persist.ts";
-import { clampNumber } from "../tts-status.ts";
-import { candidates } from "./chain.ts";
+} from "../practice/refinement.ts";
+import { persistAttempt } from "../session/attempt-persist.ts";
+import { clampNumber } from "../audio/tts-status.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /** Server long-poll cap for `GET /api/attempt/:id/feedback` (env override). */

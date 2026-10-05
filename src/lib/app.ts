@@ -24,10 +24,10 @@ import express, { type Express } from "express";
 import { join } from "node:path";
 
 import { apiErrorHandler, apiNotFound } from "./http-errors.ts";
-import type { createStorage } from "./storage.ts";
-import type { createTtsCache } from "./tts-cache.ts";
-import type { createRefinementRegistry } from "./refinement.ts";
-import type { createLookupCache } from "./lookup.ts";
+import type { createStorage } from "./session/storage.ts";
+import type { createTtsCache } from "./audio/tts-cache.ts";
+import type { createRefinementRegistry } from "./practice/refinement.ts";
+import type { createLookupCache } from "./lookup/lookup.ts";
 import type { Provider, ProviderId } from "./providers/types.ts";
 
 import { registerHealthRoutes } from "./routes/health.ts";

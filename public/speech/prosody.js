@@ -8,7 +8,7 @@
  *
  * The implementation lives here (browser module) because the practice view
  * cannot import `src/lib/*.ts` (no build step) AND the server needs the very
- * same splitter; `src/lib/prosody.ts` re-exports this module so there is a
+ * same splitter; `src/lib/audio/prosody.ts` re-exports this module so there is a
  * single source of truth for both sides (and for `tests/prosody.test.ts`).
  *
  * Pure and deterministic: no I/O, no globals, same input → same output.

@@ -55,4 +55,4 @@ El semáforo se pinta en cuanto termina whisper + la alineación determinista (s
 
 ## Recursos
 
-- `src/lib/practice.ts`, `src/server.ts`, `public/ui/practice-view.js`, `tests/coach.test.ts`, `spec/use-cases/CU2.md`.
+- `src/lib/practice/practice.ts`, `src/server.ts`, `public/ui/practice-view.js`, `tests/coach.test.ts`, `spec/use-cases/CU2.md`.

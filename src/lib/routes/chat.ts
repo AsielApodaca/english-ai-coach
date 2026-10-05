@@ -9,8 +9,8 @@ import type { Express } from "express";
 
 import { completeWithFallback } from "../providers/index.ts";
 import { PROVIDER_IDS, isProviderId, type ChatMessage } from "../providers/types.ts";
-import { buildLearnerMemory } from "../learner.ts";
-import { candidates } from "./chain.ts";
+import { buildLearnerMemory } from "../practice/learner.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /** Hard cap on a chat message (feature 117): the JSON body limit is 25 MB. */

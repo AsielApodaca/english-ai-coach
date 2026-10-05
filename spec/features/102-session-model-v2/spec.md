@@ -57,4 +57,4 @@ CU3 exige sesiones separadas con progreso diferenciado y reanudables; el modelo 
 
 ## Recursos
 
-- `src/lib/storage.ts`, `src/lib/learner.ts`, `tests/storage.test.ts`; `spec/use-cases/CU3.md`; `spec/constitution/tech-stack.md`.
+- `src/lib/session/storage.ts`, `src/lib/practice/learner.ts`, `tests/storage.test.ts`; `spec/use-cases/CU3.md`; `spec/constitution/tech-stack.md`.

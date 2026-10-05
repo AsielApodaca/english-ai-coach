@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chatJSON, completeWithFallback, ProviderError } from "../src/lib/providers/index.ts";
-import type { Candidate } from "../src/lib/practice.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
 import {
   generatePracticeSet,
   evaluateFragment,
@@ -11,8 +11,8 @@ import {
   NATURALNESS_WEIGHT,
   type LLMFeedback,
   type WordMatch,
-} from "../src/lib/practice.ts";
-import { DEFAULT_PASS_THRESHOLD } from "../src/lib/cu2.ts";
+} from "../src/lib/practice/practice.ts";
+import { DEFAULT_PASS_THRESHOLD } from "../src/lib/practice/karaoke.ts";
 
 function fake(id: string, reply: string | ((messages: unknown[]) => string)): Candidate {
   return {
