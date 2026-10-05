@@ -10,7 +10,8 @@
  *
  * Contracts:
  *   AppDeps            — { storage, providers, primaryProviderId, ttsCache,
- *                          refinements, lookupCache, rootDir, env }
+ *                          refinements, lookupCache, rootDir, env,
+ *                          ollamaLauncher? }
  *   createApp(deps)    — Express app with JSON/static middleware, every /api
  *                        route registered, and the global error contracts
  *                        (apiNotFound → apiErrorHandler, registered LAST so
@@ -29,6 +30,7 @@ import type { createTtsCache } from "./audio/tts-cache.ts";
 import type { createRefinementRegistry } from "./practice/refinement.ts";
 import type { createLookupCache } from "./lookup/lookup.ts";
 import type { Provider, ProviderId } from "./providers/types.ts";
+import type { OllamaLauncher } from "./providers/ollama-launch.ts";
 
 import { registerHealthRoutes } from "./routes/health.ts";
 import { registerPracticeRoutes } from "./routes/practice.ts";
@@ -59,6 +61,12 @@ export interface AppDeps {
   rootDir: string;
   /** Process environment — read inside createApp/routes, never at module scope. */
   env: NodeJS.ProcessEnv;
+  /**
+   * Auto-starter for the local Ollama server (providers/ollama-launch.ts,
+   * feature 119). Optional: `registerHealthRoutes` builds the real one when
+   * absent; tests inject a double so no `ollama serve` is ever spawned.
+   */
+  ollamaLauncher?: OllamaLauncher;
 }
 
 /**

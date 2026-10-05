@@ -8,7 +8,7 @@ App web local para practicar inglés técnico como conversación hablada con IA:
 - **Conversación hablada** — subtítulos en vivo etiquetados Coach/You, palabras faltantes resaltadas en la frase del coach, extras resaltadas en lo que dijiste, y feedback hablado (voz mejorable; roadmap → feature 007).
 - **Evaluación híbrida** — score 0-100 por word-match determinista: las palabras añadidas fuera del fragmento restan del score (los fillers uh/um no penalizan) + correcciones del LLM (grammar, word-choice, fluency, pronunciation, other).
 - **Memoria** — el perfil del aprendiz (nivel, debilidades, temas recientes, next step) se inyecta en cada generación/evaluación.
-- **Multi-proveedor LLM con fallback** — Gemini, Cloudflare Workers AI y Ollama local.
+- **Multi-proveedor LLM con fallback** — Gemini, Cloudflare Workers AI y Ollama local (si el servidor local está apagado, la app lo enciende sola en el arranque).
 - **STT** — whisper.cpp local por defecto cuando está instalado (100% offline/privado); Chrome Web Speech como fallback automático.
 
 ## Requisitos
@@ -27,6 +27,7 @@ Abre http://localhost:3000.
 
 - **Configura tu LLM** copiando `.env.example` a `.env` (ver `LLM_PROVIDER`, `GEMINI_API_KEY`, `CLOUDFLARE_API_TOKEN`). El default `cloudflare` auto-descubre el account id desde tu config de opencode.
 - **Whisper local (opcional)**: `npm run setup` instala `whisper-cpp` (Homebrew) y descarga el modelo en `models/`. Una vez listo, Whisper se auto-selecciona como STT por defecto (100% offline); Web Speech queda como fallback automático y puedes cambiarlo en Settings.
+- **Ollama auto-arrancado**: si el warmup de modelos locales falla porque `ollama serve` no está corriendo, el servidor lo enciende en background (lo deja corriendo tras cerrar la app) y repite el warmup. Requiere `ollama` en el PATH; si falta el modelo (`ollama pull`), lo sigue reportando el warmup.
 
 ## Configuración
 
@@ -36,6 +37,7 @@ Abre http://localhost:3000.
 | `GEMINI_API_KEY` | – | Free-tier de Google AI Studio |
 | `CLOUDFLARE_API_TOKEN` | – | Workers AI (account id auto-descubierto) |
 | `OLLAMA_MODEL` | `llama3.1` | Modelo Ollama local |
+| `OLLAMA_WARM` | activo | `0` desactiva el warmup local **y** el auto-arranque de `ollama serve` |
 | `PORT` | `3000` | Puerto del servidor |
 | `WHISPER_MODEL` | `small.en` | Modelo whisper.cpp bajo `models/` |
 
