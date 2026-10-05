@@ -8,6 +8,7 @@
 import type { CompleteOptions } from "../providers/types.ts";
 import { chatJSON } from "../providers/index.ts";
 import type { Candidate, FirstQuestion } from "./practice.ts";
+import { QUESTION_REPLY_SCHEMA, toFirstQuestion, type QuestionReply } from "./practice-generate.ts";
 import type { Level, SessionV2 } from "../session/storage.ts";
 import type { RigorLevel } from "../settings/settings.ts";
 
@@ -61,7 +62,9 @@ export interface NextQuestionParams {
  * Generate the next question of a continuous session (spec 107). Mirrors
  * `generateFirstQuestion` (practice.ts): the role instruction becomes the
  * system persona, the conversation context + learner memory drive the prompt,
- * and the model answer is assembled from the spoken fragments.
+ * and the model answer is assembled from the spoken fragments. The reply goes
+ * through the same schema/shape gate as the first question, so a degenerate
+ * reply is retried and never appended to the session.
  */
 export async function generateNextQuestion(
   candidates: Candidate[],
@@ -72,20 +75,14 @@ export async function generateNextQuestion(
   const contextLine = params.contextSummary ? `\n\nCONVERSATION CONTEXT:\n${params.contextSummary}` : "";
   const user = `Generate the next question of the session. Level: ${params.level}. Rigor: ${params.rigor}.${memoryLine}${contextLine}`;
   const options: CompleteOptions = { temperature: 0.7, maxTokens: 4096 };
-  const res = await chatJSON<{ question?: unknown; fragments?: Array<{ id?: string; stage?: string; text?: string }> }>(
-    candidates,
-    { system, user, options },
-  );
-  const fragments = (res.data.fragments ?? [])
-    .map((f, i) => ({ id: f.id || `f${i + 1}`, stage: f.stage ?? "", text: f.text ?? "" }))
-    .filter((f) => f.text.trim().length > 0);
-  const q = typeof res.data.question === "string" ? res.data.question.trim() : "";
-  return {
-    provider: res.provider,
-    question: {
-      q,
-      answer: fragments.map((f) => f.text).join(" "),
-      fragments,
+  const res = await chatJSON<QuestionReply>(candidates, {
+    system,
+    user,
+    options,
+    schema: QUESTION_REPLY_SCHEMA,
+    validate: (data) => {
+      toFirstQuestion(data);
     },
-  };
+  });
+  return { provider: res.provider, question: toFirstQuestion(res.data) };
 }

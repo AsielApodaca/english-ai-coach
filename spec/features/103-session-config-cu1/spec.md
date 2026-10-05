@@ -34,6 +34,8 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 
 - El textarea no hace autosave por cada tecla (aunque sí a `data/tmp/` draft si se cancela y desea retomar — ver 109).
 - Generación de la primera pregunta: se hace al "Entrar al Estudio" (loading state en modal), no antes.
+- **Respuesta del LLM acotada antes de persistir**: la generación de la primera pregunta (y la siguiente, 107) envía un JSON Schema (`QUESTION_REPLY_SCHEMA`, con enum de stages) a los proveedores con structured outputs (Ollama lo recibe como `format`, lo que garantiza JSON bien formado muestreo mediante) y valida la forma de la respuesta parseada: `question` no vacía y ≥ 3 fragmentos utilizables (`MIN_QUESTION_FRAGMENTS`). Una respuesta degenerada hace que `chatJSON` reintente hasta `CHAT_JSON_ATTEMPTS` (3) veces y, si persiste, `POST /api/session/start` devuelve **502 sin crear la sesión**.
+  - Motivo (regresión real): el modelo local a veces omite el separador `}{` entre items del array de fragmentos; `JSON.parse` acepta las claves duplicadas descartando todo menos el último valor, y la sesión se creaba con **una sola oración** como respuesta modelo.
 
 ## Decisiones de diseño / tecnología
 
@@ -51,6 +53,9 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 - [x] Modal de lanzamiento muestra estado de motores (whisper ready o fallback).
 - [x] Crear una práctica desde la config crea sesión v2 y navega a `#/practice/<id>` sin reload.
 - [x] `npm test` y `npm run check` pasan.
+- [x] Respuesta degenerada del LLM (fragmentos colapsados por claves duplicadas, pregunta vacía o un solo fragmento) → **502 sin crear sesión** (`tests/session-start.test.ts`).
+- [x] `chatJSON` reintenta un parseo inválido y aplica el validador de forma antes de devolver datos (`tests/coach.test.ts`); `extractJSON` rechaza claves JSON duplicadas (`tests/extract.test.ts`).
+- [x] Ollama recibe el JSON Schema como `format` y lo omite cuando no hay schema (`tests/providers-ollama.test.ts`).
 
 ## Fuera de alcance
 

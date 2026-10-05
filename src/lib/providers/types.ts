@@ -27,6 +27,31 @@ export interface CompleteOptions {
   temperature?: number;
   maxTokens?: number;
   signal?: AbortSignal;
+  /**
+   * JSON Schema the reply must conform to (structured outputs).
+   *
+   * Only providers that can enforce it while sampling honour this option
+   * (Ollama maps it to the native `format` field); providers without that
+   * capability ignore it and the caller still gets the plain-text reply, so
+   * validation of the parsed shape stays the caller's responsibility.
+   */
+  jsonSchema?: JsonSchema;
+}
+
+/**
+ * Minimal JSON Schema shape used for structured outputs (the subset Ollama
+ * accepts in `format`). Open-ended on purpose: nested `properties`,
+ * `required`, `enum` and `items` are all allowed, unknown keywords are
+ * forwarded untouched.
+ */
+export interface JsonSchema {
+  type?: string;
+  properties?: Record<string, JsonSchema>;
+  items?: JsonSchema;
+  required?: string[];
+  enum?: string[];
+  additionalProperties?: boolean;
+  [keyword: string]: unknown;
 }
 
 export interface ProviderInfo {

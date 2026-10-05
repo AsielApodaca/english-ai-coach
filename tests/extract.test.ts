@@ -32,6 +32,33 @@ test("extractJSON: throws when no JSON found", () => {
   assert.throws(() => extractJSON("no json here at all"));
 });
 
+// Strict parsing (regression: a collapsed fragments array persisted a
+// one-fragment model answer). The local model drops the `}{` separator between
+// array items, so every item folds into ONE object with repeated keys — which
+// JSON.parse happily accepts, keeping only the last value of each key.
+
+test("extractJSON: rejects array items that lost their `}{` separator", () => {
+  const collapsed =
+    `{"question":"Tell me about Zenda.","fragments":[{"id":"f1","stage":"Opening","text":"First line.",` +
+    `"id":"f5","stage":"Closing","text":"Now our data is reliable."}]}`;
+  assert.throws(() => extractJSON(collapsed), /Duplicate key "id"/);
+});
+
+test("extractJSON: a repeated key in a nested object is rejected too", () => {
+  assert.throws(() => extractJSON('{"a":{"x":1,"x":2}}'), /Duplicate key "x"/);
+});
+
+test("extractJSON: keys repeated across sibling objects are fine", () => {
+  const out = extractJSON<{ a: { id: string }; b: { id: string } }>('{"a":{"id":"f1"},"b":{"id":"f2"}}');
+  assert.deepEqual(out, { a: { id: "f1" }, b: { id: "f2" } });
+});
+
+test("extractJSON: quotes and escapes inside values do not confuse the key scan", () => {
+  const out = extractJSON<{ s: string; n: number }>('{"s":"quote \\" brace {} comma ,","n":1}');
+  assert.equal(out.s, 'quote " brace {} comma ,');
+  assert.equal(out.n, 1);
+});
+
 // Feature 104 additions: the existing extract.test.ts is extended with the
 // pure helpers of src/lib/ingest/extract.ts (bulk coverage lives in extract-files.test.ts).
 
