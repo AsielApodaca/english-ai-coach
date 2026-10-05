@@ -4,8 +4,8 @@
  *
  * Pure data: the choice lists (with their derived union types), the full
  * `AppSettings` surface, `DEFAULT_SETTINGS`, the volume bounds and the
- * localStorage keys. `settings.ts` re-exports this file, so existing
- * `from "./settings.ts"` imports resolve unchanged.
+ * localStorage keys. `settings.ts` re-exports this file, so callers only
+ * ever import `lib/settings/settings.ts` (feature 118).
  */
 
 // ---------------------------------------------------------------------------

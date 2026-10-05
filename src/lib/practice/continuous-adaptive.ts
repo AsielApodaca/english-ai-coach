@@ -7,7 +7,7 @@
  */
 
 import { LEVELS, type Level, type SessionV2 } from "../session/storage.ts";
-import { RIGOR_LEVELS, type AdaptiveSettings, type RigorLevel } from "../settings.ts";
+import { RIGOR_LEVELS, type AdaptiveSettings, type RigorLevel } from "../settings/settings.ts";
 
 // ---------------------------------------------------------------------------
 // Rolling scores (adaptive difficulty)

@@ -9,7 +9,7 @@ import type { CompleteOptions } from "../providers/types.ts";
 import { chatJSON } from "../providers/index.ts";
 import type { Candidate, FirstQuestion } from "./practice.ts";
 import type { Level, SessionV2 } from "../session/storage.ts";
-import type { RigorLevel } from "../settings.ts";
+import type { RigorLevel } from "../settings/settings.ts";
 
 // ---------------------------------------------------------------------------
 // Conversation context summary

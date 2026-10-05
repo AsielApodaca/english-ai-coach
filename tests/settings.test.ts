@@ -11,7 +11,7 @@ import {
   profileSettings,
   readAutoAdvance,
   readSnapshotSettings,
-} from "../src/lib/settings.ts";
+} from "../src/lib/settings/settings.ts";
 import type { Profile } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------

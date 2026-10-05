@@ -13,7 +13,7 @@ import {
   DEFAULT_SETTINGS,
   RIGOR_THRESHOLDS,
   readSnapshotSettings,
-} from "../settings.ts";
+} from "../settings/settings.ts";
 import type { Candidate } from "./practice.ts";
 import { computeAdaptive, rollingScores } from "./continuous-adaptive.ts";
 import { buildContextSummary, generateNextQuestion } from "./continuous-generate.ts";

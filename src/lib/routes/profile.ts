@@ -13,7 +13,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { computeStats } from "../practice/learner.ts";
-import { applyProfileSettings, parseProfileSettings } from "../settings.ts";
+import { applyProfileSettings, parseProfileSettings } from "../settings/settings.ts";
 import type { AppDeps } from "../app.ts";
 
 /**
