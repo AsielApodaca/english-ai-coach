@@ -57,7 +57,7 @@ Abre http://localhost:3000.
 | `npm start` | Servidor local con watch |
 | `npm run start:no-watch` | Sin watch |
 | `npm run setup` | Instala/configura whisper.cpp opcional |
-| `npm run check` | Verificación de sintaxis TS |
+| `npm run check` | Gate de tipos (`tsc --noEmit`) + verificación de sintaxis (`node --check` sobre `src/` y `public/`) |
 | `npm test` | Suite `node:test` |
 
 ## Arquitectura
@@ -77,4 +77,4 @@ Los datos de práctica quedan en `data/` (fuera de git) y el audio no se persist
 
 ## Roadmap
 
-Próximo (ver `spec/constitution/roadmap.md`): conversación hablada natural (003), evaluación fonética por audio (004), vocabulario con repaso espaciado, modo sin conexión total y voz humana neural (007).
+Próximo (ver `spec/constitution/roadmap.md`): estado por feature, backlog (evaluación fonética 004, vocabulario con repaso espaciado 005, modo sin conexión total 006) y las olas siguientes. 117 (backend legible para IA) y 118 (`src/lib/` organizado por carpetas de dominio) ya están en "Hecho ✅".

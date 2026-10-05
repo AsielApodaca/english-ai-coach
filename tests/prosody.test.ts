@@ -8,7 +8,7 @@ import {
   LONG_PAUSE_MS,
   MAX_SEGMENTS,
   SHORT_TEXT_MAX_WORDS,
-} from "../src/lib/prosody.ts";
+} from "../src/lib/audio/prosody.ts";
 
 /** Every pause of a split must be one of the three spec classes. */
 function assertPauseClasses(pauses: number[]): void {

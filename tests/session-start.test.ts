@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { handleSessionStartRequest } from "../src/lib/session-start.ts";
-import { createStorage, DEFAULT_ACCENT, type Profile } from "../src/lib/storage.ts";
+import { handleSessionStartRequest } from "../src/lib/session/session-start.ts";
+import { createStorage, DEFAULT_ACCENT, type Profile } from "../src/lib/session/storage.ts";
 import { ProviderError } from "../src/lib/providers/index.ts";
-import type { Candidate } from "../src/lib/practice.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures

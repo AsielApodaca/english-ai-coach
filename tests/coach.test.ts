@@ -1,8 +1,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { chatJSON, completeWithFallback, ProviderError } from "../src/lib/providers/index.ts";
-import type { Candidate } from "../src/lib/practice.ts";
-import { generatePracticeSet, evaluateFragment, evaluateFragmentDeterministic, mergeLLMFeedback, type LLMFeedback, type WordMatch } from "../src/lib/practice.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
+import {
+  generatePracticeSet,
+  evaluateFragment,
+  evaluateFragmentDeterministic,
+  mergeLLMFeedback,
+  LEXICAL_WEIGHT,
+  NATURALNESS_WEIGHT,
+  type LLMFeedback,
+  type WordMatch,
+} from "../src/lib/practice/practice.ts";
+import { DEFAULT_PASS_THRESHOLD } from "../src/lib/practice/karaoke.ts";
 
 function fake(id: string, reply: string | ((messages: unknown[]) => string)): Candidate {
   return {
@@ -112,7 +122,7 @@ test("evaluateFragment: blends deterministic match with LLM naturalness", async 
   });
   assert.equal(provider, "amber");
   assert.equal(evaluation.missing.length, 0);
-  assert.ok(evaluation.score >= 70);
+  assert.ok(evaluation.score >= DEFAULT_PASS_THRESHOLD);
   assert.equal(evaluation.issues[0].category, "grammar");
 });
 
@@ -182,12 +192,28 @@ test("evaluateFragmentDeterministic: equals evaluateFragment when every provider
   assert.deepEqual(evaluateFragmentDeterministic(params).evaluation, evaluation);
 });
 
-test("mergeLLMFeedback: naturalness blends 0.75·lexical + 0.25·naturalness", () => {
+test("mergeLLMFeedback: naturalness blends LEXICAL_WEIGHT·lexical + NATURALNESS_WEIGHT·naturalness", () => {
   const lexical: WordMatch = { score: 100, matched: ["a"], missing: [], extra: [] };
   const merged = mergeLLMFeedback(lexical, { issues: [], tips: ["Slow down"], naturalness: 60 } satisfies LLMFeedback);
-  assert.equal(merged.score, 90);
+  assert.equal(merged.score, Math.round(LEXICAL_WEIGHT * 100 + NATURALNESS_WEIGHT * 60));
   assert.equal(merged.verdict, "great");
   assert.equal(merged.next, true);
+});
+
+test("mergeLLMFeedback: verdict and next follow the session passThreshold when given", () => {
+  // 75 is great at the default threshold (70) but only "almost" at 80.
+  const lexical: WordMatch = { score: 75, matched: ["a"], missing: [], extra: [] };
+  const atDefault = mergeLLMFeedback(lexical, { issues: [], tips: [], naturalness: 75 });
+  assert.equal(atDefault.verdict, "great");
+  assert.equal(atDefault.next, true);
+
+  const strict = mergeLLMFeedback(lexical, { issues: [], tips: [], naturalness: 75 }, { passThreshold: 80 });
+  assert.equal(strict.verdict, "almost");
+  assert.equal(strict.next, false);
+
+  const lenient = mergeLLMFeedback(lexical, { issues: [], tips: [], naturalness: 75 }, { passThreshold: 65 });
+  assert.equal(lenient.verdict, "great");
+  assert.equal(lenient.next, true);
 });
 
 test("mergeLLMFeedback: missing naturalness falls back to the lexical score", () => {

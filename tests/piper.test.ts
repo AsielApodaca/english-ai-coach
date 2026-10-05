@@ -3,15 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  checkPiper,
-  downloadVoice,
-  synthesize,
-  concatWavWithPauses,
-  makeSilence,
-  buildWavHeader,
-  DEFAULT_VOICE,
-} from "../src/lib/piper.ts";
+import { checkPiper, downloadVoice, synthesize, DEFAULT_VOICE } from "../src/lib/audio/piper.ts";
+import { buildWavHeader, concatWavWithPauses, makeSilence } from "../src/lib/audio/wav.ts";
 
 let dir = "";
 

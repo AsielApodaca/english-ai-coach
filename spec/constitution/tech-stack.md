@@ -31,26 +31,30 @@
 
 ## Archivos / módulos clave
 
-- `src/server.ts` — Express: sirve `public/`, expone `/api/*`.
+- `src/server.ts` — punto de entrada (75 líneas): env → singletons → `createApp` → `listen`; el ÚNICO módulo que abre puerto.
+- `src/lib/app.ts` — `createApp(deps)`: middleware JSON/static, registro de rutas y contratos globales de error; import sin efectos secundarios (lo usan los tests HTTP).
+- `src/lib/routes/*.ts` — registradores por dominio (`registerXxxRoutes(app, deps)`): health, practice, attempt, session, sessions, profile, audio, chat, lookup, files.
+- `src/lib/http-errors.ts` — `apiNotFound` (404 `{ error }`) + `apiErrorHandler` (500 `{ error }`, nunca HTML) para `/api/*`.
 - `src/lib/providers/index.ts` — registro de proveedores, selección y cadena de fallback.
 - `src/lib/providers/gemini.ts` — cliente Generative Language API.
 - `src/lib/providers/cloudflare.ts` — cliente Workers AI.
 - `src/lib/providers/ollama.ts` — cliente Ollama local.
-- `src/lib/practice.ts` — generación de sets de práctica (JSON) y evaluación híbrida (determinista + LLM).
-- `src/lib/learner.ts` — resumen del aprendiz, métricas de progreso, motor de "next step".
-- `src/lib/storage.ts` — carga/guardado de `data/profile.json` y `data/sessions/*.json`.
-- `src/lib/whisper.ts` — subprocess `whisper-cli` para transcripción local (modos texto plano y word-timestamps JSON).
-- `src/lib/refinement.ts` — refino LLM en background tras la respuesta rápida de `/api/attempt` (registro en memoria TTL 60 s / cap 100) — feature `116`.
-- `src/lib/align.ts` — alineación determinista de palabras vs. fragmento (LCS ponderada → green/amber/red, extras, contracciones).
-- `src/lib/cu2.ts` — máquina de estados pura de la práctica karaoke + líneas habladas (CU2).
-- `src/lib/continuous.ts` — preguntas continuas Q1→Q∞ y dificultad adaptativa (`computeAdaptive` con clamps).
-- `src/lib/session-start.ts` / `src/lib/session-payload.ts` — arranque de sesión y contrato de `GET /api/session/:id`.
-- `src/lib/settings.ts` — settings del perfil: tipos, defaults y merge con precedencia snapshot > local > perfil > defaults.
-- `src/lib/prosody.ts` — partidor de cláusulas servidor (pausas 220/400/650 ms, contrato `pausesMs[i]`).
-- `src/lib/tts-cache.ts` — caché LRU de síntesis en `data/tmp/tts-cache/` (100/50 MB, TTL 24 h).
-- `src/lib/piper.ts` / `src/lib/edge-tts.ts` — motores TTS (local subprocess / online).
-- `src/lib/lookup.ts` — pipeline híbrido de diccionario del popover léxico (`GET /api/lookup`).
-- `src/lib/extract.ts` — extracción de texto de PDF/DOCX/TXT/MD para el contexto de sesión.
+- `src/lib/practice/practice.ts` — generación de sets de práctica (JSON) y evaluación híbrida (determinista + LLM).
+- `src/lib/practice/learner.ts` — resumen del aprendiz, métricas de progreso, motor de "next step".
+- `src/lib/session/storage.ts` — carga/guardado de `data/profile.json` y `data/sessions/*.json`.
+- `src/lib/audio/whisper.ts` — subprocess `whisper-cli` para transcripción local (modos texto plano y word-timestamps JSON).
+- `src/lib/practice/refinement.ts` — refino LLM en background tras la respuesta rápida de `/api/attempt` (registro en memoria TTL 60 s / cap 100) — feature `116`.
+- `src/lib/practice/align.ts` — alineación determinista de palabras vs. fragmento (LCS ponderada → green/amber/red, extras, contracciones).
+- `src/lib/practice/karaoke.ts` — máquina de estados pura de la práctica karaoke + líneas habladas (CU2).
+- `src/lib/practice/continuous.ts` — preguntas continuas Q1→Q∞ y dificultad adaptativa (`computeAdaptive` con clamps).
+- `src/lib/session/session-start.ts` / `src/lib/session/session-payload.ts` — arranque de sesión y contrato de `GET /api/session/:id`.
+- `src/lib/settings/settings.ts` — settings del perfil: tipos, defaults y merge con precedencia snapshot > local > perfil > defaults.
+- `src/lib/audio/prosody.ts` — partidor de cláusulas servidor (pausas 220/400/650 ms, contrato `pausesMs[i]`).
+- `src/lib/audio/tts-cache.ts` — caché LRU de síntesis en `data/tmp/tts-cache/` (100/50 MB, TTL 24 h).
+- `src/lib/audio/piper.ts` / `src/lib/audio/edge-tts.ts` — motores TTS (local subprocess / online).
+- `src/lib/lookup/lookup.ts` — pipeline híbrido de diccionario del popover léxico (`GET /api/lookup`).
+- `src/lib/ingest/extract.ts` — extracción de texto de PDF/DOCX/TXT/MD para el contexto de sesión.
+- `src/lib/util/` — infraestructura compartida entre dominios: `subprocess.ts` (presupuestos de spawn + `snip()`), `time.ts` (`MS_PER_S`/`MS_PER_MIN`).
 - `public/` — frontend vanilla SPA: `index.html` (shell cockpit), `styles.css` (design system), `app.js` (router SPA), `ui/` (componentes), `speech/` (browser-stt, browser-tts, ptt, chime, prosody, level, recorder-wave, stt-pick).
 - `models/` — modelos locales: `ggml-small.en.bin` (whisper.cpp) y voces Piper.
 - `spec/use-cases/` — CU1 (configuración), CU2 (práctica), CU3 (historial); `spec/design/` — design-system, screens, ui-flow.
@@ -61,10 +65,10 @@
 - `npm install` — instala dependencias
 - `npm run setup` — instala y configura whisper.cpp local (opcional; requiere Homebrew)
 - `npm start` — arranca el servidor local (watch) en http://localhost:3000
-- `npm run check` — comprobación de sintaxis de cada archivo TS/JS (type stripping, sin build)
-- `npm test` — suite con `node:test` (`tests/*.test.ts`, 34 archivos)
+- `npm run check` — `tsc --noEmit` (gate de tipos, feature 117) sobre `src/` + `tests/`, y `node --check` de **todos** los `.ts`/`.js` de `src/` y `public/` con `find` (barrido sin lista de paths, type stripping, sin build)
+- `npm test` — suite con `node:test` (`tests/*.test.ts`, 44 archivos)
 
-No hay lint ni formatter configurados: el gate de calidad es `npm run check` + `npm test`.
+No hay lint ni formatter configurados: el gate de calidad es `npm run check` (incluye el type gate) + `npm test`. Convención de tamaño (117): ningún `src/**/*.ts` supera 300 líneas; los módulos grandes de la lista anterior son el punto de entrada que recompone archivos más pequeños (`storage.ts` → `session-types`/`storage-session`/…, `practice.ts` → `practice-generate`/`practice-text`/`practice-eval`, etc.).
 
 ## Modelo de datos / dominio
 

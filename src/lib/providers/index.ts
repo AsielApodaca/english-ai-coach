@@ -1,5 +1,5 @@
 import type { ChatMessage, CompleteOptions, Provider, ProviderId } from "./types.ts";
-import { ProviderError } from "./types.ts";
+import { ProviderError, REPLY_SNIP_LEN } from "./types.ts";
 import { createGeminiProvider } from "./gemini.ts";
 import { createCloudflareProvider } from "./cloudflare.ts";
 import { createOllamaProvider } from "./ollama.ts";
@@ -192,7 +192,7 @@ export function extractJSON<T>(text: string): T {
       }
     }
   }
-  throw new Error(`No JSON found in model reply: ${text.slice(0, 200)}`);
+  throw new Error(`No JSON found in model reply: ${text.slice(0, REPLY_SNIP_LEN)}`);
 }
 
 /** Sends a request with a JSON system prompt and returns structured data. */

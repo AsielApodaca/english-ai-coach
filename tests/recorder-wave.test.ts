@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { encodeWAV } from "../public/speech/recorder-wave.js";
 
 /** Decode a WAV blob into its little-endian header + raw 16-bit samples. */
-async function decode(wav) {
+async function decode(wav: Blob) {
   const bytes = new Uint8Array(await wav.arrayBuffer());
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const riff = String.fromCharCode(...bytes.subarray(0, 4));

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseWhisperJSON, parseWhisperWordsJSON } from "../src/lib/whisper.ts";
+import { parseWhisperJSON, parseWhisperWordsJSON } from "../src/lib/audio/whisper.ts";
 
 test("parseWhisperWordsJSON: segments with seconds floats → rounded ms", () => {
   const raw = JSON.stringify({

@@ -55,4 +55,4 @@ CU1 pide dar más contexto a la conversación vía archivos (un job spec, una no
 
 ## Recursos
 
-- `tests/extract.test.ts` (existente), `src/lib/storage.ts`; verificar que `pdf-parse` sea compatible con Node 26 / type-stripping ESM (documentar fallback si falla el import).
+- `tests/extract.test.ts` (existente), `src/lib/session/storage.ts`; verificar que `pdf-parse` sea compatible con Node 26 / type-stripping ESM (documentar fallback si falla el import).

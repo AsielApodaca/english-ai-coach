@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkEdgeTts, synthesizeEdge, edgeRateArg, DEFAULT_EDGE_VOICE } from "../src/lib/edge-tts.ts";
+import { checkEdgeTts, synthesizeEdge, edgeRateArg, DEFAULT_EDGE_VOICE } from "../src/lib/audio/edge-tts.ts";
 
 // If edge-tts is actually installed on this machine, the "unavailable" paths
 // below are not applicable and are skipped instead of failing.

@@ -1,7 +1,7 @@
 /**
  * Karaoke practice view (feature 105 / CU2) — the live practice stage.
  *
- * Imperative async flow mirroring the pure state machine in `src/lib/cu2.ts`
+ * Imperative async flow mirroring the pure state machine in `src/lib/practice/karaoke.ts`
  * (the reducer there is the canonical, unit-tested spec; this view is the
  * effectful layer that speaks, records and calls the API):
  *
@@ -77,7 +77,7 @@ const CHIME_MAX_MS = 500;
 const REFINE_WAIT_MS = 10000;
 
 // ---------------------------------------------------------------------------
-// Module state (mirrors PracticeState in cu2.ts)
+// Module state (mirrors PracticeState in karaoke.ts)
 // ---------------------------------------------------------------------------
 
 /** @type {"question"|"model"|"repeatingFragment"|"feedback"|"fullAnswer"|"done"} */
@@ -465,7 +465,7 @@ async function loadSessionPayload(sessionId, token) {
 }
 
 // ---------------------------------------------------------------------------
-// The CU2 flow (imperative port of the cu2.ts reducer)
+// The CU2 flow (imperative port of the karaoke.ts reducer)
 // ---------------------------------------------------------------------------
 
 async function runFlow(token) {
@@ -585,7 +585,7 @@ async function runQuestionLoop(token, { resume = false } = {}) {
   }
 
   // FULL — the user reads the whole answer until it passes (same loop as the
-  // cu2.ts reducer: fullAnswer → feedback → fullAnswer on failure). Every
+  // karaoke.ts reducer: fullAnswer → feedback → fullAnswer on failure). Every
   // round repaints the book from scratch, so the answer starts white.
   fullAttemptCount = 0;
   fullPassed = false;
@@ -1327,7 +1327,7 @@ function attemptParams(target, kind) {
   return params;
 }
 
-/** Map the /api/attempt response into an AttemptOutcome (cu2.ts shape). */
+/** Map the /api/attempt response into an AttemptOutcome (karaoke.ts shape). */
 function outcomeFromJson(json, target, kind) {
   return {
     kind,

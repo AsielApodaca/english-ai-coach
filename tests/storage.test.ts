@@ -11,7 +11,7 @@ import {
   type SessionConfig,
   type SessionStatus,
   type SessionV2,
-} from "../src/lib/storage.ts";
+} from "../src/lib/session/storage.ts";
 
 let dir = "";
 

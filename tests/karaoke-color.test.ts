@@ -3,8 +3,15 @@ import assert from "node:assert/strict";
 
 import { tokenizeWords, lineColorStatuses, fragmentWordCounts } from "../public/ui/karaoke-color.js";
 
+/**
+ * Mock of an aligned word as the aligner produces it: the helper under test
+ * only reads `status`, but `word` mirrors the real shape so partial objects
+ * (e.g. a word with no status yet) stay representable.
+ */
+type MockAlignedWord = { word?: string; status?: string };
+
 /** Shorthand for an aligned word (only the status matters here). */
-function w(status: string | undefined) {
+function w(status: string | undefined): MockAlignedWord {
   return { word: "x", status };
 }
 
@@ -47,7 +54,8 @@ test("lineColorStatuses: aligner extras beyond spanCount are dropped", () => {
 });
 
 test("lineColorStatuses: unknown or missing status → null (span stays white)", () => {
-  const statuses = lineColorStatuses([w("blue"), w(undefined), { word: "x" }, w("green")], 4);
+  const statuslessWord: MockAlignedWord = { word: "x" };
+  const statuses = lineColorStatuses([w("blue"), w(undefined), statuslessWord, w("green")], 4);
   assert.deepEqual(statuses, [null, null, null, "green"]);
 });
 

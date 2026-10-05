@@ -83,4 +83,4 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 ## Recursos
 
-- `src/lib/cu2.ts`, `public/ui/practice-view.js`, `public/speech/browser-tts.js`, `tests/cu2.test.ts`, `spec/use-cases/CU2.md` (pasos 11–12, 18).
+- `src/lib/practice/karaoke.ts`, `public/ui/practice-view.js`, `public/speech/browser-tts.js`, `tests/karaoke.test.ts`, `spec/use-cases/CU2.md` (pasos 11–12, 18).

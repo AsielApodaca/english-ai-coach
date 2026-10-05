@@ -1,5 +1,5 @@
 import type { ChatMessage, Provider, CompleteOptions, ProviderId } from "./types.ts";
-import { ProviderError } from "./types.ts";
+import { LLM_DEFAULT_MAX_TOKENS, LLM_DEFAULT_TEMPERATURE, ProviderError, REPLY_SNIP_LEN } from "./types.ts";
 
 const OLLAMA_BASE = "http://localhost:11434/v1";
 export const OLLAMA_DEFAULT_MODEL = "llama3.1";
@@ -88,14 +88,14 @@ export function createOllamaProvider(
           messages,
           stream: false,
           think: false,
-          temperature: options.temperature ?? 0.4,
-          options: { num_predict: options.maxTokens ?? 2048, num_ctx: numCtx },
+          temperature: options.temperature ?? LLM_DEFAULT_TEMPERATURE,
+          options: { num_predict: options.maxTokens ?? LLM_DEFAULT_MAX_TOKENS, num_ctx: numCtx },
         }),
         signal: options.signal,
       });
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new ProviderError(`ollama ${res.status}: ${text.slice(0, 200)}`, res.status === 429 || res.status >= 500, id);
+        throw new ProviderError(`ollama ${res.status}: ${text.slice(0, REPLY_SNIP_LEN)}`, res.status === 429 || res.status >= 500, id);
       }
       const data = (await res.json().catch(() => ({}))) as OllamaChatResponse;
       const content = data.message?.content;

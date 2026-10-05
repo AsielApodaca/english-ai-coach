@@ -3,7 +3,7 @@
  * (installed + model downloaded) and the user has not made an explicit choice;
  * an explicit choice is always respected.
  *
- * @param {{ whisper?: { available: boolean, modelReady: boolean } } | undefined} health
+ * @param {{ whisper?: { available: boolean, modelReady: boolean } } | null | undefined} health - health snapshot from /api/health; null until the fetch resolves (or when it failed)
  * @param {string | null | undefined} userChoice Stored engine from localStorage, or null/undefined when never chosen.
  * @returns {"browser" | "whisper"}
  */
