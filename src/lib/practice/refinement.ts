@@ -23,7 +23,7 @@ import { alignTextWords, alignWords, forcedAmberWordsFromIssues } from "./align.
 import { buildFeedbackText } from "./karaoke.ts";
 import { updateProfile } from "./learner.ts";
 import { evaluateFragmentDeterministic, isFiller, mergeLLMFeedback, normalize, refineWithLLM } from "./practice.ts";
-import { MS_PER_MIN } from "../time.ts";
+import { MS_PER_MIN } from "../util/time.ts";
 import type { AttemptStorage } from "../session/attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
 import type { AttemptWord, FeedbackIssue, Level } from "../session/storage.ts";

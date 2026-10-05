@@ -10,7 +10,7 @@
  */
 
 import { completeWithFallback, extractJSON } from "../providers/index.ts";
-import { MS_PER_MIN } from "../time.ts";
+import { MS_PER_MIN } from "../util/time.ts";
 import {
   GLOSS_MAX_CHARS,
   type DictionaryHit,

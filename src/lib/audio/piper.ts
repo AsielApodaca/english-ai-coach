@@ -19,7 +19,7 @@ import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "../subprocess.ts";
+import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "../util/subprocess.ts";
 import { checkPiper, DEFAULT_VOICE } from "./piper-voices.ts";
 import { buildWavHeader, concatWavWithPauses, extractWavData, makeSilence, normalizeWav, readWavFormat } from "./wav.ts";
 
