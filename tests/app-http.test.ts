@@ -16,6 +16,7 @@ import { createLookupCache } from "../src/lib/lookup/lookup.ts";
 import { CHAT_MAX_CHARS } from "../src/lib/routes/chat.ts";
 import { evaluateFragmentDeterministic } from "../src/lib/practice/practice-eval.ts";
 import type { Provider } from "../src/lib/providers/types.ts";
+import type { OllamaLauncher } from "../src/lib/providers/ollama-launch.ts";
 
 // ---------------------------------------------------------------------------
 // Feature 117 — behaviour tests over the REAL app factory. The whole HTTP
@@ -273,4 +274,56 @@ test("POST /api/evaluate: verdict/next follow the session's passThreshold, not t
   const defaultEval = (withoutSession.json as unknown as EvalBody).evaluation;
   assert.equal(defaultEval.next, false, "no session → the documented 70 fallback applies");
   assert.equal(defaultEval.verdict, "almost");
+});
+
+test("POST /api/warmup: warm failure with the server down consults the injected launcher and re-warms (119)", async () => {
+  // Local double: the FIRST warm fails (server down), the re-warm succeeds.
+  let warmCalls = 0;
+  const ollamaProvider: Provider = {
+    id: "ollama",
+    name: "Ollama test double",
+    async available() {
+      return true;
+    },
+    async complete() {
+      warmCalls++;
+      if (warmCalls === 1) throw new Error("server down");
+      return "ok";
+    },
+  };
+  // Launcher double: registers what health.ts consulted, never spawns anything.
+  const launcherCalls = { isUp: 0, ensure: 0 };
+  const launcher: OllamaLauncher = {
+    async isUp() {
+      launcherCalls.isUp++;
+      return false;
+    },
+    async ensureRunning() {
+      launcherCalls.ensure++;
+      return true;
+    },
+  };
+
+  // Warm enabled (no OLLAMA_WARM=0): createApp fires the boot warm through the
+  // injected launcher, so no real `ollama serve` can be spawned here.
+  const warmDeps: AppDeps = { ...deps, providers: [ollamaProvider], ollamaLauncher: launcher, env: {} };
+  const warmServer: Server = await new Promise((resolve) => {
+    const s = createApp(warmDeps).listen(0, () => resolve(s));
+  });
+  try {
+    const warmBase = `http://127.0.0.1:${(warmServer.address() as AddressInfo).port}`;
+    const res = await fetch(`${warmBase}/api/warmup`, { method: "POST" });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { ok: boolean; warmed: Record<string, boolean> };
+    assert.equal(body.ok, true, "the re-warm after the launch must succeed");
+    assert.deepEqual(body.warmed, { ollama: true });
+    // Whether the endpoint joined the boot warm or ran its own, the launcher
+    // was consulted exactly once for this one down-server failure.
+    assert.deepEqual(launcherCalls, { isUp: 1, ensure: 1 });
+    assert.ok(warmCalls >= 2, "failure → launch → re-warm");
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      warmServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
 });

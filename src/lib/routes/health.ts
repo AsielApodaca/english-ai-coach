@@ -12,12 +12,20 @@
  * the entrypoint stays `env → createApp → listen`. Timing is unchanged: the
  * kick runs while the app is being built, before `app.listen`, and it is
  * gated by `warmupEnabled(env)` exactly as before.
+ *
+ * Feature 119: the warm runs through `warmWithOllamaAutostart` — if a local
+ * warm fails because the Ollama server is down, `ollama serve` is spawned
+ * (detached, never killed) and the models are warmed once more. The launcher
+ * comes from `deps.ollamaLauncher` when injected (tests) or is built here.
+ * That can lengthen the warm (up to the 15 s startup budget + one re-warm),
+ * but it stays fire-and-forget at boot and deduped on `POST /api/warmup`.
  */
 
 import type { Express } from "express";
 
 import { checkWhisper, DEFAULT_WHISPER_MODEL } from "../audio/whisper.ts";
-import { providerStatus, warmProviders, warmupEnabled } from "../providers/index.ts";
+import { providerStatus, warmupEnabled } from "../providers/index.ts";
+import { createOllamaLauncher, warmWithOllamaAutostart } from "../providers/ollama-launch.ts";
 import { ttsStatus } from "../audio/tts-status.ts";
 import type { AppDeps } from "../app.ts";
 
@@ -36,10 +44,14 @@ export function registerHealthRoutes(app: Express, deps: AppDeps): void {
    */
   let warmInFlight: Promise<Record<string, boolean>> | null = null;
 
+  // Feature 119: the auto-starter used when a warm fails with the server down.
+  // Injected by tests (a double that spawns nothing); the real one here.
+  const launcher = deps.ollamaLauncher ?? createOllamaLauncher();
+
   /** Deduped warm of every local Ollama provider (never rejects). */
   function startWarmup(): Promise<Record<string, boolean>> {
     if (!warmInFlight) {
-      warmInFlight = warmProviders(deps.providers)
+      warmInFlight = warmWithOllamaAutostart(deps.providers, launcher)
         .catch(() => ({}) as Record<string, boolean>)
         .finally(() => {
           warmInFlight = null;
@@ -50,7 +62,8 @@ export function registerHealthRoutes(app: Express, deps: AppDeps): void {
 
   // Boot warm (feature 113): pre-load the local Ollama models so the first
   // session/popup does not pay the model-load latency. Fire-and-forget — it
-  // must never block or throw around `app.listen`.
+  // must never block or throw around `app.listen`. With feature 119 it also
+  // starts `ollama serve` when the warm fails because the server is down.
   if (warmupEnabled(deps.env)) {
     const startedAt = performance.now();
     void startWarmup().then((results) => {
@@ -110,6 +123,8 @@ export function registerHealthRoutes(app: Express, deps: AppDeps): void {
    * the boot warm is still running joins it instead of starting a second batch.
    * Responds 200 `{ ok: false, reason: "disabled" }` without touching Ollama
    * when `OLLAMA_WARM=0`, else 200 `{ ok, warmed: { ollama, "ollama-fast" } }`.
+   * Feature 119: when a local warm fails with the server down, the response can
+   * take up to the 15 s `ollama serve` startup budget plus one re-warm.
    * The frontend fires it (fire-and-forget) on app load.
    */
   app.post("/api/warmup", async (_req, res) => {
