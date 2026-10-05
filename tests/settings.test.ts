@@ -12,7 +12,7 @@ import {
   readAutoAdvance,
   readSnapshotSettings,
 } from "../src/lib/settings.ts";
-import type { Profile } from "../src/lib/storage.ts";
+import type { Profile } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------
 // Defaults

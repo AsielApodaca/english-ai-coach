@@ -10,7 +10,7 @@ import {
   rollingAverage,
   rollingScores,
 } from "../src/lib/continuous.ts";
-import { createStorage, DEFAULT_ACCENT, type Level, type SessionV2 } from "../src/lib/storage.ts";
+import { createStorage, DEFAULT_ACCENT, type Level, type SessionV2 } from "../src/lib/session/storage.ts";
 import { RIGOR_THRESHOLDS } from "../src/lib/settings.ts";
 import { ProviderError } from "../src/lib/providers/index.ts";
 import type { Candidate } from "../src/lib/practice.ts";

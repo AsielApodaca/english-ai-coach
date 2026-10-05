@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createApp, type AppDeps } from "../src/lib/app.ts";
-import { createStorage } from "../src/lib/storage.ts";
+import { createStorage } from "../src/lib/session/storage.ts";
 import { createTtsCache } from "../src/lib/tts-cache.ts";
 import { createRefinementRegistry } from "../src/lib/refinement.ts";
 import { createLookupCache } from "../src/lib/lookup.ts";

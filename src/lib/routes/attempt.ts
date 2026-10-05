@@ -19,14 +19,14 @@ import { evaluateFragmentDeterministic, isBlankTranscript, isFiller, normalize }
 import { checkWhisper, DEFAULT_WHISPER_MODEL, downloadModel, transcribeWords, type WhisperWord } from "../whisper.ts";
 import { alignWords, alignTextWords } from "../align.ts";
 import { buildFeedbackText, buildNoSpeechText, DEFAULT_PASS_THRESHOLD } from "../cu2.ts";
-import { isLevel, isValidOptionalSessionId } from "../storage.ts";
+import { isLevel, isValidOptionalSessionId } from "../session/storage.ts";
 import {
   DEFAULT_REFINE_TIMEOUT_MS,
   handleAttemptFeedbackRequest,
   patchFullEval,
   refineAttempt,
 } from "../refinement.ts";
-import { persistAttempt } from "../attempt-persist.ts";
+import { persistAttempt } from "../session/attempt-persist.ts";
 import { clampNumber } from "../tts-status.ts";
 import { candidates } from "./chain.ts";
 import type { AppDeps } from "../app.ts";

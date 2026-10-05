@@ -15,7 +15,7 @@
  *     `ALMOST_MIN_SCORE`).
  */
 
-import type { FeedbackIssue, Level } from "./storage.ts";
+import type { FeedbackIssue, Level } from "./session/storage.ts";
 
 export type Candidate = Pick<import("./providers/types.ts").Provider, "id" | "available" | "complete">;
 

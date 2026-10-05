@@ -22,8 +22,8 @@
  *     capped at 12).
  */
 
-import { updateProfile } from "./learner.ts";
-import type { Evaluation } from "./practice.ts";
+import { updateProfile } from "../learner.ts";
+import type { Evaluation } from "../practice.ts";
 import type { AttemptWord, Profile, SessionV2 } from "./storage.ts";
 
 /** Minimal persistence surface `persistAttempt` needs (implemented by storage.ts). */

@@ -11,7 +11,7 @@
 import type { CompleteOptions } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
 import { DEFAULT_PASS_THRESHOLD } from "./cu2.ts";
-import type { FeedbackIssue, Level } from "./storage.ts";
+import type { FeedbackIssue, Level } from "./session/storage.ts";
 import { isFiller, wordMatch } from "./practice-text.ts";
 import type { Candidate, Evaluation, WordMatch } from "./practice.ts";
 

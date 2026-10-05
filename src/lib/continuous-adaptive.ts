@@ -6,7 +6,7 @@
  * and returns the pill message for the UI. Pure: no I/O, no network.
  */
 
-import { LEVELS, type Level, type SessionV2 } from "./storage.ts";
+import { LEVELS, type Level, type SessionV2 } from "./session/storage.ts";
 import { RIGOR_LEVELS, type AdaptiveSettings, type RigorLevel } from "./settings.ts";
 
 // ---------------------------------------------------------------------------

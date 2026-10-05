@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { isAttemptWords, isSessionEval, isValidSessionId } from "../src/lib/storage.ts";
+import { isAttemptWords, isSessionEval, isValidSessionId } from "../src/lib/session/storage.ts";
 import { isProviderId, PROVIDER_IDS, type ProviderId } from "../src/lib/providers/types.ts";
 import { isWavBuffer } from "../src/lib/wav.ts";
 

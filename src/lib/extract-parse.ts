@@ -16,7 +16,7 @@ import { PDFParse } from "pdf-parse";
 import mammoth from "mammoth";
 import { completeWithFallback } from "./providers/index.ts";
 import type { Candidate } from "./practice.ts";
-import type { ContextFileRef, FileKind } from "./storage.ts";
+import type { ContextFileRef, FileKind } from "./session/storage.ts";
 
 /** Per-file extraction limits (configurable; defaults below). */
 export interface ExtractLimits {

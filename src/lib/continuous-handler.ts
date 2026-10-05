@@ -8,7 +8,7 @@
  */
 
 import { buildLearnerMemory } from "./learner.ts";
-import type { Profile, SessionV2 } from "./storage.ts";
+import type { Profile, SessionV2 } from "./session/storage.ts";
 import {
   DEFAULT_SETTINGS,
   RIGOR_THRESHOLDS,

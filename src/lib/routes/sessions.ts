@@ -15,7 +15,7 @@
 
 import type { Express } from "express";
 
-import { groupSessionsByRecency, sessionScore } from "../storage.ts";
+import { groupSessionsByRecency, sessionScore } from "../session/storage.ts";
 import type { AppDeps } from "../app.ts";
 
 /**

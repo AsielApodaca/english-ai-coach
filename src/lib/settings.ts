@@ -19,7 +19,7 @@
 // the snapshot/profile writers.
 // ---------------------------------------------------------------------------
 
-import { isLevel, type Profile, type ProfileSettings, type SettingsSnapshot } from "./storage.ts";
+import { isLevel, type Profile, type ProfileSettings, type SettingsSnapshot } from "./session/storage.ts";
 import {
   DEFAULT_SETTINGS,
   FILLER_LEVELS,

@@ -18,8 +18,8 @@ import {
   type PracticePhase,
   type PracticeState,
 } from "../src/lib/cu2.ts";
-import { buildSessionPayload } from "../src/lib/session-payload.ts";
-import type { SessionV2 } from "../src/lib/storage.ts";
+import { buildSessionPayload } from "../src/lib/session/session-payload.ts";
+import type { SessionV2 } from "../src/lib/session/storage.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 // Feature 117 split the reducer into cu2.ts (barrel) + cu2-state /

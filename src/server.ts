@@ -19,7 +19,7 @@ import { buildProviders } from "./lib/providers/index.ts";
 import { isProviderId, type ProviderId } from "./lib/providers/types.ts";
 import { createRefinementRegistry } from "./lib/refinement.ts";
 import { createLookupCache } from "./lib/lookup.ts";
-import { createStorage } from "./lib/storage.ts";
+import { createStorage } from "./lib/session/storage.ts";
 import { createTtsCache } from "./lib/tts-cache.ts";
 import { checkWhisper, DEFAULT_WHISPER_MODEL } from "./lib/whisper.ts";
 

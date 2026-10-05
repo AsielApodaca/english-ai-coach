@@ -1,7 +1,7 @@
 import type { CompleteOptions } from "./providers/types.ts";
 import { chatJSON } from "./providers/index.ts";
 import { tokenize, type Candidate } from "./practice.ts";
-import { fallbackTitle, LEVELS, type CategoryStats, type Level, type NextStep, type Profile, type SessionV2 } from "./storage.ts";
+import { fallbackTitle, LEVELS, type CategoryStats, type Level, type NextStep, type Profile, type SessionV2 } from "./session/storage.ts";
 
 /** Average score at/above which `estimateLevel` promotes the learner a level. */
 export const LEVEL_UP_AVG = 80;

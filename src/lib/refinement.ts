@@ -24,9 +24,9 @@ import { buildFeedbackText } from "./cu2.ts";
 import { updateProfile } from "./learner.ts";
 import { evaluateFragmentDeterministic, isFiller, mergeLLMFeedback, normalize, refineWithLLM } from "./practice.ts";
 import { MS_PER_MIN } from "./time.ts";
-import type { AttemptStorage } from "./attempt-persist.ts";
+import type { AttemptStorage } from "./session/attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
-import type { AttemptWord, FeedbackIssue, Level } from "./storage.ts";
+import type { AttemptWord, FeedbackIssue, Level } from "./session/storage.ts";
 import type { WhisperWord } from "./whisper.ts";
 
 // ---------------------------------------------------------------------------

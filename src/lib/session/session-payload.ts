@@ -1,5 +1,5 @@
-import { buildFullLine, readPassThreshold } from "./cu2.ts";
-import { readAutoAdvance } from "./settings.ts";
+import { buildFullLine, readPassThreshold } from "../cu2.ts";
+import { readAutoAdvance } from "../settings.ts";
 import type { SessionQuestion, SessionV2 } from "./storage.ts";
 
 // ---------------------------------------------------------------------------
