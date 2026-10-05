@@ -18,7 +18,7 @@ import { buildLearnerMemory, buildNextStep } from "../practice/learner.ts";
 import { readPassThreshold } from "../practice/karaoke.ts";
 import { isLevel, isValidOptionalSessionId } from "../session/storage.ts";
 import { persistAttempt } from "../session/attempt-persist.ts";
-import { candidates } from "./chain.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 function isCategory(v: unknown): v is Category {

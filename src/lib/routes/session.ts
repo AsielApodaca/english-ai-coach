@@ -29,7 +29,7 @@ import {
   isValidSessionId,
   type SessionV2,
 } from "../session/storage.ts";
-import { candidates } from "./chain.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /**

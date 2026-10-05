@@ -28,7 +28,7 @@ import {
 } from "../practice/refinement.ts";
 import { persistAttempt } from "../session/attempt-persist.ts";
 import { clampNumber } from "../audio/tts-status.ts";
-import { candidates } from "./chain.ts";
+import { candidates } from "./candidate-chain.ts";
 import type { AppDeps } from "../app.ts";
 
 /** Server long-poll cap for `GET /api/attempt/:id/feedback` (env override). */
