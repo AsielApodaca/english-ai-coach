@@ -12,10 +12,10 @@
 
 import type { Express } from "express";
 
-import { CATEGORY_STAGES, type Category } from "../practice.ts";
-import { evaluateFragment, generatePracticeSet } from "../practice.ts";
-import { buildLearnerMemory, buildNextStep } from "../learner.ts";
-import { readPassThreshold } from "../cu2.ts";
+import { CATEGORY_STAGES, type Category } from "../practice/practice.ts";
+import { evaluateFragment, generatePracticeSet } from "../practice/practice.ts";
+import { buildLearnerMemory, buildNextStep } from "../practice/learner.ts";
+import { readPassThreshold } from "../practice/karaoke.ts";
 import { isLevel, isValidOptionalSessionId } from "../session/storage.ts";
 import { persistAttempt } from "../session/attempt-persist.ts";
 import { candidates } from "./chain.ts";

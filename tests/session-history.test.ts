@@ -16,7 +16,7 @@ import {
   type SessionV2,
 } from "../src/lib/session/storage.ts";
 import { handleSessionStartRequest } from "../src/lib/session/session-start.ts";
-import type { Candidate } from "../src/lib/practice.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures (same patterns as storage.test.ts / session-start.test.ts)

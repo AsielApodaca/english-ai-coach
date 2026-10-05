@@ -16,9 +16,9 @@ import type { Express } from "express";
 import { randomUUID } from "node:crypto";
 
 import { handleSessionStartRequest } from "../session/session-start.ts";
-import { handleNextQuestionRequest } from "../continuous.ts";
+import { handleNextQuestionRequest } from "../practice/continuous.ts";
 import { buildSessionPayload } from "../session/session-payload.ts";
-import { buildNextStep } from "../learner.ts";
+import { buildNextStep } from "../practice/learner.ts";
 import {
   DEFAULT_ACCENT,
   DEFAULT_SETTINGS_SNAPSHOT,

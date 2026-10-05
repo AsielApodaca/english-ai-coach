@@ -9,8 +9,8 @@
  */
 
 import { isFiller, normalize, penalizedScore, tokenize } from "./practice.ts";
-import type { FeedbackIssue } from "./session/storage.ts";
-import type { WhisperWord } from "./whisper.ts";
+import type { FeedbackIssue } from "../session/storage.ts";
+import type { WhisperWord } from "../whisper.ts";
 import type { AlignResult, AlignedWord, NormTargetToken, SpokenToken, TargetToken } from "./align.ts";
 
 /**

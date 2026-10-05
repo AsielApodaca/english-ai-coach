@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { alignWords, alignTextWords, levenshtein } from "../src/lib/align.ts";
-import { countExtraWords, penalizedScore } from "../src/lib/practice.ts";
+import { alignWords, alignTextWords, levenshtein } from "../src/lib/practice/align.ts";
+import { countExtraWords, penalizedScore } from "../src/lib/practice/practice.ts";
 import type { WhisperWord } from "../src/lib/whisper.ts";
 
 /**

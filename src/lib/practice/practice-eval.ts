@@ -8,10 +8,10 @@
  * `evaluateFragment` composes the two for `POST /api/evaluate`.
  */
 
-import type { CompleteOptions } from "./providers/types.ts";
-import { chatJSON } from "./providers/index.ts";
-import { DEFAULT_PASS_THRESHOLD } from "./cu2.ts";
-import type { FeedbackIssue, Level } from "./session/storage.ts";
+import type { CompleteOptions } from "../providers/types.ts";
+import { chatJSON } from "../providers/index.ts";
+import { DEFAULT_PASS_THRESHOLD } from "./karaoke.ts";
+import type { FeedbackIssue, Level } from "../session/storage.ts";
 import { isFiller, wordMatch } from "./practice-text.ts";
 import type { Candidate, Evaluation, WordMatch } from "./practice.ts";
 
@@ -29,7 +29,7 @@ export const NATURALNESS_WEIGHT = 0.25;
  * Score below which the verdict drops from "almost" to "retry". The PASS
  * boundary is NOT this constant: it is the session's `passThreshold` when the
  * caller can supply one, else {@link DEFAULT_PASS_THRESHOLD} (the single
- * source shared with cu2.ts).
+ * source shared with karaoke.ts).
  */
 export const ALMOST_MIN_SCORE = 50;
 

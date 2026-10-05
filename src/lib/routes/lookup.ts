@@ -16,7 +16,7 @@ import {
   resolveLookup,
   validateLookupText,
 } from "../lookup.ts";
-import { buildLearnerMemory } from "../learner.ts";
+import { buildLearnerMemory } from "../practice/learner.ts";
 import { lookupCandidates } from "./chain.ts";
 import type { AppDeps } from "../app.ts";
 

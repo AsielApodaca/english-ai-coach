@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Candidate } from "../src/lib/practice.ts";
-import { computeStats, deriveSessionTitle } from "../src/lib/learner.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
+import { computeStats, deriveSessionTitle } from "../src/lib/practice/learner.ts";
 import type { Profile, SessionV2 } from "../src/lib/session/storage.ts";
 
 function fake(id: string, reply: string): Candidate {

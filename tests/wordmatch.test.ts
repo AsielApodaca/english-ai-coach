@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isBlankTranscript, normalize, tokenize, wordMatch } from "../src/lib/practice.ts";
+import { isBlankTranscript, normalize, tokenize, wordMatch } from "../src/lib/practice/practice.ts";
 
 test("normalize: lowercases, strips punctuation, keeps letters/numbers", () => {
   assert.equal(normalize("Once in this company, I had this situation!"), "once in this company i had this situation");

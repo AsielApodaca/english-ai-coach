@@ -6,8 +6,8 @@
  * `generateFirstQuestion`. Pure text/LLM work — no scoring here.
  */
 
-import type { CompleteOptions } from "./providers/types.ts";
-import { chatJSON } from "./providers/index.ts";
+import type { CompleteOptions } from "../providers/types.ts";
+import { chatJSON } from "../providers/index.ts";
 import type { Candidate, Category, Level, PracticeFragment, PracticeSet } from "./practice.ts";
 
 export const CATEGORY_STAGES: Record<Category, string> = {

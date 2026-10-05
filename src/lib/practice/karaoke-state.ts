@@ -1,15 +1,15 @@
 /**
  * CU2 practice state (feature 105) — the phase/state/event model, the initial
  * state, the pure reducer entry point and the state queries the view derives
- * its controls from. Split out of `cu2.ts` by feature 117; the private
- * transition handlers live in `cu2-transitions.ts` and the spoken lines in
- * `cu2-lines.ts`.
+ * its controls from. Split out of `karaoke.ts` by feature 117; the private
+ * transition handlers live in `karaoke-transitions.ts` and the spoken lines in
+ * `karaoke-lines.ts`.
  *
  * Pure and side-effect free: no I/O, no timers — the caller owns the guard
  * timer and dispatches TIMEOUT when it fires.
  */
 
-import { onAttemptResult, onChimeEnd, onTimeout, onTtsEnd } from "./cu2-transitions.ts";
+import { onAttemptResult, onChimeEnd, onTimeout, onTtsEnd } from "./karaoke-transitions.ts";
 
 export type PracticePhase =
   | "question"

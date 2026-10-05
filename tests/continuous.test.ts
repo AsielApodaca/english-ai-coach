@@ -9,11 +9,11 @@ import {
   handleNextQuestionRequest,
   rollingAverage,
   rollingScores,
-} from "../src/lib/continuous.ts";
+} from "../src/lib/practice/continuous.ts";
 import { createStorage, DEFAULT_ACCENT, type Level, type SessionV2 } from "../src/lib/session/storage.ts";
 import { RIGOR_THRESHOLDS } from "../src/lib/settings.ts";
 import { ProviderError } from "../src/lib/providers/index.ts";
-import type { Candidate } from "../src/lib/practice.ts";
+import type { Candidate } from "../src/lib/practice/practice.ts";
 
 // ---------------------------------------------------------------------------
 // Fixtures

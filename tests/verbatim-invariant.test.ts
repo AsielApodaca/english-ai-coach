@@ -36,7 +36,7 @@ test("fragment reads pass `fragment.text` directly to the TTS layer", () => {
 });
 
 test("no congratulation / instruction literal exists anywhere in public/", () => {
-  // Spec 110: the only allowed occurrences live in `src/lib/cu2.ts` (the
+  // Spec 110: the only allowed occurrences live in `src/lib/practice/karaoke.ts` (the
   // definition of the now-unspoken pass line) — never in the browser bundle.
   const forbidden = [/Great\s+job/i, /repeat[^.\n]*after me/i, /Let.s continue/i];
   for (const file of publicFiles(join(repoRoot, "public"))) {

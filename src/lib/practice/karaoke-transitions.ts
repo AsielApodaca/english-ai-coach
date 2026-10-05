@@ -1,6 +1,6 @@
 /**
  * Private transition handlers of the CU2 reducer (feature 105) — split out of
- * `cu2.ts` by feature 117 so `cu2-state.ts` stays the readable model file.
+ * `karaoke.ts` by feature 117 so `karaoke-state.ts` stays the readable model file.
  *
  * Each function takes the "base" state (already stamped with updatedAt) plus
  * whatever the event carried, and returns the next state. Called only by
@@ -8,7 +8,7 @@
  * dispatches to are exported; `onFeedbackTtsEnd` stays module-private.
  */
 
-import type { AttemptOutcome, PracticeState } from "./cu2-state.ts";
+import type { AttemptOutcome, PracticeState } from "./karaoke-state.ts";
 
 /** TTS_END transitions: the coach finished speaking → next phase. */
 export function onTtsEnd(state: PracticeState): PracticeState {

@@ -19,12 +19,12 @@
 // session is done.
 //
 // Feature 117 split the module; this file recomposes it, so every existing
-// `from "./cu2.ts"` import keeps resolving unchanged:
-//   - cu2-state.ts       — types, initial state, `reducePractice`, queries
-//   - cu2-transitions.ts — the private transition handlers reducePractice uses
-//   - cu2-lines.ts       — spoken lines + `DEFAULT_PASS_THRESHOLD`/`readPassThreshold`
+// `from "./karaoke.ts"` import keeps resolving unchanged:
+//   - karaoke-state.ts       — types, initial state, `reducePractice`, queries
+//   - karaoke-transitions.ts — the private transition handlers reducePractice uses
+//   - karaoke-lines.ts       — spoken lines + `DEFAULT_PASS_THRESHOLD`/`readPassThreshold`
 // ---------------------------------------------------------------------------
 
-export * from "./cu2-state.ts";
-export * from "./cu2-transitions.ts";
-export * from "./cu2-lines.ts";
+export * from "./karaoke-state.ts";
+export * from "./karaoke-transitions.ts";
+export * from "./karaoke-lines.ts";

@@ -1,6 +1,6 @@
 /**
  * Spoken lines and the pass threshold of CU2 (features 105/108/110) — split
- * out of `cu2.ts` by feature 117. These are the strings served to the view
+ * out of `karaoke.ts` by feature 117. These are the strings served to the view
  * through the session endpoints, plus the threshold that decides a pass.
  */
 

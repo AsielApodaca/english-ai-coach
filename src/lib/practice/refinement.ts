@@ -20,14 +20,14 @@
 // ---------------------------------------------------------------------------
 
 import { alignTextWords, alignWords, forcedAmberWordsFromIssues } from "./align.ts";
-import { buildFeedbackText } from "./cu2.ts";
+import { buildFeedbackText } from "./karaoke.ts";
 import { updateProfile } from "./learner.ts";
 import { evaluateFragmentDeterministic, isFiller, mergeLLMFeedback, normalize, refineWithLLM } from "./practice.ts";
-import { MS_PER_MIN } from "./time.ts";
-import type { AttemptStorage } from "./session/attempt-persist.ts";
+import { MS_PER_MIN } from "../time.ts";
+import type { AttemptStorage } from "../session/attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
-import type { AttemptWord, FeedbackIssue, Level } from "./session/storage.ts";
-import type { WhisperWord } from "./whisper.ts";
+import type { AttemptWord, FeedbackIssue, Level } from "../session/storage.ts";
+import type { WhisperWord } from "../whisper.ts";
 
 // ---------------------------------------------------------------------------
 // The refinement itself
@@ -42,7 +42,7 @@ export interface AttemptRefinement {
   /** Combined score: 0.75·lexical + 0.25·naturalness (the pre-116 score). */
   score: number;
   next: boolean;
-  /** Coach line rebuilt with the REAL tips (buildFeedbackText, cu2.ts). */
+  /** Coach line rebuilt with the REAL tips (buildFeedbackText, karaoke.ts). */
   coachLine: string;
   /** Words re-aligned with the forced-amber set of the refined issues. */
   words: AttemptWord[];

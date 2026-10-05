@@ -1,4 +1,4 @@
-import { buildFullLine, readPassThreshold } from "../cu2.ts";
+import { buildFullLine, readPassThreshold } from "../practice/karaoke.ts";
 import { readAutoAdvance } from "../settings.ts";
 import type { SessionQuestion, SessionV2 } from "./storage.ts";
 

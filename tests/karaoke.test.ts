@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as cu2 from "../src/lib/cu2.ts";
+import * as karaoke from "../src/lib/practice/karaoke.ts";
 import {
   initialPracticeState,
   reducePractice,
@@ -17,18 +17,18 @@ import {
   type AttemptOutcome,
   type PracticePhase,
   type PracticeState,
-} from "../src/lib/cu2.ts";
+} from "../src/lib/practice/karaoke.ts";
 import { buildSessionPayload } from "../src/lib/session/session-payload.ts";
 import type { SessionV2 } from "../src/lib/session/storage.ts";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-// Feature 117 split the reducer into cu2.ts (barrel) + cu2-state /
-// cu2-transitions / cu2-lines. The "must be gone"/"authoritative union"
+// Feature 117 split the reducer into karaoke.ts (barrel) + karaoke-state /
+// karaoke-transitions / karaoke-lines. The "must be gone"/"authoritative union"
 // checks below are about the MODULE as a whole, so they run over every file
 // it is recomposed from — joined, the regexes see exactly the same code they
 // saw when it lived in one file.
-const reducerSrc = ["cu2.ts", "cu2-state.ts", "cu2-transitions.ts", "cu2-lines.ts"]
-  .map((file) => readFileSync(join(repoRoot, "src", "lib", file), "utf8"))
+const reducerSrc = ["karaoke.ts", "karaoke-state.ts", "karaoke-transitions.ts", "karaoke-lines.ts"]
+  .map((file) => readFileSync(join(repoRoot, "src", "lib", "practice", file), "utf8"))
   .join("\n");
 const sessionRoutesSrc = readFileSync(join(repoRoot, "src", "lib", "routes", "session.ts"), "utf8");
 const viewSrc = readFileSync(join(repoRoot, "public", "ui", "practice-view.js"), "utf8");
@@ -374,9 +374,9 @@ test("buildFullLine: kept intact and still spoken before the full answer", () =>
 });
 
 test("zero opening utterances: the opening speech builders no longer exist (115)", () => {
-  assert.equal("buildIntroText" in cu2, false);
-  assert.equal("buildExplainLine" in cu2, false);
-  assert.equal(typeof cu2.buildFullLine, "function");
+  assert.equal("buildIntroText" in karaoke, false);
+  assert.equal("buildExplainLine" in karaoke, false);
+  assert.equal(typeof karaoke.buildFullLine, "function");
   // The literal opening texts are gone from the running code (specs/docs and
   // historical comments may still quote them)…
   assert.doesNotMatch(reducerCode, /Welcome to your practice|Now let's practice/);
@@ -415,7 +415,7 @@ test("reducer + view: no intro/explaining phases — only the live union (115)",
   assert.doesNotMatch(reducerCode, /===?\s*"(?:intro|explaining)"/);
   assert.doesNotMatch(reducerCode, /\|\s*"(?:intro|explaining)"/);
   // And no opening-utterance builder survives in the module's exports.
-  assert.deepEqual(Object.keys(cu2).filter((name) => /intro|explain/i.test(name)), []);
+  assert.deepEqual(Object.keys(karaoke).filter((name) => /intro|explain/i.test(name)), []);
 });
 
 test("full question walk: question → model → repeatingFragment → … → done, no prelude phase", () => {

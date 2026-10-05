@@ -18,7 +18,7 @@
 import { providerById } from "../providers/index.ts";
 import type { Provider, ProviderId } from "../providers/types.ts";
 import { isProviderId } from "../providers/types.ts";
-import type { Candidate } from "../practice.ts";
+import type { Candidate } from "../practice/practice.ts";
 
 /** Provider registry + configured primary (structurally satisfied by AppDeps). */
 export interface ProviderChain {

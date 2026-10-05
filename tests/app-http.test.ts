@@ -11,10 +11,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createApp, type AppDeps } from "../src/lib/app.ts";
 import { createStorage } from "../src/lib/session/storage.ts";
 import { createTtsCache } from "../src/lib/tts-cache.ts";
-import { createRefinementRegistry } from "../src/lib/refinement.ts";
+import { createRefinementRegistry } from "../src/lib/practice/refinement.ts";
 import { createLookupCache } from "../src/lib/lookup.ts";
 import { CHAT_MAX_CHARS } from "../src/lib/routes/chat.ts";
-import { evaluateFragmentDeterministic } from "../src/lib/practice-eval.ts";
+import { evaluateFragmentDeterministic } from "../src/lib/practice/practice-eval.ts";
 import type { Provider } from "../src/lib/providers/types.ts";
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import { buildDocumentContext, type ExtractedFile } from "../extract.ts";
-import { buildLearnerMemory, deriveSessionTitle } from "../learner.ts";
-import { generateFirstQuestion, type Candidate } from "../practice.ts";
+import { buildLearnerMemory, deriveSessionTitle } from "../practice/learner.ts";
+import { generateFirstQuestion, type Candidate } from "../practice/practice.ts";
 import { buildSettingsSnapshot, mergeSettings, parseLocalSettings, profileSettings } from "../settings.ts";
 import {
   DEFAULT_ACCENT,

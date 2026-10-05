@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { persistAttempt, type AttemptStorage, type PersistAttemptParams } from "../src/lib/session/attempt-persist.ts";
-import type { Evaluation } from "../src/lib/practice.ts";
+import type { Evaluation } from "../src/lib/practice/practice.ts";
 import type { Profile, SessionFragmentV2, SessionQuestion, SessionV2 } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------
