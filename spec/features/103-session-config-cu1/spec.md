@@ -58,4 +58,4 @@ El diseño y CU1 definen que la configuración es el punto de entrada de toda se
 
 ## Recursos
 
-- `spec/use-cases/CU1.md`, `spec/design/screens.md` §1, `spec/design/design-system.md` (componente dropzone/chips/modales), `src/lib/practice.ts`, `src/server.ts`.
+- `spec/use-cases/CU1.md`, `spec/design/screens.md` §1, `spec/design/design-system.md` (componente dropzone/chips/modales), `src/lib/practice/practice.ts`, `src/server.ts`.

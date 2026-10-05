@@ -57,4 +57,4 @@ CU3 pide "historial de sesiones con progreso separado" y reanudación de aprendi
 
 ## Recursos
 
-- `spec/use-cases/CU3.md`, `spec/design/screens.md` §2/§6, `spec/design/design-system.md` (componente 6 sidebar), `src/lib/storage.ts`, `src/server.ts`.
+- `spec/use-cases/CU3.md`, `spec/design/screens.md` §2/§6, `spec/design/design-system.md` (componente 6 sidebar), `src/lib/session/storage.ts`, `src/server.ts`.

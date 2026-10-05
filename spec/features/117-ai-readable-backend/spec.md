@@ -69,7 +69,7 @@ Los 2 de `align.ts` son **errores en código de producción** (array declarado `
 - 0 efectos en import time en `src/lib/**` (I/O, timers, listeners, `let` de módulo, `console.*`): todo estado vive en closures de factories (`createStorage`, `createTtsCache`, `createRefinementRegistry`, `createLookupCache`).
 - 0 metaprogramming (`eval`, `Proxy`, `monkey-patching`, `new Function`).
 - 0 tests sin aserción (los 3 que no llaman `assert.` usan el helper `near()` que sí lo hace).
-- `src/lib/` ya tiene el **patrón correcto de handler puro** para imitar: `handleXxxRequest(body, deps) → { status, json }` con JSDoc de contrato (`session-start.ts`, `extract.ts` (`handleExtractRequest`), `continuous.ts` (`handleNextQuestionRequest`), `refinement.ts`).
+- `src/lib/` ya tiene el **patrón correcto de handler puro** para imitar: `handleXxxRequest(body, deps) → { status, json }` con JSDoc de contrato (`session/session-start.ts`, `ingest/extract.ts` (`handleExtractRequest`), `practice/continuous.ts` (`handleNextQuestionRequest`), `practice/refinement.ts`).
 
 ## Qué hace
 
@@ -110,8 +110,8 @@ Refactor del backend en **7 fases internas** (cada fase es un commit en la misma
 
 - `AGENTS.md` (Convenciones, No hagas, Flujo de trabajo, Documentación).
 - `spec/constitution/tech-stack.md` (comandos, módulos clave), `spec/constitution/roadmap.md`.
-- Patrones a imitar: `src/lib/session-start.ts` (handler puro + `SessionStartDeps` + `{status, json}`), `src/lib/extract.ts` (`handleExtractRequest`), `src/lib/continuous.ts` (`handleNextQuestionRequest`), `src/lib/lookup.ts:30-58` (constantes nombradas).
-- Tests rojos de referencia: `tests/coach.test.ts`, `tests/cu2.test.ts`, `tests/storage.test.ts`.
+- Patrones a imitar: `src/lib/session/session-start.ts` (handler puro + `SessionStartDeps` + `{status, json}`), `src/lib/ingest/extract.ts` (`handleExtractRequest`), `src/lib/practice/continuous.ts` (`handleNextQuestionRequest`), `src/lib/lookup/lookup-types.ts` (constantes nombradas).
+- Tests rojos de referencia: `tests/coach.test.ts`, `tests/karaoke.test.ts`, `tests/storage.test.ts`.
 - Features relacionadas: `116-fast-fragment-eval` (split de `practice.ts`), `102-session-model-v2` (tipos de sesión), `112-word-popover-dictionary` (contrato `ok:false` de lookup).
 - Plan detallado: `plan.md`; checklist de ejecución: `tasks.md`.
 

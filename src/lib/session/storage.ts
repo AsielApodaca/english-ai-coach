@@ -7,8 +7,8 @@
  *   - `createStorage(baseDir)` — the object with the four data paths and the
  *     load/save/copy/delete operations, each delegating to the module that
  *     owns it (profile, session, context).
- *   - `export * from ...` — the whole contract re-exported, so existing
- *     `from "./storage.ts"` imports resolve unchanged.
+ *   - `export * from ...` — the whole contract re-exported, so every caller
+ *     goes through this single entry point (`lib/session/storage.ts`).
  *
  * The modules behind it:
  *

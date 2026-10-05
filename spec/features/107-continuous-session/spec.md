@@ -58,4 +58,4 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 
 ## Recursos
 
-- `spec/use-cases/CU2.md`, `spec/design/screens.md` §2 (badge "ACTIVA (Q1)"), `src/lib/practice.ts`, `src/lib/learner.ts`.
+- `spec/use-cases/CU2.md`, `spec/design/screens.md` §2 (badge "ACTIVA (Q1)"), `src/lib/practice/practice.ts`, `src/lib/practice/learner.ts`.

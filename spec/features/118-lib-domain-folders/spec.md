@@ -1,6 +1,6 @@
 # 118 · Reorganizar `src/lib` por dominio + renombrar módulos crudos
 
-**Estado:** proposed 📝 (especificado, sin implementar)
+**Estado:** done ✅ (implementado en la rama `refactor/118-lib-domain-folders`, 10 commits; ver *Verificación final* al final del documento)
 
 ## Contexto
 
@@ -57,15 +57,15 @@ Mover cada módulo a la carpeta de su dominio, renombrar los crudos, actualizar 
 
 ## Criterios de aceptación
 
-- [ ] `npx tsc --noEmit` → 0 errores; `npm test` → verde; `npm run check` → verde tras cada commit.
-- [ ] La raíz de `src/lib/` contiene únicamente `app.ts` y `http-errors.ts` (además de las carpetas `routes/`, `providers/`, `session/`, `practice/`, `audio/`, `lookup/`, `ingest/`, `settings/`, `util/`).
-- [ ] Cero archivos `*.ts` fuera de la carpeta de su dominio según el mapa de arriba.
-- [ ] Sin barrels de re-export en las rutas viejas: ningún `export * from` que oculte la ubicación real.
-- [ ] `grep -rn "cu2" src/ tests/` → 0 coincidencias (quedan solo en `spec/` como nombre histórico del CU2).
-- [ ] El script `check` barre `src` y `public` con `find` (lista explícita eliminada) y sigue ejecutando `tsc --noEmit` primero; `tests/type-gate.test.ts` adaptado y en verde.
-- [ ] `tests/cu2.test.ts` lee las fuentes desde la ruta nueva (o renombrado a `karaoke.test.ts` — decisión en plan.md) y pasa sin reescribir aserciones.
-- [ ] `AGENTS.md`, `README.md`, `spec/constitution/{roadmap,tech-stack}.md` y las menciones de paths en `spec/features/` reflejan la estructura real.
-- [ ] Sin dependencias npm nuevas; sin cambios de comportamiento HTTP ni de datos.
+- [x] `npx tsc --noEmit` → 0 errores; `npm test` → verde; `npm run check` → verde tras cada commit.
+- [x] La raíz de `src/lib/` contiene únicamente `app.ts` y `http-errors.ts` (además de las carpetas `routes/`, `providers/`, `session/`, `practice/`, `audio/`, `lookup/`, `ingest/`, `settings/`, `util/`).
+- [x] Cero archivos `*.ts` fuera de la carpeta de su dominio según el mapa de arriba.
+- [x] Sin barrels de re-export en las rutas viejas: ningún `export * from` que oculte la ubicación real.
+- [x] `grep -rn "cu2" src/ tests/` → 0 coincidencias (quedan solo en `spec/` como nombre histórico del CU2).
+- [x] El script `check` barre `src` y `public` con `find` (lista explícita eliminada) y sigue ejecutando `tsc --noEmit` primero; `tests/type-gate.test.ts` adaptado y en verde.
+- [x] `tests/cu2.test.ts` lee las fuentes desde la ruta nueva (o renombrado a `karaoke.test.ts` — decisión en plan.md) y pasa sin reescribir aserciones. **Ejecutado: renombrado a `tests/karaoke.test.ts`** con las mismas aserciones y los paths de lectura apuntando a `src/lib/practice/karaoke*.ts`.
+- [x] `AGENTS.md`, `README.md`, `spec/constitution/{roadmap,tech-stack}.md` y las menciones de paths en `spec/features/` reflejan la estructura real.
+- [x] Sin dependencias npm nuevas; sin cambios de comportamiento HTTP ni de datos.
 
 ## Fuera de alcance
 
@@ -79,3 +79,12 @@ Mover cada módulo a la carpeta de su dominio, renombrar los crudos, actualizar 
 - `AGENTS.md` (Convenciones, Estructura, No hagas), `spec/constitution/tech-stack.md`.
 - Plan detallado: `plan.md`; checklist: `tasks.md`.
 - Features previas: `117-ai-readable-backend` (split de módulos y `createApp`), `105-karaoke-practice-cu2` (vocabulario karaoke).
+
+## Verificación final (2026-10-04, rama `refactor/118-lib-domain-folders`)
+
+- **10 commits**, uno por dominio + rename + docs: `check` con `find` (1), `session/` (2), `practice/` + `cu2*→karaoke*` (3), `audio/` (4), `lookup/` (5), `ingest/` (6), `settings/` (7), `util/` (8), `routes/chain.ts → candidate-chain.ts` (9), docs (10). Movimiento puro: ningún commit toca firmas, contratos ni lógica.
+- **Gates tras cada commit:** `npx tsc --noEmit` → 0 · `npm test` → **593 tests / 591 pass / 0 fail / 2 skipped** (baseline intacta) · `npm run check` → 0.
+- **Raíz de `src/lib/`:** solo `app.ts` y `http-errors.ts` + 9 carpetas (`audio` 8 · `ingest` 3 · `lookup` 5 · `practice` 17 · `providers` 6 · `routes` 11 · `session` 10 · `settings` 2 · `util` 2 = 64 ficheros; 66 con los 2 de la raíz; 67 contando `src/server.ts`).
+- `grep -rn "cu2" src/ tests/` → **0**; `grep -rn "export \* from" src/` → 27 líneas, **todas relativas al interior de su propia carpeta** (ninguna apunta a una ruta vieja).
+- **Ejecutado, no solo decidido:** el rename `tests/cu2.test.ts → tests/karaoke.test.ts` (plan.md, commit 3).
+- **Docs actualizados:** `AGENTS.md` (Comandos + Estructura), `README.md` (comando `check` + roadmap), `spec/constitution/tech-stack.md` (módulos clave + comando `check`), `spec/constitution/roadmap.md` (118 → Hecho ✅), secciones `## Recursos` / "Patrones a imitar" de `spec/features/*/spec.md`, y los comentarios que citan paths en `public/` y en los barrels movidos. Los diagnósticos fechados (p. ej. la lista `wc -l` y los errores `tsc` del spec de 117) quedan intactos como registro histórico.

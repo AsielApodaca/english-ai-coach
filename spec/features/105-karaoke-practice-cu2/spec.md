@@ -144,4 +144,4 @@ CU2 define la experiencia: práctica audiolingüística guiada con karaoke y fee
 
 ## Recursos
 
-- `spec/use-cases/CU2.md`, `spec/design/screens.md` §2, `spec/design/design-system.md` (componentes karaoke/waveform/orb/chips), `src/lib/practice.ts`, `src/server.ts`, `public/speech/*`.
+- `spec/use-cases/CU2.md`, `spec/design/screens.md` §2, `spec/design/design-system.md` (componentes karaoke/waveform/orb/chips), `src/lib/practice/practice.ts`, `src/server.ts`, `public/speech/*`.

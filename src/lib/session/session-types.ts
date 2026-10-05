@@ -4,8 +4,8 @@
  *
  * Everything here is a type, a type guard for the LEVELS list or a pure
  * helper derived from the model (`fallbackTitle`, `normalizeLevel`): no I/O,
- * no state. `storage.ts` re-exports this file, so existing imports of
- * `./storage.ts` resolve unchanged.
+ * no state. `storage.ts` re-exports this file, so callers only ever import
+ * `lib/session/storage.ts` (feature 118).
  */
 
 // ---------------------------------------------------------------------------
