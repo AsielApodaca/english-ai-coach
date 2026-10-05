@@ -32,7 +32,7 @@ export const TEMPO_CHOICES = [0.75, 1, 1.25] as const;
 
 export const PROVIDER_CHOICES = ["auto", "zen", "gemini", "cloudflare", "ollama"] as const;
 
-/** Whisper models supported by whisper.cpp (mirrors src/lib/whisper.ts). */
+/** Whisper models supported by whisper.cpp (mirrors src/lib/audio/whisper.ts). */
 export const WHISPER_MODELS = [
   "tiny.en",
   "base.en",

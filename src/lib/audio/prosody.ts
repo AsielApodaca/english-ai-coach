@@ -14,7 +14,7 @@
  *   - at most 12 segments per utterance.
  */
 
-import { splitForTts as splitForTtsImpl } from "../../public/speech/prosody.js";
+import { splitForTts as splitForTtsImpl } from "../../../public/speech/prosody.js";
 
 /** Pause values and limits of the splitter (mirrors the spec ranges). */
 export {
@@ -23,7 +23,7 @@ export {
   LONG_PAUSE_MS,
   MAX_SEGMENTS,
   SHORT_TEXT_MAX_WORDS,
-} from "../../public/speech/prosody.js";
+} from "../../../public/speech/prosody.js";
 
 /** Result of {@link splitForTts}: clauses plus the silence after each one. */
 export interface ProsodySplit {

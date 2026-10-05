@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 
 import { isAttemptWords, isSessionEval, isValidSessionId } from "../src/lib/session/storage.ts";
 import { isProviderId, PROVIDER_IDS, type ProviderId } from "../src/lib/providers/types.ts";
-import { isWavBuffer } from "../src/lib/wav.ts";
+import { isWavBuffer } from "../src/lib/audio/wav.ts";
 
 // ---------------------------------------------------------------------------
 // Feature 117 — input-validation guards. These are the executable spec of the

@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "./subprocess.ts";
-import { MS_PER_MIN, MS_PER_S } from "./time.ts";
+import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "../subprocess.ts";
+import { MS_PER_MIN, MS_PER_S } from "../time.ts";
 
 const MODELS: Record<string, string> = {
   "tiny.en": "ggml-tiny.en.bin",

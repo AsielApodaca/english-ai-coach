@@ -27,7 +27,7 @@ import { MS_PER_MIN } from "../time.ts";
 import type { AttemptStorage } from "../session/attempt-persist.ts";
 import type { Candidate, Evaluation } from "./practice.ts";
 import type { AttemptWord, FeedbackIssue, Level } from "../session/storage.ts";
-import type { WhisperWord } from "../whisper.ts";
+import type { WhisperWord } from "../audio/whisper.ts";
 
 // ---------------------------------------------------------------------------
 // The refinement itself

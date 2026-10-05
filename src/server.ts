@@ -20,8 +20,8 @@ import { isProviderId, type ProviderId } from "./lib/providers/types.ts";
 import { createRefinementRegistry } from "./lib/practice/refinement.ts";
 import { createLookupCache } from "./lib/lookup.ts";
 import { createStorage } from "./lib/session/storage.ts";
-import { createTtsCache } from "./lib/tts-cache.ts";
-import { checkWhisper, DEFAULT_WHISPER_MODEL } from "./lib/whisper.ts";
+import { createTtsCache } from "./lib/audio/tts-cache.ts";
+import { checkWhisper, DEFAULT_WHISPER_MODEL } from "./lib/audio/whisper.ts";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const env = process.env as NodeJS.ProcessEnv;

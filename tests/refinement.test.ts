@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { ProviderError } from "../src/lib/providers/index.ts";
 import type { Candidate, Evaluation } from "../src/lib/practice/practice.ts";
 import { tokenize } from "../src/lib/practice/practice.ts";
-import type { WhisperWord } from "../src/lib/whisper.ts";
+import type { WhisperWord } from "../src/lib/audio/whisper.ts";
 import {
   awaitRefinement,
   createRefinementRegistry,

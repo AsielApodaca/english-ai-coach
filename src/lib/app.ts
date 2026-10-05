@@ -25,7 +25,7 @@ import { join } from "node:path";
 
 import { apiErrorHandler, apiNotFound } from "./http-errors.ts";
 import type { createStorage } from "./session/storage.ts";
-import type { createTtsCache } from "./tts-cache.ts";
+import type { createTtsCache } from "./audio/tts-cache.ts";
 import type { createRefinementRegistry } from "./practice/refinement.ts";
 import type { createLookupCache } from "./lookup.ts";
 import type { Provider, ProviderId } from "./providers/types.ts";

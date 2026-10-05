@@ -17,7 +17,7 @@
 
 // Shared with the client gain (public/speech/level.js): one MAX_BOOST for
 // both normalizers so server WAV and edge MP3 behave identically (review #3).
-import { MAX_BOOST } from "../../public/speech/level.js";
+import { MAX_BOOST } from "../../../public/speech/level.js";
 
 /** Bytes of the canonical 16-bit PCM header (RIFF…data size field inclusive). */
 const MIN_WAV_HEADER_BYTES = 44;

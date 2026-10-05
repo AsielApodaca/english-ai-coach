@@ -13,13 +13,13 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { checkWhisper, DEFAULT_WHISPER_MODEL, downloadModel, transcribeWav, transcribeWords } from "../whisper.ts";
-import { isWavBuffer } from "../wav.ts";
-import { clampNumber, queryList, ttsStatus } from "../tts-status.ts";
-import { ttsCacheKey, withTtsCache } from "../tts-cache.ts";
-import { isVoiceReady, synthesizeSegments as piperSynthesizeSegments, DEFAULT_VOICE, SUPPORTED_VOICES } from "../piper.ts";
-import { synthesizeEdge, DEFAULT_EDGE_VOICE } from "../edge-tts.ts";
-import { splitForTts } from "../prosody.ts";
+import { checkWhisper, DEFAULT_WHISPER_MODEL, downloadModel, transcribeWav, transcribeWords } from "../audio/whisper.ts";
+import { isWavBuffer } from "../audio/wav.ts";
+import { clampNumber, queryList, ttsStatus } from "../audio/tts-status.ts";
+import { ttsCacheKey, withTtsCache } from "../audio/tts-cache.ts";
+import { isVoiceReady, synthesizeSegments as piperSynthesizeSegments, DEFAULT_VOICE, SUPPORTED_VOICES } from "../audio/piper.ts";
+import { synthesizeEdge, DEFAULT_EDGE_VOICE } from "../audio/edge-tts.ts";
+import { splitForTts } from "../audio/prosody.ts";
 import type { AppDeps } from "../app.ts";
 
 const TTS_MAX_CHARS = 1000;

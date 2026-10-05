@@ -9,7 +9,7 @@ import {
   ttsCacheKey,
   withTtsCache,
   TTS_CACHE_TTL_MS,
-} from "../src/lib/tts-cache.ts";
+} from "../src/lib/audio/tts-cache.ts";
 
 let dir = "";
 let cacheDir = "";
