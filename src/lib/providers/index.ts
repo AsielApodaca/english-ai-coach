@@ -1,5 +1,5 @@
 import type { ChatMessage, CompleteOptions, Provider, ProviderId } from "./types.ts";
-import { ProviderError, REPLY_SNIP_LEN } from "./types.ts";
+import { ProviderError, REPLY_SNIP_LEN, isProviderId } from "./types.ts";
 import { createGeminiProvider } from "./gemini.ts";
 import { createCloudflareProvider } from "./cloudflare.ts";
 import { createOllamaProvider } from "./ollama.ts";
@@ -166,44 +166,152 @@ export function extractJSON<T>(text: string): T {
   for (const start of starts) {
     const idx = cleaned.indexOf(start);
     if (idx === -1) continue;
-    const endChar = start === "{" ? "}" : "]";
-    let depth = 0;
-    let inString = false;
-    let escaped = false;
-    for (let i = idx; i < cleaned.length; i++) {
-      const ch = cleaned[i];
-      if (inString) {
-        if (escaped) escaped = false;
-        else if (ch === "\\") escaped = true;
-        else if (ch === '"') inString = false;
-        continue;
-      }
-      if (ch === '"') {
-        inString = true;
-        continue;
-      }
-      if (ch === start) depth++;
-      else if (ch === endChar) {
-        depth--;
-        if (depth === 0) {
-          const slice = cleaned.slice(idx, i + 1);
-          return JSON.parse(slice) as T;
-        }
-      }
+    const parsed = scanBlock(cleaned, idx);
+    if (parsed === undefined) continue;
+    if (parsed.duplicateKey !== undefined) {
+      // A reply whose objects repeat a key is structurally invalid even though
+      // JSON.parse accepts it (last value wins). The local model produces this
+      // when it drops the `}{` separator between array items: every item folds
+      // into ONE object and only the last item's values survive — the classic
+      // "single-fragment answer" bug. Fail loudly so the caller can retry.
+      throw new Error(
+        `Duplicate key "${parsed.duplicateKey}" in model reply JSON: ${cleaned.slice(parsed.start, parsed.end).slice(0, REPLY_SNIP_LEN)}`,
+      );
+    }
+    try {
+      return JSON.parse(cleaned.slice(parsed.start, parsed.end)) as T;
+    } catch (err) {
+      throw new Error(`Invalid JSON in model reply: ${(err as Error).message}`);
     }
   }
   throw new Error(`No JSON found in model reply: ${text.slice(0, REPLY_SNIP_LEN)}`);
 }
 
-/** Sends a request with a JSON system prompt and returns structured data. */
+/** One brace frame of the JSON scanner: object frames collect their keys. */
+interface ScanFrame {
+  kind: "object" | "array";
+  keys: Set<string>;
+  /** True while the next string in an object frame would be a key, not a value. */
+  expectKey: boolean;
+}
+
+interface ScannedBlock {
+  start: number;
+  end: number;
+  /** First duplicated key found in any object, or `undefined` when the block is clean. */
+  duplicateKey?: string;
+}
+
+/**
+ * Scan from `idx` for the balanced JSON block that starts there, tracking
+ * object keys as it goes so duplicate keys can be reported.
+ * Returns `undefined` when the block never closes (the caller then tries the
+ * next start token).
+ */
+function scanBlock(cleaned: string, idx: number): ScannedBlock | undefined {
+  const stack: ScanFrame[] = [];
+  let inString = false;
+  let escaped = false;
+  let stringStart = 0;
+  let duplicateKey: string | undefined;
+
+  for (let i = idx; i < cleaned.length; i++) {
+    const ch = cleaned[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') {
+        inString = false;
+        const frame = stack[stack.length - 1];
+        if (frame?.kind === "object" && frame.expectKey && duplicateKey === undefined) {
+          const key = cleaned.slice(stringStart, i);
+          if (frame.keys.has(key)) duplicateKey = key;
+          else frame.keys.add(key);
+        }
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      stringStart = i + 1;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      stack.push({ kind: ch === "{" ? "object" : "array", keys: new Set(), expectKey: ch === "{" });
+      continue;
+    }
+    if (ch === "}" || ch === "]") {
+      stack.pop();
+      if (stack.length === 0) return { start: idx, end: i + 1, duplicateKey };
+      continue;
+    }
+    if (ch === ":") {
+      const frame = stack[stack.length - 1];
+      if (frame) frame.expectKey = false;
+      continue;
+    }
+    if (ch === ",") {
+      const frame = stack[stack.length - 1];
+      if (frame?.kind === "object") frame.expectKey = true;
+    }
+  }
+  return undefined;
+}
+
+/** Default number of times `chatJSON` asks the provider chain for a usable reply. */
+export const CHAT_JSON_ATTEMPTS = 3;
+
+/**
+ * Sends a request with a JSON system prompt and returns structured data.
+ *
+ * @param params.system - JSON-only system prompt
+ * @param params.user - user message
+ * @param params.options - sampling options
+ * @param params.schema - optional JSON Schema forwarded to providers that
+ *   support structured outputs (Ollama: constrained sampling)
+ * @param params.validate - optional shape check run on the parsed value;
+ *   a throw is treated like a parse failure and triggers a retry
+ *
+ * Malformed or shape-rejected replies are retried (up to `CHAT_JSON_ATTEMPTS`
+ * calls to the chain) because local models occasionally emit structurally
+ * invalid JSON. Exhausting the attempts throws a `ProviderError` quoting the
+ * last reply; a chain that fails outright propagates immediately instead of
+ * burning retries.
+ */
 export async function chatJSON<T>(
   candidates: Pick<Provider, "id" | "available" | "complete">[],
-  params: { system: string; user: string; options?: CompleteOptions },
+  params: {
+    system: string;
+    user: string;
+    options?: CompleteOptions;
+    schema?: CompleteOptions["jsonSchema"];
+    validate?: (data: T) => void;
+  },
 ): Promise<{ data: T; provider: string }> {
   const messages: ChatMessage[] = [
     { role: "system", content: params.system },
     { role: "user", content: params.user },
   ];
-  const result = await completeWithFallback(candidates, messages, params.options);
-  return { data: extractJSON<T>(result.text), provider: result.provider };
+  const options: CompleteOptions = { ...params.options };
+  if (params.schema) options.jsonSchema = params.schema;
+
+  let last: Error | undefined;
+  let lastProvider = "unknown";
+  for (let attempt = 1; attempt <= CHAT_JSON_ATTEMPTS; attempt++) {
+    const result = await completeWithFallback(candidates, messages, options);
+    lastProvider = result.provider;
+    try {
+      const data = extractJSON<T>(result.text);
+      params.validate?.(data);
+      return { data, provider: result.provider };
+    } catch (err) {
+      last = err instanceof Error ? err : new Error(String(err));
+      if (attempt < CHAT_JSON_ATTEMPTS) continue;
+    }
+  }
+  throw new ProviderError(
+    `No usable JSON reply after ${CHAT_JSON_ATTEMPTS} attempts: ${last?.message ?? "unknown"}`,
+    false,
+    isProviderId(lastProvider) ? lastProvider : "unknown",
+  );
 }

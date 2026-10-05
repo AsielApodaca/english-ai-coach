@@ -25,6 +25,7 @@ CU1 pide dar más contexto a la conversación vía archivos (un job spec, una no
 - [ ] Persistencia: el texto extraído se guarda en `data/tmp/context/<sessionId>/` (ignorada por git) o se re-extrae al crear sesión; el `config.contextFiles[]` guarda `{ name, size, kind, textRef }` (sin duplicar el contenido en el JSON de sesión).
 - [ ] Resumen opcional del texto por LLM para caber en el contexto (si supera límite); detector de idioma suave.
 - [ ] El contenido extraído se inyecta en el prompt de rol como "DOCUMENT CONTEXT" al generar la pregunta/respuesta (103/105), respetando instrucciones del usuario (dentro de prompts internos españoles? no: el texto del archivo se deja crudo, solo el wrapper en el prompt).
+- [ ] El bloque `DOCUMENT CONTEXT` se trata como **dato, no como sintaxis**: la generación que lo consume corre bajo el contrato JSON estricto de 103 (JSON Schema + validación de forma + reintentos), de modo que un texto que termine con llaves/comas sueltas no puede degradar la respuesta generada.
 - [ ] No se sube nunca el archivo en sí a ningún proveedor externo: solo texto extraído.
 - [ ] Errores amigables: `{ error }` con mensaje si el archivo no se puede parsear.
 
@@ -48,6 +49,7 @@ CU1 pide dar más contexto a la conversación vía archivos (un job spec, una no
 - [x] Tests (`tests/extract.test.ts` existente se amplía): TXT/MD directos; PDF y DOCX con fixtures minimos de ejemplo; límite de tamaño; sanitización de nulos.
 - [x] Endpoint `POST /api/files/extract` funciona con presencia/ausencia del archivo.
 - [x] `npm test` y `npm run check` pasan.
+- [x] Regresión (respuesta modelo incompleta con archivo adjunto): la generación que recibe el `DOCUMENT CONTEXT` valida la forma de la respuesta igual que sin adjunto — una respuesta degenerada reintenta y, si persiste, no crea sesión (criterios de 103 en `tests/session-start.test.ts`).
 
 ## Fuera de alcance
 

@@ -282,7 +282,7 @@ test("history: copyContextText returns false when the text cannot be resolved", 
 // session/start with contextBucket (feature 109 "Practicar de nuevo")
 // ---------------------------------------------------------------------------
 
-const FAKE_FIRST = `{"question":"Tell me about a time you led a difficult project.","fragments":[{"id":"f1","stage":"Opening","text":"Last year I led a project with a very tight deadline."}]}`;
+const FAKE_FIRST = `{"question":"Tell me about a time you led a difficult project.","fragments":[{"id":"f1","stage":"Opening","text":"Last year I led a project with a very tight deadline."},{"id":"f2","stage":"Main point","text":"I split the work into small tasks and tracked progress daily."},{"id":"f3","stage":"Example","text":"We shipped two days early and the client was thrilled."}]}`;
 const FAKE_TITLE = `{"title":"Leading a Difficult Project"}`;
 
 function fake(id: string, reply: string): Candidate {

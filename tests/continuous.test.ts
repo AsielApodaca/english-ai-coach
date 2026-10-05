@@ -19,7 +19,7 @@ import type { Candidate } from "../src/lib/practice/practice.ts";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const FAKE_NEXT = `{"question":"How did you handle a conflict inside your team?","fragments":[{"id":"f1","stage":"Opening","text":"I once had a conflict about priorities."},{"id":"f2","stage":"Main point","text":"I scheduled a one-on-one to understand both sides."}]}`;
+const FAKE_NEXT = `{"question":"How did you handle a conflict inside your team?","fragments":[{"id":"f1","stage":"Opening","text":"I once had a conflict about priorities."},{"id":"f2","stage":"Main point","text":"I scheduled a one-on-one to understand both sides."},{"id":"f3","stage":"Closing","text":"We agreed on a shared plan and shipped on time."}]}`;
 
 /** Fake provider that returns a fixed reply. */
 function fake(id: string, reply: string): Candidate {
@@ -260,7 +260,7 @@ test("next-question: generates Q_n+1 and applies the adaptive step", async () =>
     rigor: string;
   };
   assert.equal(json.question.q, "How did you handle a conflict inside your team?");
-  assert.equal(json.question.fragments.length, 2);
+  assert.equal(json.question.fragments.length, 3);
   assert.equal(json.provider, "amber");
   assert.equal(json.adjustment, "Dificultad sube a B2 · rigor Estricto");
   assert.equal(json.level, "B2");

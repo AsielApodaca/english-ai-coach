@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { chatJSON, completeWithFallback, ProviderError } from "../src/lib/providers/index.ts";
+import { CHAT_JSON_ATTEMPTS, chatJSON, completeWithFallback, ProviderError } from "../src/lib/providers/index.ts";
 import type { Candidate } from "../src/lib/practice/practice.ts";
 import {
   generatePracticeSet,
@@ -95,6 +95,102 @@ test("chatJSON: extracts structured data from response with prose", async () => 
   assert.equal(data.word, "situation");
 });
 
+// ---------------------------------------------------------------------------
+// Strict JSON replies — regression coverage for the collapsed-fragments bug
+// ---------------------------------------------------------------------------
+
+/** Counting fake: returns `replies[i]` (last one repeats) and records the calls. */
+function scripted(id: string, replies: string[]): { candidate: Candidate; calls: () => number } {
+  let i = 0;
+  const candidate: Candidate = {
+    id: id as never,
+    async available() {
+      return true;
+    },
+    async complete() {
+      const reply = replies[Math.min(i, replies.length - 1)];
+      i++;
+      return reply;
+    },
+  };
+  return { candidate, calls: () => i };
+}
+
+/** The reply shape that used to persist a one-fragment model answer. */
+const COLLAPSED_REPLY =
+  `{"question":"Tell me about Zenda.","fragments":[{"id":"f1","stage":"Opening","text":"First line.",` +
+  `"id":"f5","stage":"Closing","text":"Now our data is reliable."}]}`;
+
+test("chatJSON: an unusable reply is retried and the next usable one wins", async () => {
+  const { candidate, calls } = scripted("amber", ["no json here at all", '{"word":"situation"}']);
+  const { data } = await chatJSON<{ word: string }>([candidate], { system: "be strict", user: "task" });
+  assert.equal(data.word, "situation");
+  assert.equal(calls(), 2, "one failed parse, then a good reply");
+});
+
+test("chatJSON: a collapsed fragments array never reaches the caller", async () => {
+  const { candidate, calls } = scripted("amber", [COLLAPSED_REPLY, '{"word":"situation"}']);
+  const { data } = await chatJSON<{ word: string }>([candidate], { system: "be strict", user: "task" });
+  assert.equal(data.word, "situation");
+  assert.equal(calls(), 2, "duplicate keys are caught, not silently collapsed");
+});
+
+test("chatJSON: gives up after CHAT_JSON_ATTEMPTS unusable replies", async () => {
+  const { candidate, calls } = scripted("amber", [COLLAPSED_REPLY]);
+  await assert.rejects(
+    () => chatJSON<{ word: string }>([candidate], { system: "be strict", user: "task" }),
+    /No usable JSON reply after 3 attempts/,
+  );
+  assert.equal(calls(), CHAT_JSON_ATTEMPTS);
+});
+
+test("chatJSON: a rejected validate() is retried like a parse failure", async () => {
+  const { candidate, calls } = scripted("amber", ['{"word":""}', '{"word":"situation"}']);
+  const { data } = await chatJSON<{ word: string }>([candidate], {
+    system: "be strict",
+    user: "task",
+    validate: (d) => {
+      if (!d.word) throw new Error("empty word");
+    },
+  });
+  assert.equal(data.word, "situation");
+  assert.equal(calls(), 2);
+});
+
+test("chatJSON: a provider-chain failure is NOT retried", async () => {
+  let calls = 0;
+  const down: Candidate = {
+    id: "amber" as never,
+    async available() {
+      return true;
+    },
+    async complete() {
+      calls++;
+      throw new ProviderError("boom", true, "amber" as never);
+    },
+  };
+  await assert.rejects(() => chatJSON([down], { system: "be strict", user: "task" }), /All LLM providers failed/);
+  assert.equal(calls, 1, "the chain already exhausted every candidate");
+});
+
+test("chatJSON: forwards the JSON schema to the provider", async () => {
+  const schema = { type: "object", properties: { word: { type: "string" } }, required: ["word"] };
+  let seen: unknown;
+  const candidate: Candidate = {
+    id: "amber" as never,
+    async available() {
+      return true;
+    },
+    async complete(_messages: unknown[], options?: { jsonSchema?: unknown }) {
+      seen = options?.jsonSchema;
+      return '{"word":"situation"}';
+    },
+  };
+  const { data } = await chatJSON<{ word: string }>([candidate], { system: "be strict", user: "task", schema });
+  assert.deepEqual(seen, schema);
+  assert.equal(data.word, "situation");
+});
+
 const FAKE_SET = `{"question":"Tell me about a difficult situation you handled.","context":"Use past tense and STAR.","fragments":[{"id":"f1","stage":"Situation","text":"Once in this company I had a difficult situation."},{"id":"f2","stage":"Action","text":"I analyzed the problem carefully and asked my team for support."}]}`;
 
 test("generatePracticeSet: builds fragments from LLM JSON", async () => {
@@ -107,6 +203,14 @@ test("generatePracticeSet: builds fragments from LLM JSON", async () => {
   assert.equal(set.fragments.length, 2);
   assert.equal(set.fragments[0].stage, "Situation");
   assert.ok(set.fragments[0].text.length > 0);
+});
+
+test("generatePracticeSet: a set with too few fragments is retried, never returned", async () => {
+  const stub = `{"question":"Tell me about a difficult situation.","context":"Use STAR.","fragments":[{"id":"f1","stage":"Situation","text":"Once I had a difficult situation."}]}`;
+  const { candidate, calls } = scripted("amber", [stub, FAKE_SET]);
+  const { set } = await generatePracticeSet([candidate], { category: "star", level: "B2", learnerMemory: "" });
+  assert.equal(set.fragments.length, 2);
+  assert.equal(calls(), 2);
 });
 
 const FAKE_EVAL = `{"issues":[{"category":"grammar","message":"Add the","fix":"Use \\"the problem\\""}],"tips":["Slow down"],"naturalness":72}`;

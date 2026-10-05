@@ -55,7 +55,11 @@ function originOf(baseUrl: string): string {
  * server streams reasoning before the answer, which both slows the reply down
  * and breaks strict-JSON parsing; non-thinking models (e.g. `phi4-mini`)
  * simply ignore the flag. `options.num_ctx` bounds the KV cache per call so a
- * burst of concurrent requests cannot exhaust RAM.
+ * burst of concurrent requests cannot exhaust RAM. When `options.jsonSchema`
+ * is given it becomes `format`, which makes the server constrain sampling to
+ * that schema — the reply is then guaranteed well-formed JSON (the local model
+ * otherwise occasionally emits array items without their `}{` separator, which
+ * JSON.parse accepts with duplicate keys and silently collapses).
  *
  * Health checks keep using the OpenAI-compat `/models` path (`pingOllama`).
  *
@@ -89,6 +93,11 @@ export function createOllamaProvider(
           stream: false,
           think: false,
           temperature: options.temperature ?? LLM_DEFAULT_TEMPERATURE,
+          // Structured outputs: Ollama constrains sampling to the schema, so
+          // the reply is guaranteed to be well-formed JSON with one object per
+          // array item (feature: strict first-question generation). Omitted
+          // entirely when no schema is given, keeping the default body intact.
+          ...(options.jsonSchema ? { format: options.jsonSchema } : {}),
           options: { num_predict: options.maxTokens ?? LLM_DEFAULT_MAX_TOKENS, num_ctx: numCtx },
         }),
         signal: options.signal,

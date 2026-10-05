@@ -12,7 +12,7 @@ import type { Candidate } from "../src/lib/practice/practice.ts";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const FAKE_FIRST = `{"question":"Tell me about a time you led a difficult project.","fragments":[{"id":"f1","stage":"Opening","text":"Last year I led a project with a very tight deadline."},{"id":"f2","stage":"Main point","text":"I split the work into small tasks and tracked progress daily."}]}`;
+const FAKE_FIRST = `{"question":"Tell me about a time you led a difficult project.","fragments":[{"id":"f1","stage":"Opening","text":"Last year I led a project with a very tight deadline."},{"id":"f2","stage":"Main point","text":"I split the work into small tasks and tracked progress daily."},{"id":"f3","stage":"Example","text":"We shipped two days early and the client was thrilled."}]}`;
 
 const FAKE_TITLE = `{"title":"Leading a Difficult Project"}`;
 
@@ -139,7 +139,7 @@ test("session/start: creates a v2 session and persists the first question", asyn
   const { sessionId, firstQuestion } = res.json as { sessionId: string; firstQuestion: { q: string; answer: string; fragments: unknown[] } };
   assert.ok(sessionId.length > 0);
   assert.equal(firstQuestion.q, "Tell me about a time you led a difficult project.");
-  assert.equal(firstQuestion.fragments.length, 2);
+  assert.equal(firstQuestion.fragments.length, 3);
   assert.ok(firstQuestion.answer.includes("Last year I led a project"));
 
   const session = s.loadSession(sessionId);
@@ -156,7 +156,7 @@ test("session/start: creates a v2 session and persists the first question", asyn
   assert.equal(session.questions.length, 1);
   assert.equal(session.questions[0].q, firstQuestion.q);
   assert.equal(session.questions[0].answer, firstQuestion.answer);
-  assert.equal(session.questions[0].fragments.length, 2);
+  assert.equal(session.questions[0].fragments.length, 3);
   assert.equal(session.questions[0].fullAttempt, null);
   assert.equal(session.questions[0].eval, null);
 });
@@ -246,9 +246,54 @@ test("session/start: fragments are born with attempts: [] and passed: false", as
   const { sessionId } = res.json as { sessionId: string };
   const session = s.loadSession(sessionId)!;
   const fragments = session.questions[0].fragments;
-  assert.equal(fragments.length, 2);
+  assert.equal(fragments.length, 3);
   for (const fragment of fragments) {
     assert.deepEqual(fragment.attempts, []);
     assert.equal(fragment.passed, false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Degenerate first-question replies — regression (feature 104): a collapsed
+// fragments array (duplicate JSON keys) and an empty question used to be
+// persisted as a valid session, producing a one-fragment "model answer".
+// ---------------------------------------------------------------------------
+
+/** The reply that shipped the bug: 5 items folded into one `f5` fragment. */
+const COLLAPSED_FIRST =
+  `{"question":"Can you describe a difficult problem you solved at Zenda Logistics?",` +
+  `"fragments":[{"id":"f1","stage":"Opening","text":"First line.","id":"f5","stage":"Closing",` +
+  `"text":"Now our data is reliable and ready for artificial intelligence models."}]}`;
+
+const EMPTY_QUESTION_FIRST = `{"question":"","fragments":[{"id":"f1","stage":"Opening","text":"First line."},{"id":"f2","stage":"Detail","text":"Second line."},{"id":"f3","stage":"Closing","text":"Third line."}]}`;
+
+test("session/start: a collapsed fragments array → 502 and NO session is created", async () => {
+  const s = createStorage(dir);
+  const res = await handleSessionStartRequest(s, [fake("amber", COLLAPSED_FIRST)], {
+    topicPrompt: "Entrevista del resume adjunto",
+    level: "B2",
+  });
+  assert.equal(res.status, 502);
+  assert.match(res.json.error as string, /Duplicate key "id"/);
+  assert.deepEqual(sessionFiles(), []);
+});
+
+test("session/start: an empty question → 502 and NO session is created", async () => {
+  const s = createStorage(dir);
+  const res = await handleSessionStartRequest(s, [fake("amber", EMPTY_QUESTION_FIRST)], {
+    topicPrompt: "Role",
+    level: "B2",
+  });
+  assert.equal(res.status, 502);
+  assert.match(res.json.error as string, /empty question/);
+  assert.deepEqual(sessionFiles(), []);
+});
+
+test("session/start: a single-fragment answer → 502 and NO session is created", async () => {
+  const s = createStorage(dir);
+  const oneFragment = `{"question":"Tell me about your last internship.","fragments":[{"id":"f5","stage":"Closing","text":"Now our data is reliable."}]}`;
+  const res = await handleSessionStartRequest(s, [fake("amber", oneFragment)], { topicPrompt: "Role", level: "B2" });
+  assert.equal(res.status, 502);
+  assert.match(res.json.error as string, /usable fragments \(minimum 3\)/);
+  assert.deepEqual(sessionFiles(), []);
 });

@@ -72,6 +72,24 @@ test("complete(): ping then native /api/chat, with think:false and the baked num
   });
 });
 
+test("complete(): jsonSchema is sent as `format` for structured outputs", async (t) => {
+  let body: Record<string, unknown> | undefined;
+  t.mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
+    if (String(input).endsWith("/models")) return new Response("{}", { status: 200 });
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return jsonResponse({ message: { content: '{"question":"Q?","fragments":[]}' } });
+  });
+
+  const jsonSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: { question: { type: "string" } },
+    required: ["question"],
+  };
+  await createOllamaProvider().complete(MSGS, { jsonSchema });
+  assert.deepEqual(body?.format, jsonSchema, "the schema constrains sampling at the server");
+});
+
 test("complete(): a dead server fails WITHOUT reaching /api/chat", async (t) => {
   const mock = t.mock.method(globalThis, "fetch", async () => {
     throw new Error("ECONNREFUSED");
