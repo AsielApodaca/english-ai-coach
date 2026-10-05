@@ -1,10 +1,10 @@
 # 118 · Reorganizar `src/lib` por dominio + renombrar módulos crudos
 
-**Estado:** done ✅ (implementado en la rama `refactor/118-lib-domain-folders`, 10 commits; ver *Verificación final* al final del documento)
+**Estado:** done ✅ (implementado en la rama `refactor/118-lib-domain-folders`, 10 commits de implementación; ver *Verificación final* al final del documento)
 
 ## Contexto
 
-- Motivo: el split de features 116/117 dejó **51 archivos sueltos en la raíz de `src/lib/`** (más `providers/` y `routes/`, que ya están organizados). Los grupos de dominio solo se intuyen por prefijo (`storage-*`, `practice-*`, `cu2-*`, `lookup-*`, `piper-*`); un agente o persona que abre el repo no sabe dónde empieza cada dominio. Además hay nombres crudos heredados: `cu2.ts` (del "Caso de Uso 2", invisible sin leer el spec) y `routes/chain.ts`.
+- Motivo: el split de features 116/117 dejó **49 ficheros `*.ts` sueltos en la raíz de `src/lib/`** (47 a mover; `app.ts` y `http-errors.ts` se quedan; más las carpetas `providers/` y `routes/`, que ya estaban organizadas). Los grupos de dominio solo se intuyen por prefijo (`storage-*`, `practice-*`, `cu2-*`, `lookup-*`, `piper-*`); un agente o persona que abre el repo no sabe dónde empieza cada dominio. Además hay nombres crudos heredados: `cu2.ts` (del "Caso de Uso 2", invisible sin leer el spec) y `routes/chain.ts`.
 - Decidido con el usuario (2026-10-04): feature **nueva apilada sobre 117** (diffs y review separados), alcance **mover + renombrar**, y **actualizar todos los imports** (sin barrels de re-export), aprovechando para cambiar el barrido `node --check` del script `check` por un `find` (la lista explícita de ~60 paths se rompe con cada move).
 - Este spec es **autocontenido**: una sesión sin contexto previo implementa la feature leyendo este directorio + `AGENTS.md`.
 - Rama: `refactor/118-lib-domain-folders` (apilada sobre `refactor/117-ai-readable-backend`). Commits en inglés, uno por dominio.
@@ -20,7 +20,7 @@
 - **Referencias en docs:** `AGENTS.md` (sección Estructura), `README.md`, `spec/constitution/{roadmap,tech-stack}.md`, `spec/features/105-*/spec.md` y `117` mencionan paths concretos (`src/lib/cu2.ts`, etc.).
 - **12 ficheros** referencian `cu2` (4 propios + 8 imports): `practice-eval`, `refinement`, `session-payload`, `routes/practice`, `routes/attempt` y los tests `coach`, `cu2`, `verbatim-invariant`.
 
-### Mapa destino (51 → carpetas de dominio)
+### Mapa destino (47 de los 49 `*.ts` de la raíz → carpetas de dominio)
 
 ```
 src/lib/
@@ -82,7 +82,7 @@ Mover cada módulo a la carpeta de su dominio, renombrar los crudos, actualizar 
 
 ## Verificación final (2026-10-04, rama `refactor/118-lib-domain-folders`)
 
-- **10 commits**, uno por dominio + rename + docs: `check` con `find` (1), `session/` (2), `practice/` + `cu2*→karaoke*` (3), `audio/` (4), `lookup/` (5), `ingest/` (6), `settings/` (7), `util/` (8), `routes/chain.ts → candidate-chain.ts` (9), docs (10). Movimiento puro: ningún commit toca firmas, contratos ni lógica.
+- **10 commits de implementación**, uno por dominio + rename + docs: `check` con `find` (1), `session/` (2), `practice/` + `cu2*→karaoke*` (3), `audio/` (4), `lookup/` (5), `ingest/` (6), `settings/` (7), `util/` (8), `routes/chain.ts → candidate-chain.ts` (9), docs (10). Movimiento puro: ningún commit toca firmas, contratos ni lógica.
 - **Gates tras cada commit:** `npx tsc --noEmit` → 0 · `npm test` → **593 tests / 591 pass / 0 fail / 2 skipped** (baseline intacta) · `npm run check` → 0.
 - **Raíz de `src/lib/`:** solo `app.ts` y `http-errors.ts` + 9 carpetas (`audio` 8 · `ingest` 3 · `lookup` 5 · `practice` 17 · `providers` 6 · `routes` 11 · `session` 10 · `settings` 2 · `util` 2 = 64 ficheros; 66 con los 2 de la raíz; 67 contando `src/server.ts`).
 - `grep -rn "cu2" src/ tests/` → **0**; `grep -rn "export \* from" src/` → 26 líneas (25 exports + 1 comentario), **todas relativas al interior de su propia carpeta** (ninguna apunta a una ruta vieja).

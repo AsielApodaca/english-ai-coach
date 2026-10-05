@@ -61,6 +61,12 @@ test("check syntax-checks src and public through a find sweep", () => {
   );
   assert.match(
     check,
+    /\\\( -name '\*\.ts' -o -name '\*\.js' \\\)/,
+    "the two `-name` patterns must be grouped (`\\( … \\)`) so `-o` precedence " +
+      "cannot silently drop one of the trees from the sweep",
+  );
+  assert.match(
+    check,
     /-print0 \| xargs -0 .*node --check/,
     "the sweep must pipe into `node --check` (NUL-separated, one file per run)",
   );

@@ -52,7 +52,7 @@ FULL      al terminar todos los fragmentos se DESPINTA el semáforo de todos y
 Garantías:
 - El semáforo solo se aplica al **rango de spans de la línea en evaluación**; los *extras* del alineador (índices ≥ número de palabras de la línea) se descartan y nunca pintan spans ajenos.
 - El auto-scroll (`scrollIntoView({ block: "nearest" })`) mantiene la línea activa visible dentro del `karaoke-book` (`max-height: 46vh`).
-- `src/lib/cu2.ts` no cambia: el reducer ya modelaba el reintento de fragmento y el de respuesta completa; la vista se alinea con él.
+- `src/lib/practice/karaoke.ts` (antes `cu2.ts`, renombrado por 118) no cambia: el reducer ya modelaba el reintento de fragmento y el de respuesta completa; la vista se alinea con él.
 
 ### Requerimientos de coloreado
 

@@ -2,7 +2,7 @@
 
 ## Enfoque
 
-Nueve commits en la rama apilada, cada uno con `npm test` + `npm run check` en verde antes de pasar al siguiente. **Orden: primero el `check` con `find`** (así ningún move posterior obliga a re-editar la lista de paths), luego un commit por dominio (`git mv` + actualización de imports + fixes de tests que fijan paths), los renombres dentro del commit del dominio al que pertenecen, y los docs al final. Regla transversal: movimiento puro — ninguna firma, contrato ni comportamiento cambia; si un move requiere tocar lógica, se para y se documenta en vez de mezclar.
+Diez commits en la rama apilada, cada uno con `npm test` + `npm run check` en verde antes de pasar al siguiente. **Orden: primero el `check` con `find`** (así ningún move posterior obliga a re-editar la lista de paths), luego un commit por dominio (`git mv` + actualización de imports + fixes de tests que fijan paths), los renombres dentro del commit del dominio al que pertenecen, y los docs al final. Regla transversal: movimiento puro — ninguna firma, contrato ni comportamiento cambia; si un move requiere tocar lógica, se para y se documenta en vez de mezclar.
 
 ## Implementación
 
