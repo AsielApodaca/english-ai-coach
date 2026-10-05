@@ -22,7 +22,7 @@ import {
   type ContextStorage,
   type ExtractedFile,
   type SummarizeFn,
-} from "../src/lib/extract.ts";
+} from "../src/lib/ingest/extract.ts";
 import { createStorage } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------

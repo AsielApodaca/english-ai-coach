@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
 // Context file ingestion (feature 104)
 //
-// Feature 117 split; this file recomposes the module, so every existing
-// `from "./extract.ts"` import keeps resolving unchanged:
+// Feature 117 split; this file recomposes the module, so callers only ever
+// import `lib/ingest/extract.ts` (feature 118):
 //   - extract-parse.ts   — limits/constants, ExtractError, the extractors
 //                          (extractText / extractFile), the DOCUMENT CONTEXT
 //                          block, the soft language detector and the LLM

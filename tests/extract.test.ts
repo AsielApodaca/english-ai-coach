@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { extractJSON } from "../src/lib/providers/index.ts";
-import { detectKind, trimToBudget } from "../src/lib/extract.ts";
+import { detectKind, trimToBudget } from "../src/lib/ingest/extract.ts";
 
 test("extractJSON: plain JSON object", () => {
   const out = extractJSON<{ q: string }>('{"q": "hello"}');
@@ -33,7 +33,7 @@ test("extractJSON: throws when no JSON found", () => {
 });
 
 // Feature 104 additions: the existing extract.test.ts is extended with the
-// pure helpers of src/lib/extract.ts (bulk coverage lives in extract-files.test.ts).
+// pure helpers of src/lib/ingest/extract.ts (bulk coverage lives in extract-files.test.ts).
 
 test("extract: detectKind resolves supported extensions", () => {
   assert.equal(detectKind("job-spec.pdf"), "pdf");
