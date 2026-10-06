@@ -16,6 +16,7 @@ import {
   extractFile,
   extractText,
   handleExtractRequest,
+  resolveContextFiles,
   sanitizeText,
   summarizeContext,
   trimToBudget,
@@ -267,6 +268,56 @@ test("buildDocumentContext: wraps raw file text in the DOCUMENT CONTEXT block", 
   assert.ok(block.includes("--- b.md (md) ---\nbeta"));
 });
 
+test("buildDocumentContext: marks the text as data, never JSON, and closes the block", () => {
+  const block = buildDocumentContext([fileOf("app.json", '{"fragments": [')]);
+  assert.ok(block.includes("never JSON"), "the wrapper must say the text is not prompt syntax");
+  assert.ok(block.includes("--- END DOCUMENT CONTEXT ---"), "the block must be closed");
+  // raw braces must pass through untouched — only the wrapper carries rules
+  assert.ok(block.includes('{"fragments": ['));
+});
+
+test("resolveContextFiles: resolves refs from the given bucket", () => {
+  const loaded: string[] = [];
+  const files = resolveContextFiles(
+    [{ name: "job.md", size: 9, kind: "md", textRef: "job.txt" }],
+    "sess-1",
+    (bucket, textRef) => {
+      loaded.push(`${bucket}:${textRef}`);
+      return "the job spec";
+    },
+  );
+  assert.deepEqual(loaded, ["sess-1:job.txt"]);
+  assert.equal(files.length, 1);
+  assert.deepEqual(files[0], {
+    name: "job.md",
+    size: 9,
+    kind: "md",
+    text: "the job spec",
+    textRef: "job.txt",
+    truncated: false,
+  });
+});
+
+test("resolveContextFiles: skips unusable refs instead of failing", () => {
+  const files = resolveContextFiles(undefined, "draft", () => "text");
+  assert.deepEqual(files, []);
+  assert.deepEqual(resolveContextFiles("nope", "draft", () => "text"), []);
+  assert.deepEqual(
+    resolveContextFiles(
+      [
+        null,
+        "string",
+        { name: "missing-ref.md" }, // no textRef
+        { name: "gone.md", textRef: "gone.txt" }, // loader has no text
+        { name: "", size: "big" as unknown as number, kind: "exe", textRef: "ok.txt" },
+      ],
+      "draft",
+      (bucket, textRef) => (textRef === "ok.txt" ? "ok" : undefined),
+    ),
+    [{ name: "file", size: 0, kind: "txt", text: "ok", textRef: "ok.txt", truncated: false }],
+  );
+});
+
 test("buildDocumentContext: returns empty string for no files", () => {
   assert.equal(buildDocumentContext([]), "");
 });
@@ -274,7 +325,9 @@ test("buildDocumentContext: returns empty string for no files", () => {
 test("buildDocumentContext: respects the budget across files", () => {
   const big = "x".repeat(10_000);
   const block = buildDocumentContext([fileOf("big.txt", big)], 100);
-  assert.ok(block.length <= 100 + 64, `block too long: ${block.length}`);
+  // The budget bounds the attached text; the header/footer wrapper is ours.
+  assert.ok(block.includes("x".repeat(100)), "text must be kept up to the budget");
+  assert.ok(!block.includes("x".repeat(101)), "text must be trimmed to the budget");
   assert.ok(block.includes("--- big.txt (txt) ---"));
 });
 
@@ -306,7 +359,8 @@ test("summarizeContext: falls back to truncation when the LLM fails", async () =
   };
   const out = await summarizeContext([fileOf("big.txt", "y".repeat(5000))], llm, 100);
   assert.ok(out.startsWith("DOCUMENT CONTEXT\n"));
-  assert.ok(out.length <= 100 + 64);
+  assert.ok(out.includes("y".repeat(100)), "text must be kept up to the budget");
+  assert.ok(!out.includes("y".repeat(101)), "text must be trimmed to the budget");
 });
 
 // ---------------------------------------------------------------------------

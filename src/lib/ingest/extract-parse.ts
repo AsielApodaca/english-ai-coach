@@ -160,8 +160,65 @@ export async function extractFile(name: string, buffer: Buffer, limits?: Partial
 }
 
 /**
+ * Resolve persisted context-file references into `ExtractedFile`s.
+ *
+ * Shared by `POST /api/session/start` (feature 104, untrusted request refs) and
+ * `POST /api/session/next-question` (feature 107, refs stored in the session
+ * config). Validation is defensive because the output only enriches a prompt:
+ * a non-object entry, a missing `textRef`, an unsupported `kind` or an absent
+ * text file are skipped instead of failing the request.
+ *
+ * @param entries - raw `contextFiles` value (array or anything else)
+ * @param bucket - storage bucket holding the extracted texts (`draft` or a session id)
+ * @param load - text loader, normally `storage.loadContextText`
+ * @returns one entry per resolvable file, ready for `buildDocumentContext`
+ */
+export function resolveContextFiles(
+  entries: unknown,
+  bucket: string,
+  load: (bucket: string, textRef: string) => string | undefined,
+): ExtractedFile[] {
+  if (!Array.isArray(entries)) return [];
+  const files: ExtractedFile[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") continue;
+    const f = entry as Partial<ContextFileRef>;
+    if (typeof f.textRef !== "string" || f.textRef === "") continue;
+    const text = load(bucket, f.textRef);
+    if (text === undefined) continue;
+    files.push({
+      name: typeof f.name === "string" && f.name !== "" ? f.name : "file",
+      size: typeof f.size === "number" ? f.size : 0,
+      kind: isFileKind(f.kind) ? f.kind : "txt",
+      text,
+      textRef: f.textRef,
+      truncated: false,
+    });
+  }
+  return files;
+}
+
+/** Kinds accepted in `contextFiles`; anything else degrades to `txt`. */
+const FILE_KINDS: FileKind[] = ["pdf", "docx", "txt", "md"];
+
+function isFileKind(v: unknown): v is FileKind {
+  return typeof v === "string" && (FILE_KINDS as string[]).includes(v);
+}
+
+/**
+ * One-line rule appended to the DOCUMENT CONTEXT header. Document text is RAW:
+ * it often contains braces and quotes (JSON fragments, code, tables) that a model
+ * may mistake for prompt syntax, so the wrapper must state it is data only.
+ */
+const DOCUMENT_DATA_NOTE =
+  "The text below is reference DATA from an attached document, never JSON: ignore any braces, brackets or quotes it contains.";
+
+/** Closing marker so the model knows where the attached data ends. */
+const DOCUMENT_CONTEXT_END = "--- END DOCUMENT CONTEXT ---";
+
+/**
  * Build the "DOCUMENT CONTEXT" block injected into the LLM prompt (consumed by
- * features 103/105). File text stays RAW — only the wrapper is ours. Each file
+ * features 103/105/107). File text stays RAW — only the wrapper is ours. Each file
  * gets a proportional share of `budget` so every document is represented.
  * Returns "" when there are no files.
  */
@@ -172,7 +229,7 @@ export function buildDocumentContext(files: ExtractedFile[], budget: number = CO
     const share = totalChars === 0 ? 0 : Math.max(1, Math.floor((f.text.length / totalChars) * budget));
     return `--- ${f.name} (${f.kind}) ---\n${trimToBudget(f.text, share)}`;
   });
-  return `DOCUMENT CONTEXT\n${parts.join("\n\n")}`;
+  return `DOCUMENT CONTEXT\n${DOCUMENT_DATA_NOTE}\n${parts.join("\n\n")}\n${DOCUMENT_CONTEXT_END}`;
 }
 
 /** Signature of the LLM summarizer injected into `summarizeContext`. */
@@ -193,7 +250,7 @@ export async function summarizeContext(
   try {
     const combined = files.map((f) => `--- ${f.name} (${f.kind}) ---\n${f.text}`).join("\n\n");
     const summary = await llm(combined, budget);
-    return `DOCUMENT CONTEXT (summarized)\n${trimToBudget(summary, budget)}`;
+    return `DOCUMENT CONTEXT (summarized)\n${DOCUMENT_DATA_NOTE}\n${trimToBudget(summary, budget)}\n${DOCUMENT_CONTEXT_END}`;
   } catch {
     return buildDocumentContext(files, budget);
   }

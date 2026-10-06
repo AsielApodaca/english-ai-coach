@@ -14,6 +14,7 @@ import {
   RIGOR_THRESHOLDS,
   readSnapshotSettings,
 } from "../settings/settings.ts";
+import { createLLMSummarizer, resolveContextFiles, summarizeContext } from "../ingest/extract.ts";
 import type { Candidate } from "./practice.ts";
 import { computeAdaptive, rollingScores } from "./continuous-adaptive.ts";
 import { buildContextSummary, generateNextQuestion } from "./continuous-generate.ts";
@@ -28,6 +29,8 @@ export interface NextQuestionDeps {
   loadAllSessions(): SessionV2[];
   loadSession(id: string): SessionV2 | undefined;
   saveSession(session: SessionV2): void;
+  /** Reads an extracted context text from a bucket (feature 104). */
+  loadContextText(bucket: string, textRef: string): string | undefined;
 }
 
 export interface NextQuestionResponse {
@@ -43,8 +46,9 @@ export interface NextQuestionResponse {
  * when the last question has no evaluation yet (a retry after a network drop)
  * it returns that question without generating a duplicate. Otherwise it computes
  * the adaptive step from the rolling scores, generates Q_n+1 (varying the
- * subtopic, never repeating), applies the adjustment to the session config and
- * persists the new question.
+ * subtopic, never repeating) together with the DOCUMENT CONTEXT block of the
+ * files attached at session start (feature 104), applies the adjustment to the
+ * session config and persists the new question.
  *
  * Returns `{ question, provider, adjustment, level, rigor }` on success;
  * `{ error }` with 400/404/409 for validation or 502 when the LLM generation
@@ -91,13 +95,24 @@ export async function handleNextQuestionRequest(
   const adjusted = computeAdaptive(rollingScores(session), { level: currentLevel, rigor: currentRigor }, adaptive);
   const contextSummary = buildContextSummary(session);
 
+  // Attached context files (feature 104) are snapshotted into the session config
+  // and copied into the session's own bucket at session start, so questions 2..N
+  // are asked over the same document as question 1.
+  const files = resolveContextFiles(session.config.contextFiles, session.id, deps.loadContextText);
+
   try {
+    // Documents over CONTEXT_BUDGET are summarized by a dedicated LLM call here;
+    // within budget the texts are injected verbatim (no extra call). A failing
+    // summarizer degrades to truncation inside `summarizeContext`.
+    const documentContext = await summarizeContext(files, createLLMSummarizer(candidates, { learnerMemory }));
+
     const { question, provider } = await generateNextQuestion(candidates, {
       topicPrompt: session.config.topicPrompt,
       level: adjusted.level,
       rigor: adjusted.rigor,
       learnerMemory,
       contextSummary,
+      documentContext: documentContext || undefined,
     });
 
     // Apply the adaptive adjustment: the session level moves and the snapshot

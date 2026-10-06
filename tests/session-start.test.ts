@@ -196,6 +196,7 @@ test("session/start: learner memory and DOCUMENT CONTEXT reach the LLM call", as
   assert.ok(user.includes("Estimated level: B1"), "learner memory must reflect the profile");
   assert.ok(user.includes("DOCUMENT CONTEXT"), "context files must be injected");
   assert.ok(user.includes("the job spec"), "extracted text must be injected");
+  assert.ok(user.includes("never JSON"), "the document must be marked as data, not prompt syntax");
 
   // context files are snapshotted into the session config
   const { sessionId } = res.json as { sessionId: string };

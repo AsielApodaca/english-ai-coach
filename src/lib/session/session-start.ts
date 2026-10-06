@@ -1,13 +1,11 @@
-import { buildDocumentContext, type ExtractedFile } from "../ingest/extract.ts";
+import { createLLMSummarizer, resolveContextFiles, summarizeContext } from "../ingest/extract.ts";
 import { buildLearnerMemory, deriveSessionTitle } from "../practice/learner.ts";
 import { generateFirstQuestion, type Candidate } from "../practice/practice.ts";
 import { buildSettingsSnapshot, mergeSettings, parseLocalSettings, profileSettings } from "../settings/settings.ts";
 import {
   DEFAULT_ACCENT,
   isLevel,
-  type ContextFileRef,
   type CreateSessionOptions,
-  type FileKind,
   type Profile,
   type SessionConfig,
   type SessionV2,
@@ -26,12 +24,6 @@ import {
 // or network: LLM calls go through the injected `candidates` (same pattern as
 // `handleExtractRequest` in extract.ts).
 // ---------------------------------------------------------------------------
-
-const FILE_KINDS: FileKind[] = ["pdf", "docx", "txt", "md"];
-
-function isFileKind(v: unknown): v is FileKind {
-  return typeof v === "string" && (FILE_KINDS as string[]).includes(v);
-}
 
 /** Minimal persistence surface the session-start handler needs (storage.ts). */
 export interface SessionStartDeps {
@@ -90,30 +82,18 @@ export async function handleSessionStartRequest(
   const mergedSettings = mergeSettings({ local: localSettings, profile: profileSettings(profile) });
   const settingsSnapshot = buildSettingsSnapshot(mergedSettings);
 
-  // Resolve attached context files to their extracted text (source bucket) and
-  // build the DOCUMENT CONTEXT block (feature 104). Files whose text is missing
-  // are skipped defensively — they only enrich the prompt.
-  const files: ExtractedFile[] = [];
-  if (Array.isArray(contextFiles)) {
-    for (const entry of contextFiles) {
-      if (!entry || typeof entry !== "object") continue;
-      const f = entry as Partial<ContextFileRef>;
-      if (typeof f.textRef !== "string" || !f.textRef) continue;
-      const text = deps.loadContextText(sourceBucket, f.textRef);
-      if (text === undefined) continue;
-      files.push({
-        name: typeof f.name === "string" && f.name ? f.name : "file",
-        size: typeof f.size === "number" ? f.size : 0,
-        kind: isFileKind(f.kind) ? f.kind : "txt",
-        text,
-        textRef: f.textRef,
-        truncated: false,
-      });
-    }
-  }
-  const documentContext = buildDocumentContext(files);
+  // Resolve attached context files to their extracted text (source bucket);
+  // files whose text is missing are skipped defensively — they only enrich
+  // the prompt (feature 104).
+  const files = resolveContextFiles(contextFiles, sourceBucket, deps.loadContextText);
 
   try {
+    // Documents over CONTEXT_BUDGET are summarized here by a dedicated LLM
+    // call; within budget the texts are injected verbatim. `summarizeContext`
+    // degrades to truncation when the summarizer fails, so this only rejects
+    // on an unexpected programming error (handled like any other 5xx).
+    const documentContext = await summarizeContext(files, createLLMSummarizer(candidates, { learnerMemory }));
+
     // The first question and the session title are independent LLM calls; run
     // them concurrently so the shared (and possibly slow) provider chain is
     // hit only once in wall-clock terms. Each is still capped by the provider

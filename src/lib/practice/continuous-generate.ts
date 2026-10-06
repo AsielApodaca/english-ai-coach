@@ -56,15 +56,18 @@ export interface NextQuestionParams {
   rigor: RigorLevel;
   learnerMemory: string;
   contextSummary: string;
+  /** DOCUMENT CONTEXT block of the files attached at session start (feature 104). */
+  documentContext?: string;
 }
 
 /**
  * Generate the next question of a continuous session (spec 107). Mirrors
  * `generateFirstQuestion` (practice.ts): the role instruction becomes the
- * system persona, the conversation context + learner memory drive the prompt,
- * and the model answer is assembled from the spoken fragments. The reply goes
- * through the same schema/shape gate as the first question, so a degenerate
- * reply is retried and never appended to the session.
+ * system persona, the conversation context + learner memory + attached
+ * documents drive the prompt, and the model answer is assembled from the
+ * spoken fragments. The reply goes through the same schema/shape gate as the
+ * first question, so a degenerate reply is retried and never appended to the
+ * session.
  */
 export async function generateNextQuestion(
   candidates: Candidate[],
@@ -73,7 +76,8 @@ export async function generateNextQuestion(
   const system = `${SYSTEM_NEXT_QUESTION}\n\nROLE INSTRUCTION:\n${params.topicPrompt}`;
   const memoryLine = params.learnerMemory ? `\n\nLEARNER MEMORY:\n${params.learnerMemory}` : "";
   const contextLine = params.contextSummary ? `\n\nCONVERSATION CONTEXT:\n${params.contextSummary}` : "";
-  const user = `Generate the next question of the session. Level: ${params.level}. Rigor: ${params.rigor}.${memoryLine}${contextLine}`;
+  const docLine = params.documentContext ? `\n\n${params.documentContext}` : "";
+  const user = `Generate the next question of the session. Level: ${params.level}. Rigor: ${params.rigor}.${memoryLine}${contextLine}${docLine}`;
   const options: CompleteOptions = { temperature: 0.7, maxTokens: 4096 };
   const res = await chatJSON<QuestionReply>(candidates, {
     system,
