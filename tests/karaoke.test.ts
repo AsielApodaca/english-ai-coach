@@ -480,16 +480,19 @@ test("buildFeedbackText: passed → positive with tip; failed → focus on missi
   assert.match(ok, /Nice pacing/);
 
   const fail = buildFeedbackText({ score: 40, passed: false, missing: ["situation", "handled"], tips: [] });
-  assert.match(fail, /40 percent/);
-  assert.match(fail, /situation, handled/);
-  assert.match(fail, /try that again/);
+  assert.equal(fail, "Focus on: situation, handled.");
+  // The fail opener is gone: the view plays the fail chime instead of it.
+  assert.doesNotMatch(fail, /percent|Almost there|try that again/i);
 });
 
 test("buildFeedbackText: failed with nothing missing but added words → tells the user to drop them", () => {
   const line = buildFeedbackText({ score: 55, passed: false, missing: [], extra: ["i", "like", "chocolate"], tips: [] });
-  assert.match(line, /55 percent/);
-  assert.match(line, /Drop the extra words: i, like, chocolate/);
-  assert.match(line, /try that again/);
+  assert.equal(line, "Drop the extra words: i, like, chocolate.");
+  assert.doesNotMatch(line, /percent|Almost there|try that again/i);
+});
+
+test("buildFeedbackText: failed with nothing to point at → empty line (chime only)", () => {
+  assert.equal(buildFeedbackText({ score: 60, passed: false, missing: [], extra: [], tips: [] }), "");
 });
 
 test("buildNoSpeechText: plain retry, no score or phantom words", () => {

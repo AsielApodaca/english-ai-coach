@@ -65,7 +65,7 @@ const MIC_IDLE_LABEL = "Micrófono";
 /** Shown when the mic stream cannot be acquired (permissions / no device). */
 const MIC_UNAVAILABLE = "Micrófono no disponible. Revisa los permisos del navegador.";
 
-/** Defensive cap on the success chime so phase `feedback` can never hang. */
+/** Defensive cap on the chime so phase `feedback` can never hang. */
 const CHIME_MAX_MS = 500;
 
 /**
@@ -562,25 +562,31 @@ async function runQuestionLoop(token, { resume = false } = {}) {
       // `fragment.text`, with no spoken preamble (the loop reads it below).
       passedFragments.push(fi);
       fragmentScores.push(outcome.score);
-      await playSuccessChime();
+      await playAttemptChime("pass");
       if (token !== flowToken) return;
       fi++;
       continue;
     }
 
-    // Fail (CU2 alt flow): replay the user's take, speak the coach tips and
-    // re-read the SAME fragment.
+    // Fail (CU2 alt flow): replay the user's take, play the "incorrecto"
+    // chime (feature 110's module, kind `fail`) where the old "Almost there.
+    // That was N percent. Let's try that again." line used to be, speak the
+    // focus hint and re-read the SAME fragment.
     if (lastWavBlob) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
+    await playAttemptChime("fail");
+    if (token !== flowToken) return;
     // The refinement request has been in flight since the paint (overlapping
     // the replay): wait for it — capped — so the coach keeps its LLM-quality
     // line. On timeout, dead provider or a blank transcript (no attemptId)
-    // the deterministic coachLine is spoken instead.
+    // the deterministic coachLine is spoken instead. An EMPTY line (nothing to
+    // focus on) means silence: the fail chime already said it.
     const refined = await refinement;
     if (token !== flowToken) return;
-    await speak(refined?.coachLine || outcome.coachLine, token);
+    const refinedLine = refined?.coachLine || outcome.coachLine;
+    if (refinedLine) await speak(refinedLine, token);
     if (token !== flowToken) return;
   }
 
@@ -614,20 +620,25 @@ async function runQuestionLoop(token, { resume = false } = {}) {
     if (fullOutcome.passed) {
       // Feature 110: pass → chime, then close the session without the spoken
       // congratulation (the DONE panel is the reward).
-      await playSuccessChime();
+      await playAttemptChime("pass");
       if (token !== flowToken) return;
       break;
     }
 
+    // Same fail treatment as the fragment loop: replay → "incorrecto" chime →
+    // focus hint (only when there is one) → retry the whole answer.
     if (lastWavBlob) {
       await replayUserWav(lastWavBlob);
       if (token !== flowToken) return;
     }
+    await playAttemptChime("fail");
+    if (token !== flowToken) return;
     // Overlapped with the replay since the paint; capped, and falling back to
     // the deterministic coachLine on timeout / dead provider / blank input.
     const refined = await refinement;
     if (token !== flowToken) return;
-    await speak(refined?.coachLine || fullOutcome.coachLine, token);
+    const refinedLine = refined?.coachLine || fullOutcome.coachLine;
+    if (refinedLine) await speak(refinedLine, token);
     if (token !== flowToken) return;
   } while (!fullOutcome.passed);
 
@@ -698,14 +709,17 @@ function sleep(ms) {
 }
 
 /**
- * Play the success chime of a passed attempt at the coach volume (feature
- * 110), time-boxed: the race settles even if the chime never resolves, so
- * phase `feedback` cannot hang on a sound that will not play. If the cap wins,
- * the chime is silenced so it can never start under the next read (chime and
- * TTS must not overlap). Callers must re-check `flowToken` after awaiting.
+ * Play the attempt chime at the coach volume (feature 110), time-boxed: the
+ * race settles even if the chime never resolves, so phase `feedback` cannot
+ * hang on a sound that will not play. If the cap wins, the chime is silenced
+ * so it can never start under the next read (chime and TTS must not overlap).
+ * Callers must re-check `flowToken` after awaiting.
+ *
+ * @param {"pass"|"fail"} kind - `pass` on a cleared attempt, `fail` on a
+ *   failed one (the sound that replaced the spoken "Almost there… percent")
  */
-async function playSuccessChime() {
-  const ended = playChime({ kind: "pass", volume: volumeSetting() }).then(() => "ended");
+async function playAttemptChime(kind) {
+  const ended = playChime({ kind, volume: volumeSetting() }).then(() => "ended");
   const winner = await Promise.race([ended, sleep(CHIME_MAX_MS).then(() => "capped")]);
   if (winner === "capped") stopChime();
 }

@@ -28,8 +28,8 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 - [x] **Acierto sin locución:** cuando `outcome.passed === true` (fragmento **o** respuesta completa), el cliente **no** llama `speak(coachLine)`; en su lugar reproduce el chime. El chip visual de feedback (`renderFeedback`: "Buen flujo · N%") **se mantiene sin cambios**.
 - [x] **Secuencia sin solape:** orden normativo `renderFeedback → await playChime() → speakWithKaraoke(siguiente fragmento)`. El chime nunca se superpone al TTS del coach ni al del usuario.
 - [x] **Directo al grano (invariante verbatim):** todo texto enviado al TTS para leer un fragmento debe ser **exactamente** `fragment.text` (`inputAlTts === textoDelFragmento`), sin prefijo ni sufijo. Cubre: primer fragmento del loop, fragmento siguiente a un acierto, y reintento tras fallo (ahí sí se permite la locución de feedback **antes** de releer el fragmento, pero la releitura en sí sigue siendo verbatim).
-- [x] **Fallo intacto:** si `outcome.passed === false`, comportamiento actual sin cambios: se locuta `coachLine` (feedback con tips de `buildFeedbackText` rama fail) y se relee el **mismo** fragmento. El caso no-speech (`buildNoSpeechText`) también conserva su locución.
-- [x] **Respuesta completa:** pass → chime → cierre de sesión (panel "hacer otra práctica") **sin** locución de enhorabuena; fail → feedback hablado + reintento (sin cambios).
+- [x] **Fallo intacto (comportamiento de 110, luego cambiado por 120):** si `outcome.passed === false`, aquí no se tocaba nada: se locutaba `coachLine` (feedback con tips de `buildFeedbackText` rama fail) y se relee el **mismo** fragmento. El caso no-speech (`buildNoSpeechText`) conserva su locución. **[Modificado por `../120-fail-chime-feedback/` — la apertura de fallo pasó a sonar como chime `kind: "fail"`; solo se locuta el hint de foco.]**
+- [x] **Respuesta completa:** pass → chime → cierre de sesión (panel "hacer otra práctica") **sin** locución de enhorabuena; fail → reintento tras el feedback (hoy: chime de fallo + hint hablado, ver 120).
 - [x] **Cancelación:** el chime obedece al mismo token/generación de flujo que el TTS (`cancelFlow`/token de `speak`); al cancelar la sesión en mitad de un chime, este se detiene y no arranca ninguna lectura posterior.
 - [x] **Volumen:** el gain del chime aplica el setting de volumen del coach (mismo clamp/floor que `volumeSetting()`), para que bajar la voz del coach baje también el chime.
 - [x] **Reductor canónico alineado:** `src/lib/cu2.ts` actualiza la regla de avance: en el path de pass, el evento que dispara `onFeedbackTtsEnd` pasa a ser el **fin del chime** (nuevo evento del reducer, p. ej. `CHIME_END`, o bien el cliente sintetiza el mismo efecto emitiendo `TTS_END` tras el chime — elegir uno y mantener reducer y vista consistentes). La fase `feedback` no debe quedarse colgada si el chime no llega a sonar (timeout defensivo).
@@ -57,7 +57,7 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 ## Criterios de aceptación
 
-- [x] `tests/chime.test.ts`: parámetros del chime (duración ≤ 300 ms, ramps de ataque/decaimiento, rango de frecuencias, gain clampado por el volumen del coach, kind pass vs fail-quieter si aplica).
+- [x] `tests/chime.test.ts`: parámetros del chime (duración ≤ 300 ms, ramps de ataque/decaimiento, rango de frecuencias, gain clampado por el volumen del coach, kind pass vs fail-quieter si aplica **[la aserción de loudness/tono del `fail` la redefine 120]**).
 - [x] `tests/cu2.test.ts` actualizado: pass de fragmento → avanza al siguiente vía fin-del-chime; pass del último fragmento → fase `fullAnswer`; pass de full → `done`; fail → se permanece en `feedback` (reintento); cancelación durante `feedback` no deja la fase colgada.
 - [x] Test de invariante verbatim: para las ramas "primer fragmento", "avance tras pass" y "reintento", el string entregado a la capa TTS === texto del fragmento (sin prefijos/sufijos). Cubre el string hardcodeado duplicado del timeout en `practice-view.js` (verificar que también obedece la regla).
 - [x] `npm test` en verde y `npm run check` en verde (los archivos nuevos/afectados listados en `package.json` `check`).
@@ -66,7 +66,7 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 - [ ] Aprobar un fragmento → suena **solo** el chime y enseguida el siguiente fragmento, sin ninguna frase de enhorabuena ni "repeat after me".
 - [ ] Aprobar la **respuesta completa** → chime + panel de cierre, sin locución de enhorabuena.
-- [ ] Fallar un fragmento → feedback hablado con tips y relectura del mismo fragmento (regresión verificada).
+- [ ] Fallar un fragmento → chime de fallo + hint de foco hablado y relectura del mismo fragmento (regresión verificada; ver 120).
 - [ ] Chip visual de feedback se muestra igual que antes en pass y fail.
 - [ ] Cancelar la sesión (`cancelFlow`) justo cuando suena el chime → silencio, no arranca lectura posterior, orb/dock en reposo.
 - [ ] Cambiar el volumen del coach → el chime respeta el nuevo volumen.
@@ -78,7 +78,7 @@ Cada aprobación cuesta hoy ~3–5 s de locución de relleno que rompe el ritmo 
 
 - Cambiar el chip visual o el coloreado de palabras (105/106).
 - Chimes diferenciados por score (p. ej. sonido distinto para 100%) o por tipo de error.
-- Modificar `buildFeedbackText` (el texto fail se conserva tal cual).
+- Modificar `buildFeedbackText` (el texto fail se conserva tal cual **dentro de 110**; lo cambió `../120-fail-chime-feedback/`).
 - Animación/confetti de celebración.
 
 ## Recursos

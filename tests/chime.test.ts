@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { chimePlan } from "../public/speech/chime.js";
 
@@ -74,16 +77,57 @@ test("chimePlan: gain is monotonically clamped by the coach volume", () => {
 
 // --- Kinds -------------------------------------------------------------------
 
-test("chimePlan: kind fail is quieter and lower than kind pass", () => {
+test("chimePlan: kind fail is a descending sequence, as loud as kind pass", () => {
   const pass = chimePlan({ kind: "pass" });
   const fail = chimePlan({ kind: "fail" });
-  assert.ok(fail.gain < pass.gain, "the fail chime must be quieter");
+  // The fail cue plays right after the user's own replay: it must cut through,
+  // so it is never quieter than the "correcto" cue.
+  assert.ok(fail.gain >= pass.gain, "the fail chime must be at least as loud");
   assert.ok(
     Math.max(...fail.frequencies) < Math.max(...pass.frequencies),
     "the fail chime must sit lower",
   );
+  // Two notes played one AFTER the other (pass is a simultaneous chord)…
+  assert.equal(fail.notes.length, 2);
+  assert.equal(pass.notes.every((note) => note.startMs === 0), true);
+  // …and the second one is lower: that is what reads as "incorrecto".
+  assert.ok(fail.notes[1].frequency < fail.notes[0].frequency, "the tone must go DOWN");
+  assert.ok(fail.notes[1].startMs >= fail.decay.end, "the notes must not overlap");
+  assert.equal(fail.durationMs, fail.notes[1].startMs + fail.decay.end);
+});
+
+test("chimePlan: kind pass keeps its original 250 ms chord", () => {
+  const pass = chimePlan({ kind: "pass" });
+  assert.equal(pass.durationMs, 250);
+  assert.deepEqual(pass.notes.map((note) => note.startMs), [0, 0]);
 });
 
 test("chimePlan: defaults to the pass kind", () => {
   assert.deepEqual(chimePlan(), chimePlan({ kind: "pass" }));
+});
+
+// --- Wiring in the view ------------------------------------------------------
+
+const viewSrc = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "..", "public", "ui", "practice-view.js"),
+  "utf8",
+);
+
+test("view: one chime per outcome, pass and fail, in both attempt loops", () => {
+  // Fragment loop + full-answer loop → two call sites per outcome.
+  assert.equal(viewSrc.match(/playAttemptChime\("pass"\)/g)?.length, 2);
+  assert.equal(viewSrc.match(/playAttemptChime\("fail"\)/g)?.length, 2);
+});
+
+test("view: the fail chime plays before the focus hint is spoken", () => {
+  const tails = viewSrc.split('await playAttemptChime("fail");').slice(1);
+  assert.equal(tails.length, 2, "both fail paths must play the chime");
+  for (const tail of tails) {
+    const speakAt = tail.indexOf("if (refinedLine) await speak(refinedLine, token);");
+    assert.ok(speakAt > -1, "the guarded focus line must follow the fail chime");
+    // Nothing spoken between the chime and the hint (chimes never overlap TTS).
+    assert.ok(!tail.slice(0, speakAt).includes("await speak("));
+  }
+  // The spoken opener is gone from the view: the chime replaced it.
+  assert.doesNotMatch(viewSrc, /Almost there\. That was/);
 });

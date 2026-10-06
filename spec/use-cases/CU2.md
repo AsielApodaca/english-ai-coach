@@ -65,7 +65,7 @@ El CU2 es el corazón del producto. Se descompone en fases estrictas de una preg
 
 > Decisión registrada: el coloreado **en vivo palabra a palabra** exacto no es posible con whisper-cli (batch). MVP: marca post-grabación con animación sincronizada de timestamps (feature `106-word-timestamps`). El camino futuro a coloreado en tiempo real queda documentado como extensión en `106`.
 
-**Reintento / umbral:** Un fragmento pasa (verde→avanzar) cuando `score >= passThreshold` (umbral configurable en settings `108`, default heredado de `001` = 70). Si no pasa, el coach da feedback por voz y pide reintento (loop interno). El ciclo de "respuesta entera" replica el mismo criterio.
+**Reintento / umbral:** Un fragmento pasa (verde→avanzar) cuando `score >= passThreshold` (umbral configurable en settings `108`, default heredado de `001` = 70). Si no pasa, el coach da feedback por voz y pide reintento (loop interno). El ciclo de "respuesta entera" replica el mismo criterio. **[Modificado por 110 y 120 — feedback = sonido + hint]:** al aprobar no se locuta nada, suena el chime de acierto (110); al fallar suena el chime de fallo (120) y solo se locuta el hint de foco (`Focus on: …` / `Drop the extra words: …`, o silencio si no hay nada que señalar). El score se informa en el chip visual, no por voz.
 
 **Cierre / nueva práctica:** Al terminar, el sistema guarda la sesión (CU3 / `109`) y muestra el botón "hacer otra práctica" que regresa al config (CU1).
 
