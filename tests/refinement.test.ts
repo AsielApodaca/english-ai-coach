@@ -284,7 +284,11 @@ test("wiring: the view launches the refinement without await and gates it by att
   assert.match(viewSrc, /const refinement = startRefinement\(fullOutcome, -1, token\)/);
   // Fail path waits (capped) right before speaking; PASS never waits.
   assert.equal(viewSrc.match(/await refinement/g)?.length, 2);
-  assert.match(viewSrc, /await speak\(refined\?\.coachLine \|\| outcome\.coachLine, token\)/);
+  // Both fail branches build the line, and speak ONLY when it is non-empty
+  // (an empty line = nothing to focus on = the fail chime already said it).
+  assert.match(viewSrc, /const refinedLine = refined\?\.coachLine \|\| outcome\.coachLine;/);
+  assert.match(viewSrc, /const refinedLine = refined\?\.coachLine \|\| fullOutcome\.coachLine;/);
+  assert.equal(viewSrc.match(/if \(refinedLine\) await speak\(refinedLine, token\);/g)?.length, 2);
   assert.match(viewSrc, /attemptId !== lastAttemptId/);
   assert.match(viewSrc, /outcome\.attemptId \?\? null/);
 });

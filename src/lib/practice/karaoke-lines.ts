@@ -16,7 +16,22 @@ export function buildFullLine(): string {
   );
 }
 
-/** Spoken feedback after an attempt (score + focused correction). */
+/**
+ * Spoken feedback after an attempt.
+ *
+ * Pass → praise line with the score (kept for resume/history; the view does
+ * not speak it — feature 110 plays a chime instead).
+ *
+ * Fail → ONLY the focused correction (`Focus on: …` / `Drop the extra words:
+ * …`), or `""` when there is nothing to point at. The former opener
+ * ("Almost there. That was N percent. Let's try that again.") is deliberately
+ * gone: the view plays the fail chime (feature 110's module, `kind: "fail"`)
+ * where that sentence used to be, so the score talk is visual (the feedback
+ * chip) plus the "incorrecto" sound.
+ *
+ * @param outcome - scored attempt: score, verdict, missing/extra words, tips
+ * @returns the line the coach reads after a failed attempt (may be empty)
+ */
 export function buildFeedbackText(outcome: {
   score: number;
   passed: boolean;
@@ -32,8 +47,7 @@ export function buildFeedbackText(outcome: {
   const focus: string[] = [];
   if (outcome.missing.length) focus.push(`Focus on: ${outcome.missing.slice(0, 3).join(", ")}`);
   if (outcome.extra?.length) focus.push(`Drop the extra words: ${outcome.extra.slice(0, 3).join(", ")}`);
-  const hint = focus.length ? ` ${focus.join(". ")}.` : "";
-  return `Almost there. That was ${outcome.score} percent. Let's try that again.${hint}`;
+  return focus.length ? `${focus.join(". ")}.` : "";
 }
 
 /** Spoken feedback when the attempt captured no intelligible speech (silence
