@@ -243,6 +243,100 @@ test("next-question: last question without eval is returned idempotently", async
 });
 
 // ---------------------------------------------------------------------------
+// handleNextQuestionRequest — attached document context (feature 104)
+// ---------------------------------------------------------------------------
+
+/** Fake provider that records every prompt it receives (for prompt assertions). */
+function capturingFake(id: string, reply: string): { candidate: Candidate; messages: unknown[][] } {
+  const messages: unknown[][] = [];
+  return {
+    messages,
+    candidate: {
+      id: id as never,
+      async available() {
+        return true;
+      },
+      async complete(msgs: unknown[]) {
+        messages.push(msgs);
+        return reply;
+      },
+    },
+  };
+}
+
+/** Join every user message of a recorded call so assertions read the prompt. */
+function promptsOf(messages: unknown[][]): string {
+  return messages
+    .map((msgs) => (msgs as Array<{ role: string; content: string }>).find((m) => m.role === "user")?.content ?? "")
+    .join("\n");
+}
+
+test("next-question: the attached document is injected into the prompt", async () => {
+  const s = createStorage(dir);
+  const session = makeSession(s, { count: 1, scores: [80] });
+  const textRef = s.saveContextText(session.id, { name: "resume.md", size: 44, kind: "md" }, "I led a migration to TypeScript in 2024.");
+  session.config.contextFiles = [{ name: "resume.md", size: 44, kind: "md", textRef }];
+  s.saveSession(session);
+
+  const { candidate, messages } = capturingFake("amber", FAKE_NEXT);
+  const res = await handleNextQuestionRequest(s, [candidate], { sessionId: session.id });
+
+  assert.equal(res.status, 200);
+  // Within budget the texts are injected verbatim: exactly one LLM call.
+  assert.equal(messages.length, 1, "no summarizer call for a small document");
+  const prompt = promptsOf(messages);
+  assert.ok(prompt.includes("DOCUMENT CONTEXT"), "document block must reach the prompt");
+  assert.ok(prompt.includes("I led a migration to TypeScript in 2024."), "raw file text must be injected");
+  assert.ok(prompt.includes("never JSON"), "the wrapper must mark the text as data");
+  assert.ok(prompt.includes("--- resume.md (md) ---"));
+  assert.ok(prompt.includes("--- END DOCUMENT CONTEXT ---"));
+});
+
+test("next-question: no document in the session means no DOCUMENT CONTEXT", async () => {
+  const s = createStorage(dir);
+  const session = makeSession(s, { count: 1, scores: [80] });
+  const { candidate, messages } = capturingFake("amber", FAKE_NEXT);
+  const res = await handleNextQuestionRequest(s, [candidate], { sessionId: session.id });
+
+  assert.equal(res.status, 200);
+  assert.equal(messages.length, 1);
+  assert.ok(!promptsOf(messages).includes("DOCUMENT CONTEXT"));
+});
+
+test("next-question: a context file whose text is missing is skipped", async () => {
+  const s = createStorage(dir);
+  const session = makeSession(s, { count: 1, scores: [80] });
+  session.config.contextFiles = [{ name: "gone.pdf", size: 5, kind: "pdf", textRef: "gone.txt" }];
+  s.saveSession(session);
+
+  const { candidate, messages } = capturingFake("amber", FAKE_NEXT);
+  const res = await handleNextQuestionRequest(s, [candidate], { sessionId: session.id });
+
+  assert.equal(res.status, 200);
+  assert.ok(!promptsOf(messages).includes("DOCUMENT CONTEXT"));
+});
+
+test("next-question: an oversized document is summarized by one extra LLM call", async () => {
+  const s = createStorage(dir);
+  const session = makeSession(s, { count: 1, scores: [80] });
+  const bigText = "migration details ".repeat(2000); // > CONTEXT_BUDGET (16k chars)
+  const textRef = s.saveContextText(session.id, { name: "notes.md", size: bigText.length, kind: "md" }, bigText);
+  session.config.contextFiles = [{ name: "notes.md", size: bigText.length, kind: "md", textRef }];
+  s.saveSession(session);
+
+  const { candidate, messages } = capturingFake("amber", FAKE_NEXT);
+  const res = await handleNextQuestionRequest(s, [candidate], { sessionId: session.id });
+
+  assert.equal(res.status, 200);
+  assert.equal(messages.length, 2, "summarizer call + question call");
+  const summarizeCall = promptsOf([messages[0]]);
+  assert.ok(summarizeCall.includes("Summarize the following document"), "first call must summarize");
+  assert.ok(summarizeCall.includes("Learner memory:"), "the summarizer must carry the learner memory");
+  const questionCall = promptsOf([messages[1]]);
+  assert.ok(questionCall.includes("DOCUMENT CONTEXT (summarized)"), "summary replaces the raw text");
+});
+
+// ---------------------------------------------------------------------------
 // handleNextQuestionRequest — happy path with adaptive adjustment
 // ---------------------------------------------------------------------------
 

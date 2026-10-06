@@ -29,10 +29,11 @@ El diseño (screen 2) explicita Q1→Q∞ para simular una entrevista/standup co
 - [x] **Finalizar Sesión:** en cualquier momento → `saveSession(completed)` + pantalla de cierre con resumen: preguntas practicadas, scores, focus de mejora.
 - [x] **Badge de pregunta actual:** "ACTIVA (Q{n})" en el sidebar (109 lo lee).
 - [x] Guardado del contexto acumulado efectivo: `buildContextSummary` (topic + últimos N exchanges) se pasa al LLM en cada `next-question` (con memoria del aprendiz, convención tech-stack).
+- [x] **Contexto del adjunto (104):** `config.contextFiles` se reinyyecta en cada `next-question` como bloque `DOCUMENT CONTEXT`, con los textos resueltos desde el bucket de la propia sesión (`loadContextText`). Sólo un documento > `CONTEXT_BUDGET` (16k) dispara la llamada extra del resumidor; dentro de budget la inyección es gratis.
 
 ## Requerimientos no funcionales
 
-- Coste LLM: cada `next-question` es una llamada; se amortiza con 1 respuesta modelo por pregunta.
+- Coste LLM: cada `next-question` es una llamada; se amortiza con 1 respuesta modelo por pregunta. **Excepción:** con un adjunto mayor de 16k chars se suma 1 llamada al resumidor (0 con documentos pequeños o sin adjunto).
 - No bloquea ABA: la adaptativa cambia en el `next-question`, no en medio del fragmento.
 
 ## Decisiones de diseño / tecnología
