@@ -28,7 +28,7 @@ El color por palabra da feedback granular (dónde exactamente falló) y hace el 
 - [x] **Merge con feedback LLM:** las palabras citadas en `issues[].fix/message` (y las de categoría `pronunciation` presentes en el target) fuerzan `amber` vía `forcedAmberWords` (preciso mientras 004 no exista).
 - [ ] **Animación sincronizada:** *entregada por la ola 4 (feature 105)* — esta ola provee el motor y el modelo de datos (`words[]` con `startMs/endMs` persistidos en `attempts[].words`) que la vista karaoke consume; el render/pintado+play del intento vive en la UI de 105 (la vista `#/practice` es placeholder).
 - [ ] Fallback sin whisper: mismo atributo de 105 — lo que `001` ya hace (matching de texto sobre el transcript del browser, `matched/missing/extra`) pintando green/red sin timestamps. Documentado para la UI karaoke.
-- [x] **Escape de words meta:** números/contracciones se normalizan (reusa `normalize` de `practice.ts`) antes del match; contraction hablada expandida → green, mitad → amber.
+- [x] **Escape de words meta:** contracciones y **números** se normalizan (reusa `normalize` de `practice.ts`) antes del match; contraction hablada expandida → green, mitad → amber. Los números se comparan en una única forma canónica de palabras (`expandNumbers` en `practice-text.ts`): dígitos ≡ palabras (`200` ≡ `two hundred`), con miles (`2,000` ≡ `two thousand`), ordinales (`21st` ≡ `twenty first`) y decimales (`3.5` ≡ `three point five`). Los símbolos de valor se canonicalizan antes (`canonicalizeSymbols`): `40%` ≡ `forty percent`, `$50`/`50$` ≡ `fifty dollars` (con `€`/`£` y singular en `$1`), `R&D` ≡ `r and d`. Necesario porque whisper transcribe muchos números y símbolos en forma abreviada aunque el fragmento los escriba con palabras: sin esto, `forty percent` salía como missing + `40%` como extra (bug reportado con "shipping quote times became faster by 40%"). Dígitos pegados a letras (`covid19`, `3D`) no se expanden; un número/símbolo fuera del fragmento sigue penalizando como cualquier palabra inventada.
 
 ## Requerimientos no funcionales
 
@@ -37,7 +37,7 @@ El color por palabra da feedback granular (dónde exactamente falló) y hace el 
 
 ## Decisiones de diseño / tecnología
 
-- Alineamiento propio (sin deps): normalización (reusa `normalize`/`tokenize` de `practice.ts`) + LCS ponderada (~260 líneas puras, testeable) sobre sub-tokens normalizados.
+- Alineamiento propio (sin deps): normalización (reusa `normalize`/`tokenize` de `practice.ts`, que incluye la expansión de números y símbolos de valor a palabras: `expandNumbers` + `canonicalizeSymbols`) + LCS ponderada (~260 líneas puras, testeable) sobre sub-tokens normalizados.
 - El flujo consolidado en un endpoint: `/api/attempt` (audio raw) → transcribe `transcribeWords` → `/api/evaluate` (score+issues) → `alignWords` server-side → devuelve `{ text, words[], matched, missing, extra, score, issues, verdict, next, tips, provider }`. 105 lo usa directo.
 - Ambar vs rojo: `match normalizado` ⇒ green; `edit-dist ≤1 | transposición | shared n-gram | issue fn (forcedAmberWords)` ⇒ amber; `missing`/`extra` ⇒ red.
 - Desviación de diseño registrada: en el endpoint consolidado, el score persistido es el de `align` (coherente con el coloreado de palabras), en lugar del macro mixto de `001`; `/api/evaluate` conserva su comportamiento original.

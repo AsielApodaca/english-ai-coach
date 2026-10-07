@@ -264,10 +264,18 @@ export function alignWords(
     });
   }
 
+  // One extra entry per SPOKEN WORD, not per sub-token: a word that expands to
+  // several normalized tokens (a contraction, or a number such as "200" →
+  // "two hundred") still has a single raw form and a single timestamp, and
+  // would otherwise be appended (and reported) twice.
   const extra: string[] = [];
+  const extraWordIdx = new Set<number>();
   for (let si = 0; si < spokenTokens.length; si++) {
     if (spokenMatch[si] !== null) continue;
-    const w = spoken[spokenTokens[si].wordIdx];
+    extraWordIdx.add(spokenTokens[si].wordIdx);
+  }
+  for (const wordIdx of extraWordIdx) {
+    const w = spoken[wordIdx];
     const word = w.word.trim();
     extra.push(word);
     words.push({ word, status: "red", startMs: w.startMs, endMs: w.endMs });

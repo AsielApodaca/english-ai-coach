@@ -10,6 +10,72 @@ test("normalize: expands contractions", () => {
   assert.equal(normalize("I won't can't I've it's"), "i will not cannot i have it s");
 });
 
+test("normalize: numbers become English words (digits ≡ spelled-out)", () => {
+  assert.equal(normalize("I saved 200 dollars"), "i saved two hundred dollars");
+  assert.equal(normalize("2,000"), "two thousand");
+  assert.equal(normalize("3.5"), "three point five");
+  assert.equal(normalize("21st"), "twenty first");
+  assert.equal(normalize("1,000th"), "one thousandth");
+  assert.deepEqual(tokenize("200"), ["two", "hundred"]);
+});
+
+test("normalize: digits glued to letters are not numbers", () => {
+  assert.equal(normalize("covid19 and 3D"), "covid19 and 3d");
+  assert.equal(normalize("1990s"), "1990s");
+});
+
+test("normalize: value symbols become the words a reader says", () => {
+  assert.equal(normalize("faster by 40%"), "faster by forty percent");
+  assert.deepEqual(tokenize("40%"), ["forty", "percent"]);
+  assert.equal(normalize("$50"), "fifty dollars");
+  assert.equal(normalize("50$"), "fifty dollars"); // whisper sometimes suffixes the symbol
+  assert.equal(normalize("$1"), "one dollar");
+  assert.equal(normalize("Tom & Jerry"), "tom and jerry");
+  assert.deepEqual(tokenize("R&D"), ["r", "and", "d"]);
+});
+
+test("wordMatch: percent and currency symbols ≡ their spoken form", () => {
+  const percent = wordMatch(
+    "shipping quote times became faster by forty percent",
+    "shipping quote times became faster by 40%",
+  );
+  assert.equal(percent.score, 100);
+  assert.deepEqual(percent.missing, []);
+  assert.deepEqual(percent.extra, []);
+  // Whisper splits "40%" into two words ("40", "%") just as often.
+  const split = wordMatch("faster by forty percent", "faster by 40 %");
+  assert.equal(split.score, 100);
+  const currency = wordMatch("it costs fifty dollars", "it costs $50");
+  assert.equal(currency.score, 100);
+  assert.deepEqual(currency.missing, []);
+  assert.deepEqual(currency.extra, []);
+  assert.equal(wordMatch("it costs $50", "it costs fifty dollars").score, 100);
+  assert.equal(wordMatch("Tom and Jerry", "Tom & Jerry").score, 100);
+});
+
+test("wordMatch: digits and spelled-out numbers are the same words", () => {
+  // Whisper writes "200" where the fragment says "two hundred": without number
+  // normalization the target came back missing + "200" flagged as extra.
+  const m = wordMatch("I saved two hundred dollars", "I saved 200 dollars");
+  assert.equal(m.score, 100);
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, []);
+  const reverse = wordMatch("I saved 200 dollars", "I saved two hundred dollars");
+  assert.equal(reverse.score, 100);
+  assert.deepEqual(reverse.missing, []);
+  assert.deepEqual(reverse.extra, []);
+});
+
+test("wordMatch: a number outside the fragment is still extra content", () => {
+  // Extras are normalized tokens, so "200" surfaces (and weighs) exactly like
+  // the spelled-out "two hundred" would.
+  const m = wordMatch("I handled it", "I handled it 200");
+  assert.deepEqual(m.missing, []);
+  assert.deepEqual(m.extra, ["two", "hundred"]);
+  assert.equal(m.score, 33);
+  assert.deepEqual(wordMatch("I handled it", "I handled it two hundred").extra, ["two", "hundred"]);
+});
+
 test("wordMatch: perfect match scores 100 and no gaps", () => {
   const m = wordMatch("I handled it well", "I handled it well");
   assert.equal(m.score, 100);
