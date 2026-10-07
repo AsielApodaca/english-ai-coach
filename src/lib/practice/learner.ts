@@ -66,11 +66,37 @@ export function computeStats(profile: Profile, sessions: SessionV2[]): LearnerSt
   return { sessions: sessions.length, avg, byCategory, weakErrorsTop: weakEntries, trend: [], recentTopics, weakErrors, vocabGaps };
 }
 
+/** How many sessions feed `stats.recentTopics` (display-only, newest first). */
+export const SESSION_TOPICS_LIMIT = 10;
+
+/** Max characters of a single topic kept in a learner-memory/stats line. */
+export const TOPIC_CHARS = 80;
+
+/** Max topics rendered into the `Recent topics` line of the learner memory. */
+export const RECENT_TOPICS_LIMIT = 5;
+
+/** Truncate a topic for prompt/display use, appending an ellipsis when cut. */
+export function truncateTopic(topic: string): string {
+  const clean = topic.trim().replace(/\s+/g, " ");
+  return clean.length > TOPIC_CHARS ? `${clean.slice(0, TOPIC_CHARS)}…` : clean;
+}
+
+/**
+ * Topic of the last sessions, newest first, for `stats.recentTopics`
+ * (served by `GET /api/profile`, rendered by the config view).
+ *
+ * Uses the session's `topicPrompt` — the user's own role instruction — never
+ * the LLM-generated first question: that question can be derived from an
+ * attached document (feature 104) and would surface document-specific content
+ * in the history strip of unrelated sessions.
+ */
 export function sessionTopics(sessions: SessionV2[]): string[] {
   return sessions
-    .flatMap((s) => (s.config.topicPrompt?.length ? [s.questions[0]?.q ?? s.config.topicPrompt] : []))
-    .slice(-10)
-    .reverse();
+    .toSorted((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .map((s) => s.config.topicPrompt)
+    .filter((t) => typeof t === "string" && t.trim().length > 0)
+    .slice(0, SESSION_TOPICS_LIMIT)
+    .map(truncateTopic);
 }
 
 export function estimateLevel(profile: Profile, stats: LearnerStats): Level {
@@ -82,7 +108,13 @@ export function estimateLevel(profile: Profile, stats: LearnerStats): Level {
   return LEVELS[base];
 }
 
-/** Compact, prompt-friendly summary of who the learner is right now. */
+/**
+ * Compact, prompt-friendly summary of who the learner is right now.
+ *
+ * Injected into every LLM call (project rule), so it must stay small and free
+ * of document-derived text: recent topics are truncated, capped and framed as
+ * history — a previous session's content must never steer a new session.
+ */
 export function buildLearnerMemory(profile: Profile, sessions: SessionV2[]): string {
   const stats = computeStats(profile, sessions);
   const parts: string[] = [];
@@ -97,8 +129,15 @@ export function buildLearnerMemory(profile: Profile, sessions: SessionV2[]): str
   if (stats.weakErrorsTop.length > 0) {
     parts.push(`Recurring weaknesses: ${stats.weakErrorsTop.map(([e, n]) => `${e} (x${n})`).join(", ")}.`);
   }
-  if (profile.recentTopics?.length) {
-    parts.push(`Recent topics: ${profile.recentTopics.join(" | ")}.`);
+  const topics = (profile.recentTopics ?? [])
+    .filter((t) => typeof t === "string" && t.trim().length > 0)
+    .slice(0, RECENT_TOPICS_LIMIT)
+    .map(truncateTopic);
+  if (topics.length > 0) {
+    parts.push(
+      `Recent topics (previous sessions, background only): ${topics.join(" | ")}. ` +
+        `Do not repeat, quote or assume their content in this session unless the current role instruction or document context asks for it.`,
+    );
   }
   return parts.join(" ");
 }

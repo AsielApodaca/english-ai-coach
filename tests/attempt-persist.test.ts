@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { persistAttempt, type AttemptStorage, type PersistAttemptParams } from "../src/lib/session/attempt-persist.ts";
+import { buildLearnerMemory } from "../src/lib/practice/learner.ts";
 import type { Evaluation } from "../src/lib/practice/practice.ts";
 import type { Profile, SessionFragmentV2, SessionQuestion, SessionV2 } from "../src/lib/session/storage.ts";
 
@@ -137,11 +138,16 @@ test("persistAttempt: the attempt lands on the LAST question's named fragment", 
   assert.equal(session.questions[0].fragments[0].attempts.length, 0);
   assert.equal(lastQuestion.fragments[1].attempts.length, 0);
 
-  // Profile re-aggregated once and persisted once; topic pushed to recents.
+  // Profile re-aggregated once and persisted once; the SESSION's topicPrompt
+  // (the user's role instruction) leads the recents — never the LLM question.
   assert.equal(fake.calls.saveProfile, 1);
   assert.equal(fake.calls.saveSession, 1);
   assert.equal(fake.calls.loadAllSessions, 1);
-  assert.equal(fake.profile.recentTopics[0], "second question");
+  assert.equal(fake.profile.recentTopics[0], "Config topic prompt");
+  assert.ok(
+    !fake.profile.recentTopics.includes("second question"),
+    "the LLM-generated question must not leak into recentTopics",
+  );
 });
 
 test("persistAttempt: a legacy fragment without an attempts array gets initialized (no crash)", () => {
@@ -229,21 +235,52 @@ test("persistAttempt: without a score override the attempt uses evaluation.score
   assert.equal(session.questions[0].fragments[0].attempts[0].score, EVALUATION.score);
 });
 
-test("persistAttempt: recentTopics is deduped (the topic moves to the front) and capped at 12", () => {
-  const session = makeSession("s1", [makeQuestion("The topic", ["f1"])]);
+test("persistAttempt: recentTopics stores the session topicPrompt, deduped (moves to the front) and capped at 12", () => {
+  const session = makeSession("s1", [makeQuestion("The LLM question", ["f1"])]);
   const fake = makeFakeStorage([session]);
+  const topic = session.config.topicPrompt;
   // Defensive over-cap input (14): a stale duplicate of the current topic plus
   // 12 unrelated olds — the write must dedupe, unshift and slice to 12.
-  fake.profile.recentTopics = ["The topic", "The topic", ...Array.from({ length: 12 }, (_, i) => `old-${i}`)];
+  fake.profile.recentTopics = [topic, topic, ...Array.from({ length: 12 }, (_, i) => `old-${i}`)];
   assert.equal(fake.profile.recentTopics.length, 14);
 
   persistAttempt(fake.storage, params({ sessionId: "s1", fragmentId: "f1" }));
 
   const recents = fake.profile.recentTopics;
   assert.equal(recents.length, 12, "capped at 12 after dedupe");
-  assert.equal(recents[0], "The topic", "the current topic leads");
-  assert.equal(recents.filter((t) => t === "The topic").length, 1, "the stale duplicate was removed");
+  assert.equal(recents[0], topic, "the current topic leads");
+  assert.equal(recents.filter((t) => t === topic).length, 1, "the stale duplicate was removed");
   assert.equal(recents.includes("old-11"), false, "the oldest entry fell off the cap");
+  assert.ok(!recents.includes("The LLM question"), "the LLM question never lands in recentTopics");
+});
+
+// Regression (bug: previous-session context leaked into new sessions): a
+// document-derived question (e.g. a CV detail such as an internship company)
+// must never reach `profile.recentTopics`, because that block is re-injected
+// verbatim as LEARNER MEMORY into sessions created WITHOUT the document.
+test("persistAttempt: a document-derived question never leaks into the learner memory topics", () => {
+  const session = makeSession("s1", [makeQuestion("Tell me about your internship at Zenda.", ["f1"])]);
+  session.config.topicPrompt = "Mock interview for a junior backend role";
+  session.config.contextFiles = [{ name: "cv.pdf", size: 10, kind: "pdf", textRef: "pdf-cv.txt" }];
+  const fake = makeFakeStorage([session]);
+
+  persistAttempt(fake.storage, params({ sessionId: "s1", fragmentId: "f1" }));
+
+  assert.deepEqual(fake.profile.recentTopics, ["Mock interview for a junior backend role"]);
+  const memory = buildLearnerMemory(fake.profile, fake.sessions);
+  assert.ok(!memory.includes("Zenda"), `learner memory must not carry the document: ${memory}`);
+});
+
+test("persistAttempt: an empty topicPrompt leaves recentTopics untouched", () => {
+  const session = makeSession("s1", [makeQuestion("q", ["f1"])]);
+  session.config.topicPrompt = "   ";
+  const fake = makeFakeStorage([session]);
+  fake.profile.recentTopics = ["previous topic"];
+
+  persistAttempt(fake.storage, params({ sessionId: "s1", fragmentId: "f1" }));
+
+  assert.deepEqual(fake.profile.recentTopics, ["previous topic"]);
+  assert.equal(fake.calls.saveProfile, 1, "the profile aggregation still lands");
 });
 
 test("persistAttempt: a saveSession failure (legacy v1 file) is swallowed, the profile still lands", () => {
