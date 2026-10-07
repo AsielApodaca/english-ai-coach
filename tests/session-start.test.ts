@@ -205,6 +205,33 @@ test("session/start: learner memory and DOCUMENT CONTEXT reach the LLM call", as
   ]);
 });
 
+// Regression (bug: previous-session context leaked into new sessions): topics
+// persisted by older builds may hold a document-derived question (e.g. a CV
+// detail). They must reach the prompt only as short, framed-as-history data.
+test("session/start: legacy document-derived topics reach the prompt only as truncated history", async () => {
+  const s = createStorage(dir);
+  const legacy = `Can you share the specific numbers that define your success in your most recent internship at Zenda? ${"detail ".repeat(50)}`;
+  writeFileSync(
+    join(dir, "data", "profile.json"),
+    JSON.stringify(makeProfile({ recentTopics: [legacy, ...Array.from({ length: 7 }, (_, i) => `topic ${i}`)] })),
+    "utf8",
+  );
+  const { candidate, messages } = scriptedFake([FAKE_FIRST, FAKE_TITLE]);
+  const res = await handleSessionStartRequest(s, [candidate], { topicPrompt: "Role", level: "B2" });
+
+  assert.equal(res.status, 200);
+  const user = (messages[0] as Array<{ role: string; content: string }>).find((m) => m.role === "user")?.content ?? "";
+  assert.ok(user.includes("LEARNER MEMORY"), "learner memory must be present");
+  assert.ok(user.includes("background only"), "topics must be framed as history");
+  assert.ok(user.includes("Do not repeat"), "the memory must forbid reusing past topics");
+  assert.ok(!user.includes(legacy), "a legacy topic must be truncated, never injected verbatim");
+  assert.equal(
+    (user.match(/topic \d/g) ?? []).length,
+    4,
+    "cap of 5 topics: the legacy entry plus the 4 next-newest ones",
+  );
+});
+
 test("session/start: missing context text is skipped defensively", async () => {
   const s = createStorage(dir);
   const { candidate } = scriptedFake([FAKE_FIRST, FAKE_TITLE]);

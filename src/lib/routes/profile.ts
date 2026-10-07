@@ -29,6 +29,9 @@ export function registerProfileRoutes(app: Express, deps: AppDeps): void {
    * No input. 200 → { profile: Profile, stats }
    *   stats = { sessions, avg, byCategory, weakErrorsTop, vocabGaps,
    *             recentTopics, trend }
+   *   recentTopics — the last 8 sessions' topicPrompt (the user's own role
+   *   instruction), newest first, each truncated to TOPIC_CHARS. Never the
+   *   LLM-generated question: it may derive from an attached document (104).
    *   trend — last 30 fragment scores across all sessions, oldest→newest, for
    *   the progress chart. Read-only: nothing is persisted here.
    * Errors: unexpected storage failure → 500 { error } (global middleware).

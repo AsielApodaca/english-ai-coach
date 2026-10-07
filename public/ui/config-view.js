@@ -706,6 +706,12 @@ function openLaunchModal({ navigate }) {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "No se pudo iniciar la sesión");
+      // The new session now owns its attachments (copied into its own bucket):
+      // clear them from the draft so the next session never reuses a previous
+      // session's context files or source bucket.
+      draft.contextFiles = [];
+      draft.contextBucket = undefined;
+      renderFileChips();
       overlay.remove();
       document.body.classList.remove("overlay-open");
       document.removeEventListener("keydown", onKey);

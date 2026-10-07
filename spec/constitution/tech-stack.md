@@ -73,6 +73,7 @@ No hay lint ni formatter configurados: el gate de calidad es `npm run check` (in
 ## Modelo de datos / dominio
 
 - `data/profile.json` — estado del aprendiz: `{ level, categories, weakErrors[], vocabGaps[], recentTopics[], focusPhonemes[], lastSessionAt, nextStep }`
+  - `recentTopics[]` — hasta 12 `topicPrompt` (la instrucción/rol **escrita por el usuario** al crear la sesión), deduplicados y con el más reciente al frente. **Nunca** contiene la pregunta generada por el LLM: esa pregunta puede derivarse del `DOCUMENT CONTEXT` de un archivo adjunto (104) y filtraría contenido de un documento previo a sesiones nuevas.
 - `data/sessions/<id>.json` — sesión **v2** (modelo ampliado en `../features/102-session-model-v2/spec.md`):
   - \`\`\`{ id, status: "active"|"completed", createdAt, updatedAt, config: { topicPrompt, level, category, accent, phonemes[], contextFiles[], settingsSnapshot }, provider, questions: [ { q, answer, fragments:[{ id, text, attempts:[{text, words:[{word,status}], score}], passed }], fullAttempt, eval } ] }\`\`\`
   - Niveles: **A1–C2 (CEFR completo)**; el enum actual B1/B2/C1 se amplía.
@@ -89,7 +90,7 @@ No hay lint ni formatter configurados: el gate de calidad es `npm run check` (in
 - Errores LLM: `ProviderError` con `canRetry` para guiar la cadena de fallback.
 - Claves: nunca en el código; env vars o auth.json existente.
 - API REST JSON; respuestas de error con `{ error }` y status HTTP.
-- Toda llamada LLM incluye el bloque "Learner memory" de `learner.ts`; el rol del coach (instrucción del usuario) se inyecta como system persona.
+- Toda llamada LLM incluye el bloque "Learner memory" de `learner.ts`; el rol del coach (instrucción del usuario) se inyecta como system persona. Ese bloque es **transversal a sesiones**: sus `Recent topics` se truncan (80 chars), se limitan a 5 y se marcan como historial ("background only"), de modo que una sesión previa nunca arrastra su contexto (documento adjunto incluido) a una sesión nueva.
 - Sesiones v2: toda escritura a `data/sessions/<id>.json` es idempotente (save del estado completo actual, no merge de parches).
 
 ## Estilo visual
