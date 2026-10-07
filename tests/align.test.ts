@@ -38,6 +38,80 @@ test("alignWords: perfect match → every target word green, score 100", () => {
   assert.deepEqual({ startMs: r.words[4].startMs, endMs: r.words[4].endMs }, { startMs: 2000, endMs: 2400 });
 });
 
+// --- Numbers (digits ≡ words) -----------------------------------------------
+
+test("alignWords: whisper writes digits for a spelled-out number → green, no extras", () => {
+  // The target says "two hundred"; whisper transcribes it as "200". Both sides
+  // normalize to the same words, so nothing is missing and nothing is extra.
+  const r = alignWords(spoken("I saved 200 dollars last year"), "I saved two hundred dollars last year");
+  assert.equal(r.score, 100);
+  assert.deepEqual(targetStatuses(r.words, 6), ["green", "green", "green", "green", "green", "green"]);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+});
+
+test("alignWords: numeric target vs spelled-out speech → green, score 100", () => {
+  // The reverse direction: the fragment itself carries the digits ("200") and
+  // the user reads them out loud.
+  const r = alignWords(spoken("I saved two hundred dollars"), "I saved 200 dollars");
+  assert.equal(r.words.length, 4);
+  assert.deepEqual(targetStatuses(r.words, 4), ["green", "green", "green", "green"]);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+  assert.equal(r.score, 100);
+});
+
+test("alignWords: commas, decimals and ordinals normalize on both sides", () => {
+  const cases: Array<[spoken: string, target: string]> = [
+    ["the budget is 2,000 dollars", "the budget is two thousand dollars"],
+    ["the budget is two thousand dollars", "the budget is 2,000 dollars"],
+    ["about 3.5 percent", "about three point five percent"],
+    ["chapter 21st", "chapter twenty first"],
+    ["chapter twenty first", "chapter 21st"],
+  ];
+  for (const [sp, tg] of cases) {
+    const r = alignWords(spoken(sp), tg);
+    assert.equal(r.score, 100, `spoken="${sp}" target="${tg}"`);
+    assert.deepEqual(r.missing, [], `spoken="${sp}" target="${tg}"`);
+    assert.deepEqual(r.extra, [], `spoken="${sp}" target="${tg}"`);
+  }
+});
+
+test("alignWords: a number outside the target is still an extra word", () => {
+  // The normalization must not swallow unrelated numbers: they stay extras and
+  // keep penalizing the score like any invented word.
+  const r = alignWords(spoken("I handled it 200"), "I handled it");
+  assert.deepEqual(r.extra, ["200"]);
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.score, 67);
+});
+
+test("alignWords: percent symbol in the transcript → 'forty percent' matches", () => {
+  // Reported bug: the fragment spells the number AND the symbol out, whisper
+  // transcribes "40%" (sometimes as two words "40" "%").
+  const target = "For example shipping quote times became faster by forty percent";
+  const r = alignWords(spoken("For example shipping quote times became faster by 40%"), target);
+  assert.equal(r.score, 100);
+  assert.deepEqual(targetStatuses(r.words, 10), Array(10).fill("green"));
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+  const split = alignWords(spoken("For example shipping quote times became faster by 40 %"), target);
+  assert.equal(split.score, 100);
+  assert.deepEqual(split.extra, []);
+});
+
+test("alignWords: currency symbol vs spelled-out money → green, score 100", () => {
+  const target = alignWords(spoken("it costs fifty dollars"), "it costs $50");
+  assert.equal(target.score, 100);
+  assert.deepEqual(target.extra, []);
+  const digits = alignWords(spoken("it costs $50"), "it costs fifty dollars");
+  assert.equal(digits.score, 100);
+  assert.deepEqual(digits.missing, []);
+  assert.deepEqual(digits.extra, []);
+  // The raw target word keeps its display form; only the norm expands.
+  assert.deepEqual(digits.words.map((w) => w.word), ["it", "costs", "fifty", "dollars"]);
+});
+
 // --- Amber -----------------------------------------------------------------
 
 test("alignWords: hyphenated target vs spaced speech → all green, no extras", () => {
@@ -348,6 +422,15 @@ test("alignTextWords: transposition + filler — out-of-place red & not missing,
 
 test("alignTextWords: perfect match → every target word green, score 100", () => {
   const r = alignTextWords("I handled the situation well", "I handled the situation well");
+  assert.equal(r.score, 100);
+  assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "green", "green", "green"]);
+  assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.extra, []);
+});
+
+test("alignTextWords: digits vs spelled-out number → green, score 100", () => {
+  // Same number normalization through the text fallback path (no whisper).
+  const r = alignTextWords("I saved 200 dollars", "I saved two hundred dollars");
   assert.equal(r.score, 100);
   assert.deepEqual(r.words.map((w) => w.status), ["green", "green", "green", "green", "green"]);
   assert.deepEqual(r.missing, []);

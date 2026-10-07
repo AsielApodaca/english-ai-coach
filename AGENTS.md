@@ -58,6 +58,7 @@ El código se escribe para que un agente IA lo lea completo sin contexto prevo: 
 - Peticiones a `/api/*` con body JSON; errores como `{ error: string }` con status HTTP coherente.
 - Si un cambio toca un contrato (`/api/*`, shape de sesión, settings), actualiza `spec/` en el mismo cambio.
 - UI: la región central de la pantalla (toda la vista sin sidebar ni top bar) se llama **`main-area`**; es el contenedor de las vistas de CU (config y práctica). Sinónimo obsoleto: "central stage". Ver `spec/design/screens.md`.
+- Un archivo `.ts` debe empezar por un statement `export`/`import` (idealmente el contrato/interfaz pública): `npm run check` corre `node --check` en cada archivo y Node solo hace strip de tipos cuando ya detectó el módulo como ESM; si hay sintaxis TS (anotaciones, interfaces, `as`) antes del primer export, falla con `SyntaxError: Missing initializer in const declaration`.
 ## No hagas
 - No subir `.env*` ni `data/` al repositorio (secreto + datos personales de práctica). Están en `.gitignore`.
 - No instalar dependencias npm sin avisar. Objetivo: mínimo absoluto (Express únicamente).
