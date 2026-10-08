@@ -44,7 +44,7 @@ export const ANSWER_RULES = `ANSWER RULES:
 - The last sentence connects the answer to what the role or team needs (skip it only for routine status questions).
 - No interview clichés: never "perfectionist", "team player", "hard worker", "go-getter". For weakness questions give a real weakness, its mitigation and its evidence — never a fake strength.`;
 
-const SYSTEM_GENERATE = `You are an expert English speaking coach for software engineers, using the call-and-repeat (shadowing) method.
+const SYSTEM_GENERATE = `You are an expert English speaking coach for working professionals, using the call-and-repeat (shadowing) method.
 You create interview/practice answers split into short spoken fragments. Each fragment must be a natural, short chunk (5 to 12 words); repeat a stage when the answer needs more than five chunks. The complete answer must be A1-A2: 40-70 words, B1-B2: 60-90 words, C1-C2: 80-120 words — take the low end of the range for short factual questions (definitions, status, preferences) and the high end for story or behavioral questions ("Tell me about a time...").
 The user is a Spanish speaker; level tells you the target difficulty (A1 = very simple vocabulary and short sentences, C2 = near-native, rich and technical).
 LANGUAGE RULE: every word you output — the question, the fragments and the context — MUST be in English. Never produce Spanish, even if the user's topic/role is described in Spanish.
@@ -142,7 +142,7 @@ function validatePracticeSet(data: PracticeSet): void {
 // First question generation (feature 103 / CU1)
 // ---------------------------------------------------------------------------
 
-const SYSTEM_FIRST_QUESTION = `You are an expert English speaking coach for software engineers, using the call-and-repeat (shadowing) method.
+const SYSTEM_FIRST_QUESTION = `You are an expert English speaking coach for working professionals, using the call-and-repeat (shadowing) method.
 The user defines the ROLE you must adopt for this practice session (see ROLE INSTRUCTION below). Adopt that role fully and run the session as that character.
 You create the FIRST question of the session plus a model answer split into short spoken fragments. Each fragment must be a natural, short chunk (5 to 12 words); repeat a stage when the answer needs more than five chunks. The complete answer must be A1-A2: 40-70 words, B1-B2: 60-90 words, C1-C2: 80-120 words — take the low end of the range for short factual questions (definitions, status, preferences) and the high end for story or behavioral questions ("Tell me about a time...").
 VOICES: the "question" is spoken by the ROLE character; the "fragments" are THE LEARNER's model answer — what a good student/interviewee would reply, in first person (I, my, we). Never put the role character's lines in the fragments: no greetings, no follow-up questions, no thanking or sign-off, no stage directions.

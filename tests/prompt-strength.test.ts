@@ -4,6 +4,9 @@ import assert from "node:assert/strict";
 import type { Candidate } from "../src/lib/practice/practice.ts";
 import { ANSWER_RULES, generatePracticeSet, generateFirstQuestion } from "../src/lib/practice/practice-generate.ts";
 import { generateNextQuestion } from "../src/lib/practice/continuous-generate.ts";
+import { evaluateFragment } from "../src/lib/practice/practice-eval.ts";
+import { buildNextStep } from "../src/lib/practice/learner.ts";
+import type { Profile } from "../src/lib/session/storage.ts";
 
 // ---------------------------------------------------------------------------
 // Recruiter-lens prompt rules (branch feat/prompt-model-answer-strength): the
@@ -95,4 +98,63 @@ test("ANSWER_RULES block: BLUF, quantified evidence, fit close and no clichés",
   assertAnswerRules(ANSWER_RULES, "ANSWER_RULES");
   assert.ok(ANSWER_RULES.includes("last sentence connects"), "the fit close must be required");
   assert.ok(ANSWER_RULES.includes("never a fake strength"), "weakness answers must be real");
+});
+
+// --- Profession-neutral prompts --------------------------------------------
+// The coach serves any working professional, not only software engineers:
+// no system prompt may hardcode a profession (it would bias every generated
+// question, evaluation and next step toward one discipline).
+
+const VALID_EVAL = `{"issues":[],"tips":["Keep the same steady pace."],"naturalness":90}`;
+const VALID_NEXT_STEP = `{"focus":"past-tense narrative fluency","topic":"Tell me about a project you are proud of.","why":"Recent answers avoid past tense.","targetLevel":"B2"}`;
+
+const PROFILE_NEUTRAL: Profile = {
+  level: "B2",
+  categories: {},
+  weakErrors: {},
+  vocabGaps: [],
+  recentTopics: [],
+};
+
+test("evaluation prompt: no hardcoded profession", async () => {
+  const systems: string[] = [];
+  const candidate = capturingCandidate(systems, VALID_EVAL);
+  await evaluateFragment([candidate], { target: "We shipped two days early.", userText: "We shipped two days early", question: "q", level: "B2" });
+
+  assert.equal(systems.length, 1);
+  assert.ok(!systems[0].includes("software engineer"), "the evaluation prompt must not assume a profession");
+  assert.ok(systems[0].includes("Spanish-speaking professional"), "the evaluation prompt addresses any professional");
+});
+
+test("next-step prompt: no hardcoded profession", async () => {
+  const systems: string[] = [];
+  const candidate = capturingCandidate(systems, VALID_NEXT_STEP);
+  await buildNextStep([candidate], PROFILE_NEUTRAL, []);
+
+  assert.equal(systems.length, 1);
+  assert.ok(!systems[0].includes("software engineer"), "the next-step prompt must not assume a profession");
+  assert.ok(systems[0].includes("professional life"), "the next-step prompt addresses any profession");
+  assert.ok(!systems[0].includes("standup concision"), "examples must stay profession-neutral");
+});
+
+test("generation prompts: no hardcoded profession", async () => {
+  const systems: string[] = [];
+  const setCandidate = capturingCandidate(systems, VALID_SET);
+  await generatePracticeSet([setCandidate], { category: "interviews", level: "B2", learnerMemory: "" });
+  const firstCandidate = capturingCandidate(systems, VALID_QUESTION);
+  await generateFirstQuestion([firstCandidate], { topicPrompt: "Act as a hiring manager", level: "B2", learnerMemory: "" });
+  const nextCandidate = capturingCandidate(systems, VALID_QUESTION);
+  await generateNextQuestion([nextCandidate], {
+    topicPrompt: "Act as a hiring manager",
+    level: "B2",
+    rigor: "Balanceado",
+    learnerMemory: "",
+    contextSummary: "Topic: interview\nQ: Tell me about yourself\nA: I am a project manager.",
+  });
+
+  assert.equal(systems.length, 3);
+  for (const [i, system] of systems.entries()) {
+    assert.ok(!system.includes("software engineer"), `prompt ${i + 1} must not assume a profession`);
+    assert.ok(system.includes("working professionals"), `prompt ${i + 1} must address any profession`);
+  }
 });
