@@ -156,11 +156,11 @@ export function updateProfile(profile: Profile, sessions: SessionV2[], level?: L
   return profile;
 }
 
-const SYSTEM_NEXT_STEP = `You are a learning coach dictating the learner's next move to reach conversational fluency as a software engineer.
+const SYSTEM_NEXT_STEP = `You are a learning coach dictating the learner's next move to reach conversational fluency in their professional life.
 Given the learner memory (level, scores, weaknesses, topics), decide ONE concrete next step.
 Respond ONLY with strict JSON (no markdown):
 {"focus": string, "topic": string, "why": string, "targetLevel": string}
-- focus: what skill to train next (e.g. "past-tense narrative fluency", "STAR action verbs", "standup concision").
+- focus: what skill to train next (e.g. "past-tense narrative fluency", "STAR action verbs", "concise status updates").
 - topic: a specific practice topic/question to try.
 - why: one short sentence linking to the learner's weaknesses.
 - targetLevel: the recommended level (A2-B2/C1).`;
