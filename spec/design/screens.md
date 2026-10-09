@@ -52,10 +52,10 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 **Objetivo:** karaoke de práctica de CU2 con flujo continuo de preguntas (Q1→Q∞) — la vista de práctica en vivo.
 
 **Estructura de layout:**
-- **Top bar** resumida: "Junior SWE First Interview" (nombre actual) + pill "Speech Engine · READY"; botón "Finalizar Sesión".
+- **Top bar** resumida: "Junior SWE First Interview" (nombre actual); botón "Finalizar Sesión". **[Modificado — chore `practice-ui-cleanup`]:** el pill "Speech Engine · READY" fue removido de esta top bar (duplicaba el del sidebar); el sidebar es la única fuente.
 - **Sidebar historial:** compacto; la sesión actual con badge **"ACTIVA (Q1)"** (número de pregunta en curso).
 - **`main-area` (karaoke):**
-  - Chip de feedback del encabezado: "Buen flujo · Foco en /tʃ/ · 92%".
+  - Chip de feedback del encabezado: "Buen flujo · Foco en /tʃ/ · 92%". En fallo, el chip (ámbar) lleva un **botón de bocina** (`volume_up`) que reproduce a demanda la grabación del usuario del intento fallido (chore `practice-ui-cleanup`).
   - **Líneas de letra estilo Spotify:** la línea activa es la más grande y brillante; líneas siguiente/anterior más bajas y atenuadas; **anotación de pronunciación legible palabra por palabra** sobre la línea activa (ej. `[WUR·king] working`, `[PRAH·jekt] project`; aproximaciones con `~`).
   - Subestrofa "Coach:" resaltada cuando el coach está hablando.
 - **Dock inferior:**
