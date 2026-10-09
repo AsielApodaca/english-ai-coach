@@ -37,16 +37,17 @@ La fase v2 se organiza en olas de implementación; cada ola es un PR independien
 
 > Nota: **003 · Conversación hablada natural** queda **absorbida/superada** por 105 + 107 (el CU2 rediseñado es la conversación hablada del producto). Su texto histórico se conserva en `../features/003-spoken-conversation/` como referencia sin desarrollo activo.
 
-## Pendiente de implementar 📋 (ola 7 — UX de sesión, especificada)
+## Pendiente de implementar 📋 (especificada)
 
-Features especificadas en detalle (con checklists de verificación) en `../features/110-115/` y `../features/117-ai-readable-backend/`: **110, 111, 112, 113, 114, 115 y 117 ya están en "Hecho ✅"** — no queda ninguna feature de esta ola pendiente de implementar.
+- **121 · Coloreado en tiempo real exacto + auto-scroll de la respuesta modelo** — extensión de 106: fuente de posición en vivo del usuario (`LivePositionSource`: agenda temporal del coach como baseline + interims Web Speech cuando existan; chunked whisper queda como evolución) que alimenta el pintado provisional palabra a palabra (`kw-live`) y el **auto-scroll de la respuesta modelo durante la captura** — hoy la fase `full` no tiene scroll, la barra del `karaoke-book` está oculta y SPACE está bloqueado por PTT, así que el texto desbordado es inaccesible. Los colores finales green/amber/red siguen llegando post-hoc (106/116), sin cambios de contrato. *(Especificación, plan y tareas en `../features/121-realtime-coloring/`.)*
+
+Features de la ola 7 especificadas en detalle (con checklists de verificación) en `../features/110-115/` y `../features/117-ai-readable-backend/`: **110, 111, 112, 113, 114, 115 y 117 ya están en "Hecho ✅"** — no queda ninguna feature de esa ola pendiente de implementar.
 
 ## Backlog 💡
 
 - **004 · Evaluación fonética por audio** — sidecar Python (parselmouth/librosa) que analiza fonemas, estrés, ritmo y entonación del audio. Feeds la precisión del ámbar/rojo de 106 y añade métricas reales de pronunciación; degrada a transcripción. *(Depende de 106; refina la feature, no la bloquea.)*
 - **005 · Vocabulario técnico (repaso espaciado)** — tarjetas desde los gaps del perfil; práctica en voz alta con TTS de 001/007; modalidad "vocab" dentro del shell v2.
 - **006 · Modo sin conexión total** — todo el flujo con Ollama + whisper.cpp (002) + Piper (007); por `OFFLINE_MODE` excluye proveedores web. *Requiere 002 y 007 (hechas).*
-- **Coloreado en tiempo real exacto** — extensión de 106: marcado palabra a palabra mientras se habla (streaming de timestamps / alineador). Documentado como objetivo futuro.
 - **Phoneme Metrics nav** — vista de métricas fonéticas agregadas del aprendiz (correla con 004).
 - **Curriculum / decks de drills** — colecciones de práctica por tema en el sidebar.
 - **Investigación de fuentes fonéticas avanzadas para karaoke** — explorar opciones para eliminar huecos del diccionario estático y superar el fallback heurístico aproximado (`~`): empaquetar CMUdict offline (o subset comprimido), sidecar de fonemas (004/whisper timestamps a fonemas), o generador servidor G2P (grapheme-to-phoneme).
