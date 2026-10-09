@@ -1896,6 +1896,10 @@ body.overlay-open {
   gap: 10px;
   max-height: 46vh;
   overflow-y: auto;
+  /* Safety net: never allow a horizontal scrollbar here. Scrollbars are hidden
+     below, so any horizontal overflow would silently push the right edge of
+     the text out of view with no visible way to recover it. */
+  overflow-x: hidden;
   padding: 12px 4px;
   mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
@@ -1926,6 +1930,12 @@ body.overlay-open {
   color: var(--text);
   opacity: 1;
   filter: none;
+  /* The scale is the visual highlight, but painting a full-width box at 1.05x
+     overflows the book: a hidden horizontal scrollbar appears and the right
+     edge of the text slides out of view. Shrinking the layout width by the
+     same factor compensates it: the text wraps 4.76% earlier, then the scale
+     paints it back to exactly 100% of the book width — no overflow, no cut. */
+  width: calc(100% / 1.05);
   transform: scale(1.05);
   transform-origin: left center;
 }
