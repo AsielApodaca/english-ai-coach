@@ -1,6 +1,6 @@
 # 121 · Coloreado en tiempo real exacto + auto-scroll de la respuesta modelo
 
-**Estado:** especificada 📝 (pendiente de implementar)
+**Estado:** done ✅ (branch `feature/realtime-coloring`)
 
 ## Contexto
 
@@ -33,13 +33,13 @@ Los colores **finales** (green/amber/red) siguen llegando igual que hoy: `POST /
 
 ## Requerimientos funcionales
 
-- [ ] **Contrato de fuente de posición viva** — abstracción única (`LivePositionSource`) con una o más implementaciones, que emite el índice de la palabra activa del objetivo durante la captura. La spec no fija la tecnología de la fuente: la comparación de opciones (agenda temporal del coach / interims Web Speech / chunked whisper) y la decisión viven en `plan.md`.
-- [ ] **Pintado provisional** — la palabra activa se marca con un estilo propio (`kw-live`, no confundible con `kw-spoken` del coach ni con `kw-green/amber/red`) mientras el usuario habla en la fase `full`; se limpia al soltar y antes del pintado post-hoc.
-- [ ] **Auto-scroll durante captura** — al avanzar la posición, el `karaoke-book` mantiene la palabra activa visible (`scrollIntoView({ block: "nearest" })` sobre el wrap de la palabra, suavizado), sin scrollear fuera de fase y sin pelear con el popover léxico (112) ni con el gate `data-interactive` (113).
-- [ ] **Monotonicidad** — durante una misma captura la posición solo avanza (los intermedios de STT se reescriben; la posición no debe "rebobinar" en vivo). El reset es al iniciar la captura y al evaluar.
-- [ ] **Degradación** — si no hay fuente de posición disponible (ruta whisper sin interinos, fuente fallida), la fase `full` sigue funcionando como hoy: sin pintado en vivo y sin scroll en vivo; en ningún caso la feature bloquea la captura ni el envío a `/api/attempt`.
-- [ ] **Precedencia post-hoc** — al llegar `words[]` de `/api/attempt`, `colorWords()` pinta el semáforo definitivo sobre la línea y el estado en vivo desaparece; el guard de refinado (`attemptId` + `flowToken`, 116) sigue intacto.
-- [ ] **Cleanup garantizado** — la suscripción/animación se cancela en todos los caminos de salida de `captureAttempt` (éxito, fallo, excepción, soltar PTT), sin estado vivo colgando entre turnos.
+- [x] **Contrato de fuente de posición viva** — abstracción única (`LivePositionSource`) con una o más implementaciones, que emite el índice de la palabra activa del objetivo durante la captura. La spec no fija la tecnología de la fuente: la comparación de opciones (agenda temporal del coach / interims Web Speech / chunked whisper) y la decisión viven en `plan.md`.
+- [x] **Pintado provisional** — la palabra activa se marca con un estilo propio (`kw-live`, no confundible con `kw-spoken` del coach ni con `kw-green/amber/red`) mientras el usuario habla en la fase `full`; se limpia al soltar y antes del pintado post-hoc.
+- [x] **Auto-scroll durante captura** — al avanzar la posición, el `karaoke-book` mantiene la palabra activa visible (`scrollIntoView({ block: "nearest" })` sobre el wrap de la palabra, suavizado), sin scrollear fuera de fase y sin pelear con el popover léxico (112) ni con el gate `data-interactive` (113).
+- [x] **Monotonicidad** — durante una misma captura la posición solo avanza (los intermedios de STT se reescriben; la posición no debe "rebobinar" en vivo). El reset es al iniciar la captura y al evaluar.
+- [x] **Degradación** — si no hay fuente de posición disponible (ruta whisper sin interinos, fuente fallida), la fase `full` sigue funcionando como hoy: sin pintado en vivo y sin scroll en vivo; en ningún caso la feature bloquea la captura ni el envío a `/api/attempt`.
+- [x] **Precedencia post-hoc** — al llegar `words[]` de `/api/attempt`, `colorWords()` pinta el semáforo definitivo sobre la línea y el estado en vivo desaparece; el guard de refinado (`attemptId` + `flowToken`, 116) sigue intacto.
+- [x] **Cleanup garantizado** — la suscripción/animación se cancela en todos los caminos de salida de `captureAttempt` (éxito, fallo, excepción, soltar PTT), sin estado vivo colgando entre turnos.
 
 ## Requerimientos no funcionales
 
@@ -63,8 +63,8 @@ Los colores **finales** (green/amber/red) siguen llegando igual que hoy: `POST /
 
 ## Criterios de aceptación
 
-- [ ] Módulo puro de posición/scroll con tests (`tests/live-position.test.ts`): avance de índice, monotonicidad, tokenización alineada con `tokenizeWords`, degradación sin fuente, reset entre capturas.
-- [ ] `npm run check` y `npm test` en verde.
+- [x] Módulo puro de posición/scroll con tests (`tests/live-position.test.ts`): avance de índice, monotonicidad, tokenización alineada con `tokenizeWords`, degradación sin fuente, reset entre capturas.
+- [x] `npm run check` y `npm test` en verde.
 - [ ] Prueba manual: respuesta modelo larga (desborda 46vh) → al presionar y repetir, la línea hace scroll sola y la palabra activa queda visible; soltar → semáforo post-hoc normal.
 - [ ] Prueba manual sin fuente viva (ruta whisper / fuente deshabilitada) → flujo idéntico al actual, sin errores en consola ni scroll espurio.
 - [ ] Prueba manual de regresión: popover léxico (112), click de palabra (113) y refinado amber (116) siguen operativos tras una captura con scroll en vivo.

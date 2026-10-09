@@ -51,6 +51,7 @@ import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
 import { createWordClickHandler, tokensFromRange } from "./word-click.js";
 import { buildWordStarts } from "./karaoke-schedule.js";
+import { createLivePositionSource, buildCaptureOnsets } from "./live-position.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -174,6 +175,16 @@ let cancelPendingTurn = null;
  * @type {import("../speech/ptt.js").PushToTalk|null}
  */
 let activePtt = null;
+
+/**
+ * Live position of the FULL-answer capture in flight (feature 121), or null
+ * outside one (and always null for fragment captures: their short lines
+ * already scroll through `setCurrentLine`). Routes the PTT press (`begin`)
+ * and the Web Speech interims (`feed`) into a `LivePositionSource`, and owns
+ * the provisional `kw-live` paint + auto-scroll of the karaoke book.
+ * @type {{ begin: () => void, feed: (text: string) => void, dispose: () => void }|null}
+ */
+let livePosition = null;
 
 /** True while the coach is reading a line (blocks karaoke interaction). */
 let coachSpeaking = false;
@@ -1021,26 +1032,131 @@ async function captureAttempt(target, kind, token) {
   lastWavBlob = null;
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
-  if (stt === "whisper") {
-    const { blob, timedOut, error } = await waitForUserRecording(target, token);
-    if (token !== flowToken) return null;
-    if (error) throw new Error(error);
-    if (timedOut) return timedOutOutcome(target, kind);
-    lastWavBlob = blob;
-    try {
-      return await submitAudio(blob, target, kind);
-    } catch (err) {
-      // whisper failed → browser STT fallback (text mode).
-      const text = await captureBrowserSpeech(target, token);
+  // Feature 121: provisional paint + auto-scroll while the answer is being
+  // captured. Only the full answer needs it — its single long line has no
+  // scroll of its own while SPACE is held by PTT. The post-hoc traffic light
+  // (106/116) keeps precedence: this layer is torn down before returning, so
+  // `renderFeedback → colorWords()` paints over a clean book.
+  livePosition = kind === "full" ? createLiveCapturePosition(target, stt) : null;
+  try {
+    if (stt === "whisper") {
+      const { blob, timedOut, error } = await waitForUserRecording(target, token);
       if (token !== flowToken) return null;
-      if (!text) return timedOutOutcome(target, kind);
-      return await submitText(text, target, kind);
+      if (error) throw new Error(error);
+      if (timedOut) return timedOutOutcome(target, kind);
+      lastWavBlob = blob;
+      try {
+        return await submitAudio(blob, target, kind);
+      } catch (err) {
+        // whisper failed → browser STT fallback (text mode).
+        const text = await captureBrowserSpeech(target, token);
+        if (token !== flowToken) return null;
+        if (!text) return timedOutOutcome(target, kind);
+        return await submitText(text, target, kind);
+      }
     }
+    const text = await captureBrowserSpeech(target, token);
+    if (token !== flowToken) return null;
+    if (!text) return timedOutOutcome(target, kind);
+    return await submitText(text, target, kind);
+  } finally {
+    // Cleanup on EVERY exit (release, ceiling, error, cancel): no `kw-live`
+    // span, timer or interim feed may survive into the next turn.
+    livePosition?.dispose();
+    livePosition = null;
   }
-  const text = await captureBrowserSpeech(target, token);
-  if (token !== flowToken) return null;
-  if (!text) return timedOutOutcome(target, kind);
-  return await submitText(text, target, kind);
+}
+
+// ---------------------------------------------------------------------------
+// Live position during a FULL capture (feature 121): kw-live paint + auto-scroll
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire a live position source to the karaoke book for ONE full-answer
+ * capture (feature 121).
+ *
+ * The source kind follows the STT route of the turn: Web Speech gets the
+ * `interim` source (the recognizer's live transcript refines the position),
+ * whisper — and every other route — gets the `time` source (the coach's
+ * clause schedule over the nominal cadence), which needs no STT at all. When
+ * neither can be armed (blank target, no schedule, no feed) this returns
+ * null and the capture behaves exactly as before the feature.
+ *
+ * Effects live ONLY here: `onWord(i)` paints `kw-live` on word span `i` and
+ * scrolls its `.kw-wrap` into view (`block: "nearest"`, one rAF frame per
+ * burst so a fast signal cannot flood layout). The class sits on the span,
+ * the scroll on the WRAP: in the full phase the whole answer is ONE line, so
+ * scrolling the line (what `setCurrentLine` does for fragments) would move
+ * nothing.
+ *
+ * @param {string} target - the full answer being captured
+ * @param {"browser"|"whisper"} stt - engine chosen for this turn
+ * @returns {{ begin: () => void, feed: (text: string) => void, dispose: () => void }|null}
+ */
+function createLiveCapturePosition(target, stt) {
+  const targetTokens = tokenizeWords(target);
+  if (!targetTokens.length) return null;
+  const useInterims = stt === "browser";
+  /** Interim sink installed by the source's `register` (no-op until then). */
+  let feed = () => {};
+  const source = createLivePositionSource({
+    kind: useInterims ? "interim" : "time",
+    targetTokens,
+    wordOnsetsMs: useInterims ? null : buildCaptureOnsets(target),
+    register: useInterims
+      ? (handler) => {
+          feed = handler;
+          return () => {
+            if (feed === handler) feed = () => {};
+          };
+        }
+      : null,
+  });
+
+  /** Span currently carrying `kw-live` (the paint follows ONE word at a time). */
+  let painted = null;
+  /** Pending rAF frame of the paint/scroll (0 = none scheduled). */
+  let frame = 0;
+  /** Index waiting for the next frame (the last signal wins the frame). */
+  let pending = 0;
+
+  source.onWord((index) => {
+    pending = index;
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const spans = spansForLine(-1);
+      const next = spans[pending] ?? null;
+      if (painted && painted !== next) painted.classList.remove("kw-live");
+      if (next) {
+        next.classList.add("kw-live");
+        try {
+          next.parentElement?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+        } catch {
+          // scrollIntoView unavailable → the paint still marks the word
+        }
+      }
+      painted = next;
+    });
+  });
+
+  return {
+    // Every PTT press (re)arms: a discarded accidental tap (111) restarts at
+    // word 0 instead of inheriting the tap's position.
+    begin: () => source.start(),
+    feed: (text) => feed(text),
+    dispose: () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      source.stop();
+      // Sweep the whole book (not just `painted`): a settings-triggered
+      // rebuildBook() mid-capture may have replaced the span under us.
+      els?.book?.querySelectorAll(".kw-live").forEach((span) => span.classList.remove("kw-live"));
+      painted = null;
+    },
+  };
 }
 
 /**
@@ -1128,6 +1244,7 @@ function waitForUserRecording(target, token) {
       hasAudio: () => (recorder?.samples.length ?? 0) > 0,
       onStart: () => {
         closeLookupPopover(); // capture start closes the lookup card (112)
+        livePosition?.begin(); // feature 121: arm the live position at the press
         dock?.setMode("recording");
         dock?.setMicLabel(PTT_RECORD_LABEL);
         syncBookInteraction(); // capture held → word interaction (112/113) off
@@ -1228,6 +1345,9 @@ function captureBrowserSpeech(target, token) {
     };
 
     const stt = new BrowserSTT({
+      // Feature 121: the rewritten interim transcript refines the live
+      // position of a full-answer capture (no-op outside one).
+      onInterim: (text) => livePosition?.feed(text),
       onFinal: () => {},
       onEnd: () => {
         if (discarding) return;
@@ -1259,6 +1379,7 @@ function captureBrowserSpeech(target, token) {
       hasAudio: () => started && Boolean(stt.result()),
       onStart: () => {
         closeLookupPopover(); // capture start closes the lookup card (112)
+        livePosition?.begin(); // feature 121: arm the live position at the press
         started = true;
         ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
         dock?.setMode("recording");

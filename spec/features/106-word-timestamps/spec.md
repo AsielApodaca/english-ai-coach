@@ -55,7 +55,7 @@ El color por palabra da feedback granular (dónde exactamente falló) y hace el 
 
 ## Extensión futura (documentada, NO implementada aquí)
 
-- **Coloreado en tiempo real exacto:** streaming de timestamps de silent/apertura de mic + alineador incremental por ventana + render por palabra al llegar del onSpeechResults (stopping no indispensable). Requiere otro motor STT (o whisper en streaming) + gestor de timeline; impacto de latencia ≠. Se documenta para no romper el MVP. **→ Especificada como `../../features/121-realtime-coloring/`** (fuente de posición en vivo + auto-scroll de la respuesta modelo durante la captura).
+- **Coloreado en tiempo real exacto:** streaming de timestamps de silent/apertura de mic + alineador incremental por ventana + render por palabra al llegar del onSpeechResults (stopping no indispensable). Requiere otro motor STT (o whisper en streaming) + gestor de timeline; impacto de latencia ≠. Se documenta para no romper el MVP. **→ Implementado como `../../features/121-realtime-coloring/`** (fuente de posición en vivo `LivePositionSource` + pintado provisional `kw-live` + auto-scroll de la respuesta modelo durante la captura; los colores green/amber/red siguen siendo post-hoc, sin cambios de contrato).
 
 ## Recursos
 
