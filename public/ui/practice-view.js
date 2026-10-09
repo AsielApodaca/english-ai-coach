@@ -71,8 +71,9 @@ const CHIME_MAX_MS = 500;
 /**
  * Cap on waiting for the LLM refinement before speaking the coach line
  * (feature 116). The wait starts when the feedback is PAINTED, so it is
- * overlapped with the user's own replay and only the remainder is paid
- * right before `speak()`.
+ * overlapped with the fail chime and only the remainder is paid right
+ * before `speak()`. (The user-WAV replay that used to fill that window was
+ * removed: the take is on-demand via the feedback chip's speaker button.)
  */
 const REFINE_WAIT_MS = 10000;
 
@@ -129,7 +130,7 @@ let navigate = null;
   let dock = null;
   let tts = null;
 
-/** Last recorded WAV blob (replayed on retry with word highlighting). */
+/** Last recorded WAV blob (played on demand via the feedback chip's speaker). */
 let lastWavBlob = null;
 
 /**
@@ -156,7 +157,7 @@ let stopKaraokeRead = null;
  */
 let readAudio = null;
 
-/** Pending user-WAV replay; the retry pill and `cancelFlow()` can cut it. */
+/** Pending user-WAV replay; the feedback chip's speaker, the retry pill and `cancelFlow()` can cut it. */
 let stopReplay = null;
 
 /**
@@ -568,18 +569,15 @@ async function runQuestionLoop(token, { resume = false } = {}) {
       continue;
     }
 
-    // Fail (CU2 alt flow): replay the user's take, play the "incorrecto"
-    // chime (feature 110's module, kind `fail`) where the old "Almost there.
-    // That was N percent. Let's try that again." line used to be, speak the
-    // focus hint and re-read the SAME fragment.
-    if (lastWavBlob) {
-      await replayUserWav(lastWavBlob);
-      if (token !== flowToken) return;
-    }
+    // Fail (CU2 alt flow): play the "incorrecto" chime (feature 110's module,
+    // kind `fail`) where the old spoken opener (score + retry line) used to
+    // be, speak the focus hint and re-read the SAME fragment. The user's take
+    // is NOT replayed automatically anymore: the feedback chip carries a
+    // speaker button to hear it on demand.
     await playAttemptChime("fail");
     if (token !== flowToken) return;
     // The refinement request has been in flight since the paint (overlapping
-    // the replay): wait for it — capped — so the coach keeps its LLM-quality
+    // the chime): wait for it — capped — so the coach keeps its LLM-quality
     // line. On timeout, dead provider or a blank transcript (no attemptId)
     // the deterministic coachLine is spoken instead. An EMPTY line (nothing to
     // focus on) means silence: the fail chime already said it.
@@ -625,16 +623,14 @@ async function runQuestionLoop(token, { resume = false } = {}) {
       break;
     }
 
-    // Same fail treatment as the fragment loop: replay → "incorrecto" chime →
-    // focus hint (only when there is one) → retry the whole answer.
-    if (lastWavBlob) {
-      await replayUserWav(lastWavBlob);
-      if (token !== flowToken) return;
-    }
+    // Same fail treatment as the fragment loop: "incorrecto" chime →
+    // focus hint (only when there is one) → retry the whole answer. The user's
+    // take is on-demand via the feedback chip's speaker button.
     await playAttemptChime("fail");
     if (token !== flowToken) return;
-    // Overlapped with the replay since the paint; capped, and falling back to
-    // the deterministic coachLine on timeout / dead provider / blank input.
+    // Overlapped with the chime + paint since the request was fired; capped,
+    // and falling back to the deterministic coachLine on timeout / dead
+    // provider / blank input.
     const refined = await refinement;
     if (token !== flowToken) return;
     const refinedLine = refined?.coachLine || fullOutcome.coachLine;
@@ -1388,9 +1384,9 @@ function timedOutOutcome(target, kind) {
  * REFINE_WAIT_MS cap.
  *
  * Fired WITHOUT `await` right after `renderFeedback`, so the request overlaps
- * the user's own replay; only the FAIL path awaits the raced promise, just
- * before speaking (PASS never waits — the recolor simply lands whenever it
- * arrives). Never rejects: network errors, a 404 (expired/unknown id) and
+ * the fail chime and the paint; only the FAIL path awaits the raced promise,
+ * just before speaking (PASS never waits — the recolor simply lands whenever
+ * it arrives). Never rejects: network errors, a 404 (expired/unknown id) and
  * `refined: false` (LLM down / server timeout) all resolve to null, which
  * means "keep the deterministic state and coach line".
  *
@@ -1402,7 +1398,7 @@ function timedOutOutcome(target, kind) {
 function startRefinement(outcome, lineIndex, token) {
   if (!outcome.attemptId) return Promise.resolve(null);
   // The deadline starts at the PAINT, not at the await: the cap is spent
-  // mostly under the replay, so the wait right before speak is the remainder.
+  // under the chime + paint, so the wait right before speak is the remainder.
   return Promise.race([
     fetchRefinement(outcome.attemptId, lineIndex, token),
     sleep(REFINE_WAIT_MS).then(() => null),
@@ -1461,39 +1457,18 @@ function applyRefinement(attemptId, lineIndex, data, token) {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/** Header: session title + live speech-engine pill. */
+/** Live-practice chrome: adjustment + feedback chips, book, sub, done. (No title, no speech pill — both were removed as redundant: the pill lives in the sidebar.) */
 function renderHeader() {
-  const pill = h("div", { class: "status-pill practice-speech-pill" }, [
-    h("span", { class: "status-dot", "aria-hidden": "true" }),
-    h("span", { class: "status-label" }, "Speech Engine"),
-    h("span", { class: "status-state" }, "…"),
-  ]);
   els = {
-    head: h("div", { class: "practice-head" }, [
-      h("div", { class: "practice-title" }, escapeHtml(session.title || "Practice")),
-      pill,
-    ]),
     adjustment: h("div", { class: "adjustment-chip", hidden: true }),
     feedbackChip: h("div", { class: "feedback-chip", hidden: true }),
     book: h("div", { class: "karaoke-book" }),
     sub: h("div", { class: "practice-sub" }),
     done: h("div", { class: "practice-done", hidden: true }),
   };
-  root.append(els.head, els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
+  root.append(els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
   // Fresh book node → project the interaction gate onto it (features 112/113).
   syncBookInteraction();
-
-  // Reflect the live speech engine state (store keeps it in sync via /api/health).
-  const stateEl = pill.querySelector(".status-state");
-  const updatePill = (ready) => {
-    stateEl.textContent = ready ? "READY" : "BROWSER";
-    pill.classList.toggle("ok", ready);
-    pill.classList.toggle("bad", !ready);
-  };
-  updatePill(store.state.speechReady);
-  store.subscribe((state) => {
-    if (state.route?.view === "practice") updatePill(state.speechReady);
-  });
 }
 
 /** QUESTION phase: show the question as the coach transcript. */
@@ -1639,6 +1614,8 @@ function colorWords(outcome, lineIndex) {
 
 /** FEEDBACK phase: color the evaluated line + show the feedback chip. */
 function renderFeedback(outcome, lineIndex) {
+  // A new attempt supersedes any replay still playing from the previous one.
+  stopReplay?.();
   lastAttemptLineIndex = lineIndex;
   // Feature 116: the refinement guard — only the refinement of THIS attempt
   // may recolor the line (blank transcripts / timed-out turns have none).
@@ -1654,6 +1631,33 @@ function renderFeedback(outcome, lineIndex) {
   const parts = [h("span", { class: "feedback-chip-main" }, chipText)];
   if (!passed && outcome.heard) {
     parts.push(h("span", { class: "feedback-chip-heard" }, ` Escuché: “${escapeHtml(outcome.heard)}”`));
+  }
+  // Speaker button: only on a failed attempt (and only when the take was
+  // captured as a WAV). It replays the user's own audio on demand — the fail
+  // path no longer auto-replays it. A click while one is playing cuts it.
+  if (!passed && lastWavBlob) {
+    parts.push(
+      h(
+        "button",
+        {
+          type: "button",
+          class: "chip-hear-btn",
+          "aria-label": "Escuchar tu intento",
+          title: "Escuchar tu intento",
+          onclick: () => {
+            if (stopReplay) {
+              stopReplay();
+              return;
+            }
+            // Never overlap the coach: cut a pending read/TTS before playing.
+            stopKaraokeRead?.();
+            tts.stop();
+            replayUserWav(lastWavBlob);
+          },
+        },
+        [h("span", { class: "material-symbols-outlined", "aria-hidden": "true" }, "volume_up")],
+      ),
+    );
   }
   els.feedbackChip.textContent = "";
   els.feedbackChip.append(...parts);
@@ -1864,16 +1868,18 @@ function practiceAgain() {
 }
 
 // ---------------------------------------------------------------------------
-// User WAV replay (retry: hear yourself while the colors stay on screen)
+// User WAV replay (feedback chip speaker: hear yourself while the colors stay on screen)
 // ---------------------------------------------------------------------------
 
 /**
  * Replay the user's last recording while the traffic-light colors of the
  * attempt stay visible.
  *
- * There is no lyric animation here on purpose: the line was already scored
- * with green/amber/red, and lighting it blue would hide the feedback the
- * colors exist to give.
+ * On demand only: the feedback chip's speaker button triggers it when the
+ * attempt failed (the fail path no longer auto-replays the take). There is
+ * no lyric animation here on purpose: the line was already scored with
+ * green/amber/red, and lighting it blue would hide the feedback the colors
+ * exist to give.
  */
 function replayUserWav(blob) {
   return new Promise((resolve) => {

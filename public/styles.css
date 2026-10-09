@@ -1846,13 +1846,12 @@ body.overlay-open {
   white-space: nowrap;
 }
 
-.practice-speech-pill {
-  flex-shrink: 0;
-}
-
 /* ---------- Feedback chip ---------- */
 .feedback-chip {
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 14px;
   border-radius: 9999px;
   font-family: var(--font-mono);
@@ -1874,6 +1873,33 @@ body.overlay-open {
   color: var(--amber);
   border-color: rgba(245, 158, 11, 0.35);
   background: rgba(245, 158, 11, 0.08);
+}
+
+/* Speaker button inside the failed chip: replays the user's take on demand. */
+.chip-hear-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.chip-hear-btn:hover {
+  background: rgba(245, 158, 11, 0.18);
+}
+
+.chip-hear-btn:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 1px;
+}
+
+.chip-hear-btn .material-symbols-outlined {
+  font-size: 16px;
 }
 
 /* ---------- Adaptive-difficulty pill (feature 107) ---------- */

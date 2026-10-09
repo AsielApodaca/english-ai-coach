@@ -13,8 +13,11 @@ pass chime.
 The `fail` tone itself was redesigned for this feature: the old shape (a
 quieter, lower chord — it read as a softer "correcto") is now a **descending
 pair played in sequence** (523 Hz → 349 Hz, 20 ms apart, its own envelope per
-note), at the **same loudness as the pass cue** so it cuts through the user's
-replay that precedes it.
+note), at the **same loudness as the pass cue**. ([Chore `practice-ui-cleanup`]:
+the user's take used to auto-replay right before the chime; now the fail path
+goes straight to the chime and the take is heard on demand via the feedback
+chip's speaker button — the chime stays loud so it reads as "incorrecto" on
+its own.)
 
 What is still spoken is the focused correction only: `buildFeedbackText`'s fail
 branch now returns `Focus on: a, b, c.` / `Drop the extra words: x, y, z.` (or
@@ -42,8 +45,10 @@ again."`) is untouched.
   (`Focus on: …` / `Drop the extra words: …`, joined with `". "`, or `""` when
   there is no missing/extra word); the pass branch is untouched.
 - [x] The view plays `playAttemptChime("fail")` on both fail paths (fragment
-  loop and full answer), after the user's replay and **before** any spoken
-  hint, so the chime never overlaps TTS.
+  loop and full answer) **before** any spoken hint, so the chime never overlaps
+  TTS. ([Chore `practice-ui-cleanup`]: it used to play *after* the user's
+  auto-replay; the replay is now on-demand from the feedback chip and no longer
+  precedes the chime.)
 - [x] The focus hint is spoken only when non-empty: `if (refinedLine) await
   speak(refinedLine, token)` in both loops; an empty line means silence after
   the chime.
@@ -60,11 +65,15 @@ again."`) is untouched.
   sites, chime before the guarded `speak`, no opener left in the view);
   `tests/refinement.test.ts` asserts the guarded speak in both loops.
 - [x] `npm run check` and `npm test` green.
-- [ ] Manual: fail a fragment → hear the descending "incorrecto" chime right after
-  your own replay, then the focus hint (or silence when there is nothing to
-  focus on), then the same fragment re-read.
+- [x] Feedback-chip speaker button (fail only, WAV present): a click replays
+  the user's take (`replayUserWav(lastWavBlob)`, no `await`, never overlapping
+  the coach: a pending read/TTS is cut first); a second click while it plays
+  stops it (`stopReplay`); painting a new feedback stops any replay in flight.
+- [ ] Manual: fail a fragment → hear the descending "incorrecto" chime, then the
+  focus hint (or silence when there is nothing to focus on), then the same
+  fragment re-read; the chip's speaker button replays your take on demand.
 - [ ] Manual: fail the full answer → same treatment; pass still plays the pass
-  chime with no congratulation line.
+  chime with no congratulation line and shows no speaker button.
 
 ## Out of scope
 
