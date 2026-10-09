@@ -52,7 +52,7 @@ Nota: los screenshots `hq-*.jpg` no son legibles por el modelo (sin soporte de i
 **Objetivo:** karaoke de práctica de CU2 con flujo continuo de preguntas (Q1→Q∞) — la vista de práctica en vivo.
 
 **Estructura de layout:**
-- **Top bar** resumida: "Junior SWE First Interview" (nombre actual); botón "Finalizar Sesión". **[Modificado — chore `practice-ui-cleanup`]:** el pill "Speech Engine · READY" fue removido de esta top bar (duplicaba el del sidebar); el sidebar es la única fuente.
+- **Sin top bar propia en la práctica en vivo.** **[Modificado — chore `practice-ui-cleanup`]:** la top bar mostraba el nombre de la sesión + pill "Speech Engine · READY"; ambos fueron removidos (el pill duplicaba el del sidebar; el título se considera redundante — la sesión activa ya se ve en el sidebar/historial). La acción "Finalizar Sesión" vive en el dock inferior.
 - **Sidebar historial:** compacto; la sesión actual con badge **"ACTIVA (Q1)"** (número de pregunta en curso).
 - **`main-area` (karaoke):**
   - Chip de feedback del encabezado: "Buen flujo · Foco en /tʃ/ · 92%". En fallo, el chip (ámbar) lleva un **botón de bocina** (`volume_up`) que reproduce a demanda la grabación del usuario del intento fallido (chore `practice-ui-cleanup`).

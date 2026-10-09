@@ -1457,19 +1457,16 @@ function applyRefinement(attemptId, lineIndex, data, token) {
 // Rendering
 // ---------------------------------------------------------------------------
 
-/** Header: session title. (The live speech-engine pill lives in the sidebar.) */
+/** Live-practice chrome: adjustment + feedback chips, book, sub, done. (No title, no speech pill — both were removed as redundant: the pill lives in the sidebar.) */
 function renderHeader() {
   els = {
-    head: h("div", { class: "practice-head" }, [
-      h("div", { class: "practice-title" }, escapeHtml(session.title || "Practice")),
-    ]),
     adjustment: h("div", { class: "adjustment-chip", hidden: true }),
     feedbackChip: h("div", { class: "feedback-chip", hidden: true }),
     book: h("div", { class: "karaoke-book" }),
     sub: h("div", { class: "practice-sub" }),
     done: h("div", { class: "practice-done", hidden: true }),
   };
-  root.append(els.head, els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
+  root.append(els.adjustment, els.feedbackChip, els.book, els.sub, els.done);
   // Fresh book node → project the interaction gate onto it (features 112/113).
   syncBookInteraction();
 }
