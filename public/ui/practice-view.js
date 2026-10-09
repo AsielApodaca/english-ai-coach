@@ -1588,7 +1588,7 @@ function setCurrentLine(index) {
     line.classList.toggle("future", i > index);
   });
   try {
-    lines[index]?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    lines[index]?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "smooth" });
   } catch {
     // scrollIntoView unavailable → the line stays where it is
   }
