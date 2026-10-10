@@ -146,6 +146,8 @@ Token chart (fuentes cargadas desde Google Fonts como hoy):
 | Palabra leve | Ámbar `#f59e0b` |
 | Palabra fallada/no dicha | Rojo `#ef4444` |
 | Palabra activa del usuario durante la captura (121) | Violeta `#a78bfa` (`kw-live`, provisional hasta el semáforo post-hoc) |
+| Palabra ya dicha en vivo durante la captura (121) | Verde `#10b981` al 85% de opacidad, sin glow (`kw-live-spoken`, provisional — el `kw-green` definitivo pinta encima al evaluar) |
+| Palabra no dicha aún (faltante) en vivo durante la captura (121) | Rojo `#ef4444` al 85% de opacidad, sin glow (`kw-live-missing`, provisional — el `kw-red` definitivo pinta encima al evaluar) |
 
 ## Implementación
 

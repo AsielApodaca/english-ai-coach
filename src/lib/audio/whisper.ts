@@ -1,7 +1,8 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { snip, SUBPROCESS_MAX_BUFFER, SUBPROCESS_TIMEOUT_MS } from "../util/subprocess.ts";
+import { snip, SUBPROCESS_TIMEOUT_MS } from "../util/subprocess.ts";
 import { MS_PER_MIN, MS_PER_S } from "../util/time.ts";
 
 const MODELS: Record<string, string> = {
@@ -24,12 +25,24 @@ const HF_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
  */
 export const DEFAULT_WHISPER_MODEL = "small.en";
 
+/**
+ * Memoized result of the PATH lookup: the resolved binary path, or `null`
+ * while none has been found. ONLY a successful lookup is cached (feature 121):
+ * a negative result would freeze availability forever — e.g. a test (or a
+ * user installing whisper while the app runs) must be able to flip it.
+ */
+let cachedBinary: string | null = null;
+
 function findBinary(): string | null {
+  if (cachedBinary) return cachedBinary;
   const candidates = ["whisper-cli", "whisper"];
   for (const name of candidates) {
     try {
       const found = execFileSync("which", [name], { encoding: "utf8" }).trim();
-      if (found) return found;
+      if (found) {
+        cachedBinary = found;
+        return found;
+      }
     } catch {
       // not in PATH
     }
@@ -94,26 +107,125 @@ export interface TranscribeResult {
   durationMs: number;
 }
 
-/** Transcribe a 16kHz mono WAV file with whisper-cli. */
+/** Per-run knobs of the shared whisper-cli spawn (feature 121). */
+export interface TranscribeOptions {
+  /**
+   * Wall-clock budget for the run (defaults to SUBPROCESS_TIMEOUT_MS). The
+   * partial-transcription route passes a smaller, NAMED budget of its own so
+   * a stuck window never holds the 60 s shared with piper/edge-tts.
+   */
+  timeoutMs?: number;
+  /**
+   * Aborting it kills the whisper child (feature 121: the client of
+   * `POST /api/transcribe-partial` disconnects after releasing push-to-talk;
+   * the orphan run would burn CPU against the final `/api/attempt` spawn).
+   */
+  signal?: AbortSignal;
+}
+
+/** Outcome of one async whisper-cli run, mirroring the spawnSync fields. */
+interface RunWhisperResult {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Spawn whisper-cli asynchronously (feature 121 — replaced `spawnSync`, which
+ * blocked the whole event loop for every run: TTS, health and the long-poll
+ * of 116 stalled behind each transcription).
+ *
+ * Semantics preserved from the old `spawnSync` call sites:
+ *   - a spawn failure REJECTS with `whisper-cli failed to start: …`;
+ *   - a non-zero exit RESOLVES (status/stderr reported, caller throws).
+ * New, async-only outcomes also reject, with explicit messages: a run over
+ * `timeoutMs` (child killed with SIGTERM) and an `options.signal` abort
+ * (same kill — client disconnect). The child is settled exactly once.
+ *
+ * @param binary - resolved path of the CLI (from `findBinary`)
+ * @param args - CLI arguments
+ * @param options - timeout budget (required) and optional abort signal
+ */
+function runWhisper(
+  binary: string,
+  args: string[],
+  options: { timeoutMs: number; signal?: AbortSignal },
+): Promise<RunWhisperResult> {
+  const { timeoutMs, signal } = options;
+  return new Promise<RunWhisperResult>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("whisper-cli aborted (client disconnected)"));
+      return;
+    }
+    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    /** Kill the child and reject — first caller wins over 'close'. */
+    const die = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      child.kill("SIGTERM");
+      reject(err);
+    };
+
+    const onAbort = () => die(new Error("whisper-cli aborted (client disconnected)"));
+    signal?.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(
+      () => die(new Error(`whisper-cli timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+
+    child.on("error", (err: Error) => {
+      die(new Error(`whisper-cli failed to start: ${err.message}`));
+    });
+    // 'close' (not 'exit'): the stdio streams are drained, so stdout/stderr
+    // hold the complete output of the run.
+    child.on("close", (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve({ status: code, stdout, stderr });
+    });
+  });
+}
+
+/** Unique output prefix per run: concurrent runs must never share a file. */
+function whisperOutPrefix(baseDir: string): string {
+  const outDir = join(baseDir, "data", "tmp");
+  mkdirSync(outDir, { recursive: true });
+  return join(outDir, `whisper-${randomUUID()}`);
+}
+
+/** Transcribe a 16kHz mono WAV file with whisper-cli (async spawn, feature 121). */
 export async function transcribeWav(
   wavPath: string,
   modelFile: string,
   baseDir: string,
   language = "en",
+  options: TranscribeOptions = {},
 ): Promise<TranscribeResult> {
   const binary = findBinary();
   if (!binary) throw new Error("whisper-cli not found. Run: brew install whisper-cpp");
   const started = Date.now();
-  const outDir = join(baseDir, "data", "tmp");
-  mkdirSync(outDir, { recursive: true });
-  const outPrefix = join(outDir, `whisper-${Date.now()}`);
+  const outPrefix = whisperOutPrefix(baseDir);
   const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-otxt", "-of", outPrefix, "-nt", "-np"];
-  const res = spawnSync(binary, args, {
-    encoding: "utf8",
-    timeout: SUBPROCESS_TIMEOUT_MS,
-    maxBuffer: SUBPROCESS_MAX_BUFFER,
+  const res = await runWhisper(binary, args, {
+    timeoutMs: options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS,
+    signal: options.signal,
   });
-  if (res.error) throw new Error(`whisper-cli failed to start: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${snip(res.stderr)}`);
   const txtPath = `${outPrefix}.txt`;
   const text = existsSync(txtPath) ? readFileSync(txtPath, "utf8").trim() : "";
@@ -264,25 +376,22 @@ export async function transcribeWords(
   modelFile: string,
   baseDir: string,
   language = "en",
+  options: TranscribeOptions = {},
 ): Promise<TranscribeWordsResult> {
   const binary = findBinary();
   if (!binary) throw new Error("whisper-cli not found. Run: brew install whisper-cpp");
   const started = Date.now();
-  const outDir = join(baseDir, "data", "tmp");
-  mkdirSync(outDir, { recursive: true });
-  const outPrefix = join(outDir, `whisper-${Date.now()}`);
+  const outPrefix = whisperOutPrefix(baseDir);
   // -ml 1: one entry per segment; -sow (--split-on-word): split at word
   // boundaries instead of tokenizer (BPE) token boundaries. Without -sow,
   // whisper emits sub-word tokens (" autom" + " ating", " fl" + "aky",
   // " end" + "-" + "to"), which downstream word matching reports as
   // missing/extra words.
   const args = ["-m", modelFile, "-f", wavPath, "-l", language, "-oj", "-ml", "1", "-sow", "-of", outPrefix, "-nt", "-np"];
-  const res = spawnSync(binary, args, {
-    encoding: "utf8",
-    timeout: SUBPROCESS_TIMEOUT_MS,
-    maxBuffer: SUBPROCESS_MAX_BUFFER,
+  const res = await runWhisper(binary, args, {
+    timeoutMs: options.timeoutMs ?? SUBPROCESS_TIMEOUT_MS,
+    signal: options.signal,
   });
-  if (res.error) throw new Error(`whisper-cli failed to start: ${res.error.message}`);
   if (res.status !== 0) throw new Error(`whisper-cli exited ${res.status}: ${snip(res.stderr)}`);
   const jsonPath = `${outPrefix}.json`;
   let words: WhisperWord[] = [];

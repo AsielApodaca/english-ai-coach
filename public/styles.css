@@ -1932,11 +1932,12 @@ body.overlay-open {
   padding: 12px 4px;
   mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
   -webkit-mask-image: linear-gradient(to bottom, transparent, black 12%, black 88%, transparent);
-  /* Auto-scroll of the live position (feature 121): keep the active word
+  /* Safety line for EVERY `scrollIntoView({ block: "nearest" })` against this
+     book (coach reading `setCurrentLine`, post-hoc coloring): keep the target
      clear of the gradient mask, whose transparent bands cover roughly the
-     first/last 12% (~48px at a 46vh container) — without this padding,
-     `scrollIntoView({ block: "nearest" })` parks the word where the mask
-     fades it out. */
+     first/last 12% (~48px at a 46vh container). The LIVE row scroll of
+     feature 121 does NOT use scrollIntoView anymore — it mirrors this value
+     in `LIVE_SCROLL_MASK_PX` (practice-view.js) plus a two-row buffer. */
   scroll-padding-block: 48px;
   scrollbar-width: none;
 }
@@ -2024,6 +2025,20 @@ body.overlay-open {
 .kw-live {
   color: var(--accent-live);
   text-shadow: 0 0 24px rgba(167, 139, 250, 0.45);
+}
+
+/* Provisional spoken/missing words of the USER's live capture (feature 121):
+   the same hues as the final traffic light but at reduced opacity and WITHOUT
+   glow, so the live layer always reads as provisional — the definitive
+   kw-green/kw-red (106/116) repaint the clean canvas when the attempt lands. */
+.kw-live-spoken {
+  color: var(--green);
+  opacity: 0.85;
+}
+
+.kw-live-missing {
+  color: var(--red);
+  opacity: 0.85;
 }
 
 /* IPA annotation under each word (feature 108) */

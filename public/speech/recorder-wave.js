@@ -154,15 +154,24 @@ export class WaveRecorder {
     return ctx;
   }
 
+  /**
+   * WAV snapshot of everything captured SO FAR, without stopping the capture
+   * (feature 121): used by the live-window pump to send cumulative windows to
+   * `/api/transcribe-partial`. Unlike `stop()` it does NOT mutate `samples`,
+   * does NOT tear the graph down and does NOT touch the last-duration
+   * bookkeeping — the final evaluation still runs on the single full WAV that
+   * `stop()` produces at release.
+   *
+   * @returns {Blob} a PCM16 mono WAV of the buffer as it is right now
+   */
+  snapshotWav() {
+    return encodeWAV(combineSamples(this.samples), this.sampleRate);
+  }
+
   /** Stop and produce a WAV Blob of everything recorded. */
   stop() {
     this.recording = false;
-    const combined = new Float32Array(this.samples.reduce((n, a) => n + a.length, 0));
-    let off = 0;
-    for (const a of this.samples) {
-      combined.set(a, off);
-      off += a.length;
-    }
+    const combined = combineSamples(this.samples);
     this.lastSampleCount = combined.length;
     this.samples = [];
     /** Recorded clip length in milliseconds (0 when nothing was captured). */
@@ -198,6 +207,17 @@ export class WaveRecorder {
       this.ctx = null;
     }
   }
+}
+
+/** Concatenate the buffered frames into ONE Float32Array (copy, no mutation). */
+function combineSamples(samples) {
+  const combined = new Float32Array(samples.reduce((n, a) => n + a.length, 0));
+  let off = 0;
+  for (const a of samples) {
+    combined.set(a, off);
+    off += a.length;
+  }
+  return combined;
 }
 
 /** RMS level of an audio channel in dB (0 dBFS peak, -Infinity on silence). */

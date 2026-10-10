@@ -1,84 +1,107 @@
-# 121 · Coloreado en tiempo real exacto + auto-scroll de la respuesta modelo
+# 121 · Coloreado en tiempo real que sigue al usuario + auto-scroll de la respuesta modelo
 
-**Estado:** done ✅ (branch `feature/realtime-coloring`)
+**Estado:** v2 implementada y revisada ✅ (pendiente verificación manual — la v1 con fuente de reloj fue implementada y rechazada en prueba manual; la v2 sigue el habla real)
 
 ## Contexto
 
 - Caso de uso: CU2 (fase de respuesta entera; el usuario repite la respuesta modelo completa).
 - Pantallas: karaoke (`../../design/screens.md` §2 y design-system § componente 1).
-- Origen: ítem de backlog del roadmap y "Extensión futura" de `../106-word-timestamps/spec.md` (línea 56: *"streaming de timestamps … + alineador incremental por ventana + render por palabra"*).
-- Base:
-  - `public/ui/practice-view.js` — `rebuildBook()` rama `isFull` (línea 1545, **sin** `setCurrentLine` → sin auto-scroll), `colorWords()` (1629, solo post-hoc), `captureAttempt()` (1022, fetch bloqueante hasta soltar).
-  - `public/styles.css:1893` — `.karaoke-book` con `max-height: 46vh`, `overflow-y: auto` y **barra de scroll oculta** (`scrollbar-width: none`), máscara CSS gradiente.
-  - `public/speech/browser-stt.js:42` — hook `onInterim` declarado (`interimResults: true`) y **sin consumir** (la vista lo descarta).
-  - `src/lib/practice/align-words.ts:178` — `alignWords()` es **batch**: LCS global sobre el transcript completo con timestamps, no incremental.
-- Problema: en la fase `full` la respuesta entera es **una sola línea** de 40px dentro de un contenedor de 46vh con barra oculta; si desborda, el texto queda oculto y el único scroll existente (`setCurrentLine → scrollIntoView`, `practice-view.js:1590`) no se invoca en esa rama. Durante la captura, además, SPACE está bloqueado por push-to-talk (`practice-view.js:277-285`) → **el usuario no puede hacer scroll mientras graba**.
-- Decisión registrada en 106: el coloreado green/amber/red es post-grabación; esta feature es la extensión de tiempo real que 106 dejó documentada.
+- Origen: ítem de backlog del roadmap y "Extensión futura" de `../106-word-timestamps/spec.md` (streaming de timestamps + alineador incremental + render por palabra).
+- **Historial de la v1 (rechazada):** la primera implementación usó la fuente A "agenda temporal del coach" (velocidad constante `COACH_MS_PER_WORD = 350`): el coloreado avanzaba a ritmo fijo, independiente de lo que el usuario realmente decía. Prueba manual del usuario: *"el coloreado va avanzando con una velocidad constante totalmente independiente a lo que realmente va diciendo el usuario"* → **rechazada**. Decisión registrada: la posición en vivo debe derivarse del habla real del usuario.
+- Base actual (v2 implementada):
+  - `public/ui/live-position.js` — contrato `{ start(), stop(), onWord(cb) }` con kinds `interim` y `streaming` (ambos vía `register(handler)`); matcher greedy monotónico `advanceLiveIndex` derivado del puro `matchLiveWords` (índice activo + máscara `spoken[]`). La fuente `time` fue eliminada.
+  - `public/ui/practice-view.js` — `createLiveCapturePosition()` elige kind por ruta STT; en ruta whisper arranca el bombeo de ventanas acumulativas (`createWindowPump`: `MIN_NEW_AUDIO_MS`/`MIN_WINDOW_INTERVAL_MS`/1 en vuelo/gate RMS, abort en release) contra `POST /api/transcribe-partial`; pintado `kw-live`/`kw-live-spoken`/`kw-live-missing` + scroll con guard rAF; cleanup en `finally` de `captureAttempt`.
+  - `public/speech/recorder-wave.js` — `WaveRecorder` (ScriptProcessor 2048 frames @16 kHz), `samples` append-only, `snapshotWav()` (ventana = copia, sin mutar) y `stop()` → WAV completo de evaluación.
+  - `src/lib/audio/whisper.ts` — `transcribeWav`/`transcribeWords` con **`spawn` async** (kill en timeout/desconexión, `outPrefix = whisper-${randomUUID()}`, `findBinary()` memoizado).
+  - `src/lib/routes/audio.ts` — `POST /api/transcribe-partial` (mutex 1-en-vuelo, `PARTIAL_TRANSCRIBE_TIMEOUT_MS = 30_000`, kill del hijo al desconectar).
+  - `public/speech/browser-stt.js:42` — hook `onInterim` ya consumido por la ruta navegador.
+- Problema persistente de la v1: en fase `full` la respuesta es **una sola línea** de 40px en un contenedor de 46vh con barra oculta; durante la captura SPACE está bloqueado por PTT → el usuario no puede scrollear a mano. El auto-scroll en vivo es la solución; ahora debe seguir la posición **real** del usuario.
 
 ## Qué hace
 
-Introduce un **motor de posición en vivo**: una fuente que emite, mientras el usuario habla, en qué palabra de la respuesta modelo está (índice aproximado o exacto según la fuente disponible). Esa posición alimenta a dos consumidores en la vista karaoke:
+Motor de posición en vivo que **sigue al usuario**, no al revés:
 
-1. **Pintado provisional palabra a palabra** — la palabra activa se marca en vivo (clase `kw-live`) durante la captura, distinta de los colores finales.
-2. **Auto-scroll de la respuesta modelo** — el contenedor `karaoke-book` hace scroll para mantener la palabra activa visible mientras el usuario repite, sin intervención manual.
-
-Los colores **finales** (green/amber/red) siguen llegando igual que hoy: `POST /api/attempt` → `alignWords` → `colorWords()` (106 + 116, sin cambios de contrato). El pintado en vivo es una capa provisional que se limpia al evaluar; el semáforo post-hoc tiene precedencia.
+1. **Fuente híbrida de habla real** bajo el contrato único `LivePositionSource`:
+   - **Ruta whisper (por defecto):** durante la captura `full`, el cliente envía **ventanas acumulativas** de audio (copia del buffer desde el inicio de la captura) a `POST /api/transcribe-partial`; la respuesta `{ text }` alimenta el matcher de posición. El servidor transcribe con whisper en **spawn async**.
+   - **Ruta navegador:** interinos de Web Speech (`onInterim`), ya existentes.
+   - La fuente de reloj (velocidad constante) **se elimina**; sin señal de habla real → sin posición en vivo (degradación), nunca avance a ritmo fijo.
+2. **Marcado en vivo por palabra** (evaluación híbrida, capa provisional):
+   - `kw-live` — palabra activa (donde va la lectura del usuario) + auto-scroll con guard rAF (`scrollLiveWord` sobre el wrap): la fila de lectura se mantiene en el **antepenúltimo renglón visible** del book — la línea de reposo es `bookBottom − 48px (máscara) − 2 × altoDeFila` (alto medido del wrap, se adapta al IPA on/off) — y solo dispara cuando la fila activa sale de esa línea (≈ 1 scroll por renglón avanzado).
+   - `kw-live-spoken` (verde provisional) — palabras que el matcher confirma ya dichas.
+   - `kw-live-missing` (rojo provisional) — palabras objetivo anteriores a la posición que el usuario **no** dijo.
+   - Al soltar: cleanup total de clases live; el semáforo **definitivo** (green/amber/red con pronunciación/LLM, 106+116) pinta sobre lienzo limpio. Nada de estado live entra en `attempts[].words`.
+3. **Separación dura evaluación vs. sincronización** (decisión explícita del usuario):
+   - La **evaluación** usa siempre el WAV **único y completo** del `stop()` → `POST /api/attempt` → `transcribeWords` (camino existente, intacto).
+   - Las **ventanas** son copias `snapshotWav()` del mismo buffer contiguo (acumulativas, sin cortes ni gaps entre ventanas) y alimentan **solo** el pintado/scroll en vivo; jamás componen la transcripción de evaluación. Un partial erróneo solo degrada el color provisional.
 
 ## Por qué
 
-- **Scroll imposible durante captura:** barra oculta + SPACE bloqueado por PTT = texto desbordado inaccesible en justo el momento en que más se necesita (repitiendo la respuesta entera).
-- **El usuario no debe soltar el micrófono para ver qué sigue:** hacer scroll a mano rompería el ritmo push-to-talk y desperdiciaría el turno.
-- **Feedback inmediato:** ver la palabra activa avanzar da sensación de sincronía (mismo principio karaoke del coloreado post-hoc, pero en vivo).
-- **El hook ya existe:** `browser-stt.js` emite interinos que hoy se descartan; 106 dejó documentado este camino como extensión futura.
+- **El sistema debe seguir al usuario:** colorear a ritmo fijo es engañoso; la posición solo es meaningful si nace de lo que el usuario dice en ese momento.
+- **Scroll imposible durante captura:** barra oculta + SPACE bloqueado por PTT = texto desbordado inaccesible en el momento en que más se necesita.
+- **Feedback inmediato palabra por palabra:** ver avance real + faltantes en vivo da la sensación de karaoke evaluando sobre la marcha.
+- **Sin riesgo de palabras cortadas en la evaluación:** la evaluación nunca se compone de ventanas; es el WAV completo de siempre.
+- **`spawnSync` es insostenible con ventanas:** bloquearía el event loop (TTS, health, long-poll 116) durante cada ventana; la migración a `spawn` async es prerequisito y además mejora el camino actual.
 
 ## Requerimientos funcionales
 
-- [x] **Contrato de fuente de posición viva** — abstracción única (`LivePositionSource`) con una o más implementaciones, que emite el índice de la palabra activa del objetivo durante la captura. La spec no fija la tecnología de la fuente: la comparación de opciones (agenda temporal del coach / interims Web Speech / chunked whisper) y la decisión viven en `plan.md`.
-- [x] **Pintado provisional** — la palabra activa se marca con un estilo propio (`kw-live`, no confundible con `kw-spoken` del coach ni con `kw-green/amber/red`) mientras el usuario habla en la fase `full`; se limpia al soltar y antes del pintado post-hoc.
-- [x] **Auto-scroll durante captura** — al avanzar la posición, el `karaoke-book` mantiene la palabra activa visible (`scrollIntoView({ block: "nearest" })` sobre el wrap de la palabra, suavizado), sin scrollear fuera de fase y sin pelear con el popover léxico (112) ni con el gate `data-interactive` (113).
-- [x] **Monotonicidad** — durante una misma captura la posición solo avanza (los intermedios de STT se reescriben; la posición no debe "rebobinar" en vivo). El reset es al iniciar la captura y al evaluar.
-- [x] **Degradación** — si no hay fuente de posición disponible (ruta whisper sin interinos, fuente fallida), la fase `full` sigue funcionando como hoy: sin pintado en vivo y sin scroll en vivo; en ningún caso la feature bloquea la captura ni el envío a `/api/attempt`.
-- [x] **Precedencia post-hoc** — al llegar `words[]` de `/api/attempt`, `colorWords()` pinta el semáforo definitivo sobre la línea y el estado en vivo desaparece; el guard de refinado (`attemptId` + `flowToken`, 116) sigue intacto.
-- [x] **Cleanup garantizado** — la suscripción/animación se cancela en todos los caminos de salida de `captureAttempt` (éxito, fallo, excepción, soltar PTT), sin estado vivo colgando entre turnos.
+- [x] **Fuente de posición = habla real** — contrato único `LivePositionSource` con dos implementaciones: `interim` (Web Speech) y `streaming` (texto parcial del servidor). El kind `time` y todo su aparato (`timeLiveIndex`, `buildCaptureOnsets`, `COACH_MS_PER_WORD`, `LIVE_TICK_MS`) se **elimina**.
+- [x] **Endpoint de partials** — `POST /api/transcribe-partial` (WAV crudo acumulado) → `{ text, durationMs }`. Contrato documentado en `plan.md` y en el JSDoc de la ruta. Máximo 1 partial en vuelo (429 si ocupado); el hijo whisper se **killed** si el cliente se desconecta; timeout propio (no el de 60 s de piper/edge-tts).
+- [x] **Transcripción async** — `transcribeWav`/`transcribeWords` migran de `spawnSync` a `spawn` async sin cambiar su contrato de retorno; `outPrefix` pasa a `randomUUID()` (fix de colisión); `findBinary()` cacheado. El camino de `/api/attempt` sigue funcionando idéntico, ahora sin bloquear el event loop.
+- [x] **Ventanas del cliente** — `WaveRecorder.snapshotWav()` (copia del buffer, sin mutar `samples`); cadencia con mínimo de audio nuevo (~750 ms) e intervalo mínimo (~1.25 s), 1 en vuelo; gate por RMS (no enviar silencio); solo fase `full` en ruta whisper.
+- [x] **Marcado en vivo por palabra** — `matchLiveWords(targetTokens, text)` (puro, mismo walk greedy que `advanceLiveIndex`) devuelve índice activo + máscara de dichas; la vista pinta `kw-live` / `kw-live-spoken` / `kw-live-missing` con guard rAF y hace auto-scroll sobre el wrap de la palabra activa que mantiene la fila de lectura en el **antepenúltimo renglón visible** (colchón de 2 filas bajo la lectura; `scrollLiveWord`, no `scrollIntoView`).
+- [x] **Monotonicidad** — la posición solo avanza durante una captura; reset al iniciar cada captura y al evaluar.
+- [x] **Degradación** — sin señal de habla real (endpoint caído, modelo no listo, primer 4xx/5xx, ruta sin interinos): fase `full` funciona como antes de la feature, **sin** pintado/scroll en vivo y sin errores en consola; en ningún caso los fallos de partial disparan el fallback whisper→browser (eso lo decide solo `submitAudio`) ni bloquean la captura.
+- [x] **Precedencia post-hoc** — al llegar `words[]` de `/api/attempt`, `colorWords()` pinta el semáforo definitivo sobre lienzo limpio (clases live barridas en el `finally`); guard de refinado (`attemptId` + `flowToken`, 116) intacto.
+- [x] **Cleanup garantizado** — en todos los caminos de salida de `captureAttempt` (éxito, fallo, excepción, soltar PTT, `cancelPendingTurn`): quitar clases live, abortar fetch de partial en vuelo, detener el bombeo de ventanas, sin estado vivo colgando.
+- [x] **Evaluación = WAV único** — la evaluación post-hoc usa exclusivamente el WAV completo de `stop()`; las ventanas nunca se concatenan ni componen la transcripción de evaluación (invariante documentado y testeado).
 
 ## Requerimientos no funcionales
 
-- Latencia del pintado/scroll: percibida como inmediata (< ~100 ms desde la señal de posición), sin bloquear el hilo de UI (rAF para el scroll suavizado).
-- Presupuesto $0: sin dependencias nuevas ni endpoints nuevos obligatorios; frontend vanilla.
-- Sin cambios de contrato: `/api/attempt`, `/api/transcribe`, `attempts[].words` y la forma de la sesión quedan como están.
-- El servidor no participa en el camino de posición salvo que se elija la fuente chunked (ver `plan.md`); en la recomendación, la posición es 100% cliente.
+- Latencia del pintado/scroll: percepción de seguimiento real; el budget real lo pone la inferencia local (~0.5–3 s por ventana con `small.en`, 1 en vuelo) — aceptado y documentado; el scroll/repaint sigue siendo < ~100 ms desde la señal (rAF).
+- Presupuesto $0: sin dependencias npm nuevas (sin WS/SSE: respuesta directa por ventana, paced por el cliente).
+- Sin cambios de contrato en `/api/attempt`, `/api/transcribe`, `attempts[]` ni la forma de sesión. El único contrato nuevo es `/api/transcribe-partial` (documentado en el mismo cambio).
+- Migración async sin regresión: los tests existentes de whisper/attempt deben seguir verdes.
+- Frontend vanilla; módulos < ~300 líneas; TS estricto.
 
 ## Decisiones de diseño / tecnología
 
-- **Fuente de posición = decisión de plan (abierta en spec):** la spec define el contrato y los criterios; `plan.md` compara agenda temporal del coach, interims Web Speech y chunked whisper, y registra la decisión. Requisito transversal a cualquier fuente: disponible en la ruta por defecto (whisper local) o con degradación explícita.
-- **"Exacto" es relativo a la fuente:** la capa en vivo es *provisional* (posición); la *exactitud de colores* (green/amber/red) la aporta 106/116 post-hoc, que no cambia. Esta feature no intenta emitir semáforo en vivo.
-- **Fase `full` es el consumidor principal** (motivación del bug del texto oculto); el bucle de fragmentos queda fuera de alcance porque sus líneas cortas ya scrollean con `setCurrentLine`.
+- **Ventanas acumulativas, no fragmentos disjuntos:** cada ventana es el prefijo completo desde el inicio de la captura → no hay cortes a media palabra entre ventanas ni gaps (es el mismo buffer contiguo). Justificación y comparación en `plan.md`.
+- **Evaluación y sincronización viven en caminos separados** (decisión del usuario): partials → solo posición/coloreado provisorio; WAV completo → evaluación definitiva. Un partial erróneo nunca contamina el score.
+- **Ámbar solo post-hoc:** el ámbar por pronunciación/LLM (`forcedAmberWordsFromIssues`) requiere el resultado completo; en vivo no se emite ámbar (el aligner determinista de `/api/attempt` sigue emitiendo su ámbar de desviación como hoy).
+- **Sin señal → sin vivo:** se elimina el reloj en vez de degradar a él (decisión explícita del usuario: un avance constante es peor que no tener avance).
+- **Fase `full` es el único consumidor** (motivación del bug del scroll); el bucle de fragmentos queda fuera de alcance.
 
 ## Dependencias
 
 - 106 (word timestamps + `alignWords`) y 116 (pintado incremental post-hoc) — se consumen, no se modifican.
-- 111 (push-to-talk) — convive: la posición se recalcula mientras el botón/espacio está presionado; el cleanup ocurre al soltar.
-- 112/113 (popover/click de palabra) — se respeta el gate `canInteractWithWords()`; el scroll en vivo no habilita interacción.
+- 111 (push-to-talk) — convive: el bombeo de ventanas vive dentro de la captura; cleanup al soltar. El fix del auto-repeat de SPACE (prevención de scroll) forma parte de esta v2.
+- 112/113 (popover/click) — se respeta `canInteractWithWords()`; el scroll/pintado en vivo no habilita interacción.
 - 105 (vista karaoke: `rebuildBook`, `colorWords`, `spansForLine`).
+- 002 (whisper local) — cadena `transcribeWav`/`transcribeWords` migrada a async.
 
 ## Criterios de aceptación
 
-- [x] Módulo puro de posición/scroll con tests (`tests/live-position.test.ts`): avance de índice, monotonicidad, tokenización alineada con `tokenizeWords`, degradación sin fuente, reset entre capturas.
+- [x] Tests del módulo puro (`tests/live-position.test.ts`): `matchLiveWords` (dichas + faltantes + índice activo), monotonicidad, techo, degradación sin señal, fuente `streaming`; tests de `time` eliminados.
+- [x] Tests del contrato `POST /api/transcribe-partial` (patrón `app-http`): 200 con texto, 400 WAV inválido, 429 con partial en vuelo, 503 sin whisper; kill del hijo al desconectar.
+- [x] Tests de `snapshotWav()` (no muta `samples`) y de la migración async de whisper (outPrefix único por run).
+- [x] Pin de invariante: la vista llama a `submitAudio` con el blob de `stop()`, nunca con snapshots de ventanas.
 - [x] `npm run check` y `npm test` en verde.
-- [ ] Prueba manual: respuesta modelo larga (desborda 46vh) → al presionar y repetir, la línea hace scroll sola y la palabra activa queda visible; soltar → semáforo post-hoc normal.
-- [ ] Prueba manual sin fuente viva (ruta whisper / fuente deshabilitada) → flujo idéntico al actual, sin errores en consola ni scroll espurio.
-- [ ] Prueba manual de regresión: popover léxico (112), click de palabra (113) y refinado amber (116) siguen operativos tras una captura con scroll en vivo.
-- [ ] Verificación de cleanup: tras soltar PTT (y tras una excepción simulada), no quedan clases `kw-live` ni listeners/frames activos.
+- [ ] Prueba manual: respuesta modelo larga → el pintado/scroll avanza **con el habla del usuario** (pausa el usuario → se detiene; habla rápido → avanza); la fila de lectura se queda en el **antepenúltimo renglón visible** (2 filas de colchón debajo, no en el borde inferior); al soltar, semáforo normal.
+- [ ] Prueba manual sin señal (endpoint caído / ruta sin interinos): flujo idéntico al pre-121, sin errores en consola ni scroll espurio ni avance fantasma.
+- [ ] Prueba manual: `/api/attempt` y TTS siguen responsivos durante una captura con ventanas rodantes (el event loop no se bloquea).
+- [ ] Regresión: popover (112), click (113), refinado amber (116) y guard de teclado del área operativos.
 
 ## Fuera de alcance
 
-- Cambiar el alineador batch (`alignWords`), el contrato de `/api/attempt` o la persistencia de `attempts[].words`.
-- Semáforo green/amber/red en vivo (sigue siendo post-hoc; la exactitud de color no se promete en tiempo real).
+- Cambiar `/api/attempt`, `alignWords`, `attempts[].words` o la persistencia.
+- Emitir ámbar (pronunciación) en vivo.
+- Servidor whisper persistente / modo streaming de whisper.cpp (evolución futura si la latencia por run es inaceptable).
+- WebSocket/SSE.
 - Bucle de fragmentos (líneas cortas, ya con `setCurrentLine`).
-- Streaming de audio al servidor / chunked whisper como requisito (queda como evolución opcional documentada en `plan.md`).
-- Evaluar mientras se habla (la evaluación ocurre al soltar, como hoy).
+- Evaluar (score/LLM) mientras se habla.
 
 ## Recursos
 
-- `public/ui/practice-view.js`, `public/ui/karaoke-color.js`, `public/speech/browser-stt.js`, `public/styles.css`.
-- `spec/features/106-word-timestamps/spec.md` (§ Extensión futura), `spec/features/116-fast-fragment-eval/spec.md`, `spec/use-cases/CU2.md`, `spec/design/design-system.md:101`.
+- `public/ui/live-position.js`, `public/ui/practice-view.js`, `public/speech/recorder-wave.js`, `public/speech/browser-stt.js`, `public/styles.css`.
+- `src/lib/audio/whisper.ts`, `src/lib/routes/audio.ts`, `src/lib/util/subprocess.ts`.
+- `spec/features/106-word-timestamps/spec.md`, `spec/features/116-fast-fragment-eval/spec.md`, `spec/use-cases/CU2.md`, `spec/design/design-system.md`.
