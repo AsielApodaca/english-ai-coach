@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { encodeWAV } from "../public/speech/recorder-wave.js";
+import { encodeWAV, WaveRecorder } from "../public/speech/recorder-wave.js";
 
 /** Decode a WAV blob into its little-endian header + raw 16-bit samples. */
 async function decode(wav: Blob) {
@@ -46,4 +46,39 @@ test("encodeWAV: empty recording still yields a valid empty WAV", async () => {
   const w = await decode(encodeWAV(new Float32Array(0), 16000));
   assert.equal(w.dataLen, 0);
   assert.equal(w.samples.length, 0);
+});
+
+test("WaveRecorder.snapshotWav: a full-copy window that never mutates the buffer (121)", async () => {
+  // The recorder runs no AudioContext in Node: the buffer is fed by hand,
+  // which is exactly what the live-window pump reads on the browser side.
+  const recorder = new WaveRecorder();
+  recorder.sampleRate = 16000;
+  recorder.samples.push(new Float32Array([0.5, -0.5]), new Float32Array([0.25]));
+  const before = recorder.samples.map((c) => Array.from(c));
+
+  const snapshot = await decode(recorder.snapshotWav());
+  assert.equal(recorder.samples.length, 2, "the snapshot must not touch the chunk list");
+  assert.deepEqual(recorder.samples.map((c) => Array.from(c)), before, "every frame stays intact");
+  assert.equal(snapshot.riff, "RIFF");
+  assert.equal(snapshot.rate, 16000);
+  assert.equal(snapshot.dataLen, 6, "the window carries EVERY sample captured so far");
+  assert.deepEqual(snapshot.samples, [16383, -16384, 8191]);
+
+  // The final evaluation still gets the same single full WAV from stop():
+  // the snapshot left the buffer complete, so stop() encodes all 3 samples.
+  const final = await decode(recorder.stop());
+  assert.equal(final.dataLen, 6, "stop() after a snapshot must still yield the full take");
+  assert.equal(recorder.samples.length, 0, "stop() empties the buffer as always");
+});
+
+test("WaveRecorder.snapshotWav: repeated snapshots grow with the capture (cumulative windows)", async () => {
+  const recorder = new WaveRecorder();
+  recorder.sampleRate = 16000;
+  recorder.samples.push(new Float32Array(800));
+  const first = await decode(recorder.snapshotWav());
+  assert.equal(first.dataLen, 1600); // 800 samples × 2 bytes
+  recorder.samples.push(new Float32Array(800));
+  const second = await decode(recorder.snapshotWav());
+  assert.equal(second.dataLen, 3200, "each window is the whole prefix, not a disjoint chunk");
+  assert.equal(recorder.samples.length, 2, "still no mutation");
 });

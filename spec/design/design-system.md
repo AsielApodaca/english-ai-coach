@@ -30,6 +30,7 @@ La paleta consolidada oficial (el diseño base genera variantes de surface/seman
 | `--accent-cyan` | `#06b6d4` | Onda de audio, VU meter, estado de síntesis, active karaoke scrubber (también `#3b82f6`). |
 | `--amber` | `#f59e0b` | Corrección leve (desviación fonética, prisa, syllable stress). |
 | `--red` | `#ef4444` | Error fonético / miss / palabra no dicha. |
+| `--accent-live` | `#a78bfa` | Posición viva del usuario durante la captura (`kw-live`, feature 121) — violeta, deliberadamente fuera del cian del coach y del semáforo. |
 | `--surface-variant` | `#1e232d` | Dropzone, chips, contenedores auxiliares. |
 | `--outline` | `#334155` | Línea de corte (dropzone dashed, controles ghost). |
 
@@ -144,6 +145,9 @@ Token chart (fuentes cargadas desde Google Fonts como hoy):
 | Palabra pasada correcta | Verde `#10b981` |
 | Palabra leve | Ámbar `#f59e0b` |
 | Palabra fallada/no dicha | Rojo `#ef4444` |
+| Palabra activa del usuario durante la captura (121) | Violeta `#a78bfa` (`kw-live`, provisional hasta el semáforo post-hoc) |
+| Palabra ya dicha en vivo durante la captura (121) | Verde `#10b981` al 85% de opacidad, sin glow (`kw-live-spoken`, provisional — el `kw-green` definitivo pinta encima al evaluar) |
+| Palabra no dicha aún (faltante) en vivo durante la captura (121) | Rojo `#ef4444` al 85% de opacidad, sin glow (`kw-live-missing`, provisional — el `kw-red` definitivo pinta encima al evaluar) |
 
 ## Implementación
 

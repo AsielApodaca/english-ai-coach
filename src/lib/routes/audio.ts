@@ -2,10 +2,11 @@
  * Audio routes: STT (whisper) and TTS (Piper/edge-tts) (features 002/007/114).
  *
  * Route contracts (JSDoc blocks moved verbatim from server.ts in feature 117):
- *   POST /api/transcribe     — whisper transcription of a raw WAV
- *   GET  /api/whisper/status — whisper readiness for the STT picker
- *   GET  /api/tts/status     — TTS engine readiness
- *   GET  /api/tts            — synthesized audio (cached, pause-aware)
+ *   POST /api/transcribe        — whisper transcription of a raw WAV
+ *   POST /api/transcribe-partial — live partial of a CUMULATIVE window (121)
+ *   GET  /api/whisper/status    — whisper readiness for the STT picker
+ *   GET  /api/tts/status        — TTS engine readiness
+ *   GET  /api/tts               — synthesized audio (cached, pause-aware)
  */
 
 import express, { type Express } from "express";
@@ -28,6 +29,24 @@ const TTS_MAX_PAUSE_MS = 10_000;
 const TTS_MAX_SEGMENTS = 40;
 const RATE_MIN = 0.5;
 const RATE_MAX = 2;
+
+/**
+ * Wall-clock budget for ONE live partial transcription (feature 121). Named
+ * here on purpose: the shared SUBPROCESS_TIMEOUT_MS (60 s) is the budget of
+ * piper/edge-tts, and a stuck live window must not hold the loop for that
+ * long — 30 s is already generous for the small.en model on a window.
+ */
+const PARTIAL_TRANSCRIBE_TIMEOUT_MS = 30_000;
+
+/**
+ * One partial transcription in flight (feature 121). The client of
+ * `/api/transcribe-partial` already paces itself at 1 request in flight; this
+ * module-level mutex is the server-side second defense so two tabs (or a bug)
+ * cannot double the CPU cost of whisper. Released in the handler's `finally`,
+ * success or failure. Module-level (not per-app) so the guard holds for the
+ * whole process, the same way the spawned CPU cost does.
+ */
+let partialInFlight = false;
 
 /**
  * Register the STT/TTS routes.
@@ -85,6 +104,86 @@ export function registerAudioRoutes(app: Express, deps: AppDeps): void {
       res.status(500).json({ error: (err as Error).message });
     } finally {
       rmSync(wavPath, { force: true });
+    }
+  });
+
+  /**
+   * POST /api/transcribe-partial — live partial of a CUMULATIVE window
+   * (feature 121): during a push-to-talk capture of the model answer, the
+   * client periodically sends a WAV snapshot of EVERYTHING captured so far
+   * (prefix of the same contiguous buffer, not a disjoint chunk) so the
+   * live-position matcher can follow the user's real speech.
+   *
+   * Input: raw binary body (Content-Type audio/*, ≤ 80 MB) — NOT JSON; a
+   *   PCM16 mono 16 kHz WAV accumulated since the capture started.
+   * 200 { text, durationMs } — text-only transcription (no word timestamps;
+   *   the position comes from the client-side matcher against the target).
+   * 400 { error } — empty body or a body that is not RIFF/WAVE (checked
+   *   before anything touches the disk).
+   * 429 { error } — another partial is already in flight (mutex of 1).
+   * 503 { error } — whisper is not installed or the model is not ready. No
+   *   model download is attempted here: a live window degrades (no provisional
+   *   paint) instead of triggering a surprise download mid-capture.
+   * 500 { error } — whisper-cli failed or timed out
+   *   (PARTIAL_TRANSCRIBE_TIMEOUT_MS = 30 s, NOT the shared 60 s budget).
+   *
+   * Semantics: transcribes the COMPLETE context of the window (cumulative,
+   * not incremental); never persists, never touches attempts[] and never
+   * triggers an LLM. When the client disconnects before the response is done
+   * (released push-to-talk), the whisper child is KILLED so it stops burning
+   * CPU against the final `/api/attempt` spawn. The evaluation of the attempt
+   * ALWAYS uses the single full WAV of the recorder's stop() — this route
+   * feeds only the provisional live paint.
+   */
+  app.post("/api/transcribe-partial", express.raw({ type: "audio/*", limit: "80mb" }), async (req, res) => {
+    const buf = req.body as Buffer | undefined;
+    if (!buf || buf.length === 0) return res.status(400).json({ error: "No audio received." });
+    if (!isWavBuffer(buf)) return res.status(400).json({ error: "Body is not a RIFF/WAVE (WAV) audio file." });
+    const whisper = checkWhisper(whisperModel, deps.rootDir);
+    if (!whisper.available || !whisper.modelReady) {
+      return res.status(503).json({ error: whisper.available ? whisper.hint : "Whisper is not available for partial transcription." });
+    }
+    if (partialInFlight) return res.status(429).json({ error: "A partial transcription is already in flight." });
+    partialInFlight = true;
+
+    // Kill the whisper child when the connection closes BEFORE the response
+    // completed (client released push-to-talk and aborted): a window that
+    // nobody is waiting for must not compete with the final attempt.
+    const abort = new AbortController();
+    const onClientClose = () => {
+      if (!res.writableEnded) abort.abort();
+    };
+    res.on("close", onClientClose);
+
+    // mkdir/write live INSIDE the try: a disk failure must flow through the
+    // finally below, otherwise the mutex would leak and every later window
+    // would get a permanent 429 until process restart.
+    const wavPath = join(deps.rootDir, "data", "tmp", `partial-${randomUUID()}.wav`);
+    try {
+      mkdirSync(join(deps.rootDir, "data", "tmp"), { recursive: true });
+      writeFileSync(wavPath, buf);
+      const result = await transcribeWav(wavPath, whisper.modelPath!, deps.rootDir, "en", {
+        timeoutMs: PARTIAL_TRANSCRIBE_TIMEOUT_MS,
+        signal: abort.signal,
+      });
+      if (!res.writableEnded) res.json({ text: result.text, durationMs: result.durationMs });
+    } catch (err) {
+      // The child was killed on purpose (disconnect/abort): there is no
+      // client left to answer; every other failure is a plain 500.
+      if (!abort.signal.aborted && !res.writableEnded) {
+        res.status(500).json({ error: (err as Error).message });
+      }
+    } finally {
+      res.off("close", onClientClose);
+      // Best-effort cleanup: `force` only suppresses ENOENT — if `data/tmp`
+      // itself is broken (e.g. replaced by a regular file) rmSync throws
+      // ENOTDIR, and cleanup must never block the mutex release below.
+      try {
+        rmSync(wavPath, { force: true });
+      } catch {
+        // disposable temp path; ignore
+      }
+      partialInFlight = false;
     }
   });
 

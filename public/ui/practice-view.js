@@ -51,6 +51,7 @@ import { tokenizeWords, lineColorStatuses } from "./karaoke-color.js";
 import { closeLookupPopover, initLookupPopover } from "./lookup-popover.js";
 import { createWordClickHandler, tokensFromRange } from "./word-click.js";
 import { buildWordStarts } from "./karaoke-schedule.js";
+import { createLivePositionSource, matchLiveWords } from "./live-position.js";
 import { getLocal } from "./settings/local.js";
 import { volumeFactor } from "./settings/volume.js";
 
@@ -76,6 +77,35 @@ const CHIME_MAX_MS = 500;
  * removed: the take is on-demand via the feedback chip's speaker button.)
  */
 const REFINE_WAIT_MS = 10000;
+
+// ---------------------------------------------------------------------------
+// Live window pump (feature 121 v2) — cumulative windows to /api/transcribe-partial
+// ---------------------------------------------------------------------------
+
+/** Minimum NEW audio per window request (ms captured since the last send). */
+const MIN_NEW_AUDIO_MS = 750;
+
+/** Minimum wall-clock gap between two window requests. */
+const MIN_WINDOW_INTERVAL_MS = 1250;
+
+/** How often the window pump re-evaluates its gates. */
+const PUMP_TICK_MS = 250;
+
+/** RMS floor (dBFS) under which new audio counts as silence — never sent. */
+const PARTIAL_SILENCE_RMS_DB = -45;
+
+/**
+ * Bottom mask band of `.karaoke-book` in px — mirrors its `scroll-padding-block`
+ * (the transparent gradient band the reading row must stay clear of).
+ */
+const LIVE_SCROLL_MASK_PX = 48;
+
+/**
+ * Rows kept visible BELOW the reading row: the live scroll fires and rests
+ * when the active row reaches the ANTEPENULTIMATE visible row of the book,
+ * so the line being read never rides the bottom edge of the viewport.
+ */
+const LIVE_SCROLL_KEPT_ROWS = 2;
 
 // ---------------------------------------------------------------------------
 // Module state (mirrors PracticeState in karaoke.ts)
@@ -175,6 +205,19 @@ let cancelPendingTurn = null;
  */
 let activePtt = null;
 
+/**
+ * Live position of the FULL-answer capture in flight (feature 121), or null
+ * outside one (and always null for fragment captures: their short lines
+ * already scroll through `setCurrentLine`). Routes the PTT press (`begin`),
+ * the Web Speech interims (`feed`) and — on the whisper route — the
+ * cumulative-window pump into a `LivePositionSource`, and owns the
+ * provisional `kw-live`/`kw-live-spoken`/`kw-live-missing` paint + auto-scroll
+ * of the karaoke book. `attachRecorder` hands the pump the capture's
+ * `WaveRecorder` (settle/finally always dispose the whole thing).
+ * @type {{ begin: () => void, feed: (text: string) => void, dispose: () => void, attachRecorder?: (recorder: import("../speech/recorder-wave.js").WaveRecorder|null) => void }|null}
+ */
+let livePosition = null;
+
 /** True while the coach is reading a line (blocks karaoke interaction). */
 let coachSpeaking = false;
 
@@ -235,6 +278,11 @@ export function initPracticeView(rootElement, { store: shellStore, navigate: nav
   window.addEventListener("keydown", onPttKeyDown);
   window.addEventListener("keyup", onPttKeyUp);
 
+  // Keyboard scroll guard for the model answer (feature 121): with a
+  // selection inside `.karaoke-book`, scroll keys never scroll it — only the
+  // mouse wheel does — so keyboard defaults cannot fight the live auto-scroll.
+  window.addEventListener("keydown", onBookScrollGuard);
+
   // Word lookup popover (feature 112): one shared node + delegated listeners
   // inside the module (survives rebuildBook), gated by the same
   // coach/capture rule as the word interactions of 111/113.
@@ -267,19 +315,23 @@ function isSpaceKey(event) {
 /**
  * SPACE pressed → start the capture of the turn in flight.
  *
- * Guards: auto-repeat never starts a second capture (`event.repeat`), text
- * entry keeps typing spaces, and outside a capture SPACE keeps its default
- * meaning (scrolling / button activation). Inside one it is fully consumed:
- * `preventDefault()` stops the page from scrolling and stops a focused
- * button from being activated by the very key that drives the turn.
+ * Guards: text entry keeps typing spaces, and outside a capture SPACE keeps
+ * its default meaning (scrolling / button activation). Inside one it is fully
+ * consumed — INCLUDING the browser's auto-repeat: `preventDefault()` runs
+ * before the `event.repeat` guard, because the default action of every
+ * repeated keydown is also scrolling. Skipping it let the held key scroll the
+ * model answer against the live auto-scroll of feature 121 (the book jumped
+ * up/down for the whole utterance). Auto-repeat still never starts a second
+ * capture.
  *
  * @param {KeyboardEvent} event
  */
 function onPttKeyDown(event) {
-  if (!isSpaceKey(event) || event.repeat) return;
+  if (!isSpaceKey(event)) return;
   if (isTextEntryTarget(event.target)) return;
   if (!activePtt) return;
   event.preventDefault();
+  if (event.repeat) return;
   // Capture start closes the lookup popover (feature 112).
   closeLookupPopover();
   activePtt.press("space");
@@ -295,6 +347,40 @@ function onPttKeyUp(event) {
   // Released from a text field mid-press: still let go, otherwise the capture
   // would stay armed forever. Returns null when SPACE was not held.
   if (activePtt.release("space") !== null) event.preventDefault();
+}
+
+/** `event.key` spellings whose browser default action scrolls (feature 121). */
+const SCROLL_KEYS = new Set(["PageUp", "PageDown", "ArrowUp", "ArrowDown", "Home", "End"]);
+
+/**
+ * Keyboard scroll guard for the model answer (feature 121 regression fix).
+ *
+ * The karaoke book is its own scroller (`overflow-y: auto`, 46vh): as soon as
+ * a selection sits inside it, the usual scroll keys (SPACE, arrows,
+ * PageUp/PageDown, Home/End) make the browser scroll — and that default fights
+ * the live auto-scroll of a full-answer capture, bouncing the book up and down.
+ * This guard consumes ONLY those keyboard defaults, and ONLY while the
+ * selection lives inside `.karaoke-book`: the mouse wheel keeps working, and
+ * the rest of the app (long config pages, settings) keeps its normal keyboard
+ * scrolling.
+ *
+ * SPACE during an armed turn (auto-repeat included) is already consumed by
+ * `onPttKeyDown`; this guard covers the remaining keys and SPACE pressed with
+ * a selection while no turn is in flight. Text-entry targets are left alone so
+ * SPACE/arrows keep typing and moving the caret in inputs.
+ *
+ * @param {KeyboardEvent} event
+ */
+function onBookScrollGuard(event) {
+  if (event.defaultPrevented) return;
+  if (!isSpaceKey(event) && !SCROLL_KEYS.has(event.key)) return;
+  if (isTextEntryTarget(event.target)) return;
+  const selection = document.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const node = selection.getRangeAt(0).commonAncestorContainer;
+  const element = node.nodeType === 1 ? /** @type {Element} */ (node) : node.parentElement;
+  if (!element?.closest(".karaoke-book")) return;
+  event.preventDefault();
 }
 
 /**
@@ -1021,26 +1107,329 @@ async function captureAttempt(target, kind, token) {
   lastWavBlob = null;
   const sttChoice = getLocal("stt", null) ?? localStorage.getItem("stt-choice");
   const stt = pickStt(health, sttChoice);
-  if (stt === "whisper") {
-    const { blob, timedOut, error } = await waitForUserRecording(target, token);
-    if (token !== flowToken) return null;
-    if (error) throw new Error(error);
-    if (timedOut) return timedOutOutcome(target, kind);
-    lastWavBlob = blob;
-    try {
-      return await submitAudio(blob, target, kind);
-    } catch (err) {
-      // whisper failed → browser STT fallback (text mode).
-      const text = await captureBrowserSpeech(target, token);
+  // Feature 121: provisional paint + auto-scroll while the answer is being
+  // captured. Only the full answer needs it — its single long line has no
+  // scroll of its own while SPACE is held by PTT. The post-hoc traffic light
+  // (106/116) keeps precedence: this layer is torn down before returning, so
+  // `renderFeedback → colorWords()` paints over a clean book.
+  livePosition = kind === "full" ? createLiveCapturePosition(target, stt) : null;
+  try {
+    if (stt === "whisper") {
+      const { blob, timedOut, error } = await waitForUserRecording(target, token);
       if (token !== flowToken) return null;
-      if (!text) return timedOutOutcome(target, kind);
-      return await submitText(text, target, kind);
+      if (error) throw new Error(error);
+      if (timedOut) return timedOutOutcome(target, kind);
+      lastWavBlob = blob;
+      try {
+        return await submitAudio(blob, target, kind);
+      } catch (err) {
+        // whisper failed → browser STT fallback (text mode).
+        const text = await captureBrowserSpeech(target, token);
+        if (token !== flowToken) return null;
+        if (!text) return timedOutOutcome(target, kind);
+        return await submitText(text, target, kind);
+      }
     }
+    const text = await captureBrowserSpeech(target, token);
+    if (token !== flowToken) return null;
+    if (!text) return timedOutOutcome(target, kind);
+    return await submitText(text, target, kind);
+  } finally {
+    // Cleanup on EVERY exit (release, ceiling, error, cancel): no `kw-live`
+    // span, timer or interim feed may survive into the next turn.
+    livePosition?.dispose();
+    livePosition = null;
   }
-  const text = await captureBrowserSpeech(target, token);
-  if (token !== flowToken) return null;
-  if (!text) return timedOutOutcome(target, kind);
-  return await submitText(text, target, kind);
+}
+
+// ---------------------------------------------------------------------------
+// Live position during a FULL capture (feature 121): kw-live paint + auto-scroll
+// ---------------------------------------------------------------------------
+
+/**
+ * RMS in dBFS of the frames appended after the first `skip` samples of the
+ * capture buffer (feature 121 silence gate: a fan-hum window is never sent
+ * to the partial endpoint).
+ *
+ * @param {Array<Float32Array>} chunks - recorder frames (append-only)
+ * @param {number} skip - leading samples that already belong to a sent window
+ * @returns {number|null} RMS in dBFS (-Infinity for digital silence), or
+ *   null when there is no new audio at all
+ */
+function newSamplesRmsDb(chunks, skip) {
+  let seen = 0;
+  let sumSq = 0;
+  let n = 0;
+  for (const chunk of chunks) {
+    const from = Math.max(0, skip - seen);
+    for (let i = from; i < chunk.length; i++) {
+      sumSq += chunk[i] * chunk[i];
+      n++;
+    }
+    seen += chunk.length;
+  }
+  if (!n) return null;
+  const rms = Math.sqrt(sumSq / n);
+  return rms === 0 ? -Infinity : 20 * Math.log10(rms);
+}
+
+/**
+ * Build the cumulative-window pump behind the `streaming` live source
+ * (feature 121 v2): every {@link PUMP_TICK_MS} it evaluates the gates and,
+ * when they all pass, POSTs a `snapshotWav()` — the cumulative prefix of the
+ * capture, a copy that never mutates the recorder buffer — to
+ * `/api/transcribe-partial`, and feeds the returned text into the single
+ * `feed` funnel.
+ *
+ * Gates (all must pass): a recorder is attached AND still recording; at least
+ * {@link MIN_NEW_AUDIO_MS} of audio is new since the last send; at least
+ * {@link MIN_WINDOW_INTERVAL_MS} elapsed since the last send; at most one
+ * request in flight; and the new audio's RMS is above
+ * {@link PARTIAL_SILENCE_RMS_DB}.
+ *
+ * Failure policy: ANY error (network, 4xx/5xx) disables the pump for good
+ * with a single `console.warn` — it NEVER throws toward `captureAttempt`: the
+ * whisper→browser fallback is decided only by `submitAudio`, never by this
+ * live layer. Releasing push-to-talk aborts the in-flight request (the route
+ * kills its whisper child) so a window never competes with the final
+ * `/api/attempt` spawn; `dispose()` aborts anything that remains.
+ *
+ * @param {() => import("../speech/recorder-wave.js").WaveRecorder|null} getRecorder
+ * @param {(text: string) => void} onText - partial transcript sink (the feed funnel)
+ * @returns {{ dispose: () => void }} stops the loop and aborts the request in flight
+ */
+function createWindowPump(getRecorder, onText) {
+  /** Cumulative samples already covered by a sent window. */
+  let sentSamples = 0;
+  /** Wall-clock of the last request (0 = none yet). */
+  let lastSentAt = 0;
+  /** True while one POST /api/transcribe-partial is in flight. */
+  let inFlight = false;
+  /** AbortController of the in-flight request (null when idle). */
+  let inflightController = null;
+  /** True after dispose(): every late rejection is then silent. */
+  let disposed = false;
+  /** True once a failure disabled the pump (single-warn policy). */
+  let disabled = false;
+  /** True while WE abort a request (release/dispose) — not a real failure. */
+  let aborting = false;
+
+  /** Abort the window in flight, if any (deliberately, never a failure). */
+  const stopRequest = () => {
+    if (!inflightController) return;
+    aborting = true;
+    inflightController.abort();
+  };
+
+  function tick() {
+    if (disposed || disabled) return;
+    const recorder = getRecorder();
+    if (!recorder || !recorder.recording) {
+      stopRequest(); // released PTT: cut the window; the server kills its child
+      return;
+    }
+    if (inFlight) return;
+    const chunks = recorder.samples;
+    let total = 0;
+    for (const c of chunks) total += c.length;
+    // discard()/stop() emptied the buffer (accidental tap, new turn): the
+    // cumulative counters restart with it.
+    if (total < sentSamples) sentSamples = 0;
+    const sampleRate = recorder.sampleRate || 16000;
+    if (total - sentSamples < (MIN_NEW_AUDIO_MS / 1000) * sampleRate) return;
+    const rms = newSamplesRmsDb(chunks, sentSamples);
+    if (rms === null || rms < PARTIAL_SILENCE_RMS_DB) return;
+    const now = Date.now();
+    if (lastSentAt && now - lastSentAt < MIN_WINDOW_INTERVAL_MS) return;
+
+    inFlight = true;
+    aborting = false;
+    inflightController = new AbortController();
+    lastSentAt = now;
+    sentSamples = total;
+    fetch("/api/transcribe-partial", {
+      method: "POST",
+      headers: { "Content-Type": "audio/wav" },
+      body: recorder.snapshotWav(),
+      signal: inflightController.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (!disposed && typeof data?.text === "string" && data.text) onText(data.text);
+      })
+      .catch(() => {
+        if (aborting || disposed) return;
+        disabled = true;
+        clearInterval(timer);
+        console.warn("[practice] transcribe-partial failed — live coloring disabled for this capture.");
+      })
+      .finally(() => {
+        inFlight = false;
+        inflightController = null;
+        aborting = false;
+      });
+  }
+
+  const timer = setInterval(tick, PUMP_TICK_MS);
+  return {
+    dispose: () => {
+      disposed = true;
+      clearInterval(timer);
+      stopRequest();
+    },
+  };
+}
+
+/**
+ * Live auto-scroll of the ACTIVE word's row (feature 121).
+ *
+ * Keeps the reading row at the ANTEPENULTIMATE visible row of the book: the
+ * rest line sits {@link LIVE_SCROLL_KEPT_ROWS} word-rows above the bottom
+ * mask band ({@link LIVE_SCROLL_MASK_PX}), so two full rows stay visible
+ * below what the user is reading instead of the row riding the bottom edge
+ * (what `scrollIntoView({ block: "nearest" })` + the book's `scroll-padding-block`
+ * produced: it only fired at the LAST visible row). The extra row offset
+ * cannot be expressed with scroll-padding alone without also moving the
+ * coach's line scroll (`setCurrentLine`), so the minimal distance is computed
+ * here: fire only when the active row drops below the rest line (≈ once per
+ * row advanced), scroll exactly the overflow, smooth, and leave the scroll
+ * alone while the row is in range. The row height is MEASURED from the wrap
+ * so the scroll adapts to the IPA annotation being on or off.
+ *
+ * Failures never break the paint: measurement/scroll errors are swallowed.
+ *
+ * @param {HTMLElement|null} wrap - the active word's `.kw-wrap` (its parent)
+ */
+function scrollLiveWord(wrap) {
+  if (!wrap || !els.book) return;
+  try {
+    const book = els.book;
+    const wrapRect = wrap.getBoundingClientRect();
+    const bookRect = book.getBoundingClientRect();
+    const rowHeight = wrapRect.height;
+    if (!rowHeight) return;
+    const restY = bookRect.bottom - LIVE_SCROLL_MASK_PX - LIVE_SCROLL_KEPT_ROWS * rowHeight;
+    const overflow = wrapRect.bottom - restY;
+    if (overflow <= 0) return;
+    book.scrollTo({ top: book.scrollTop + overflow, behavior: "smooth" });
+  } catch {
+    // measurement/scroll unavailable → the paint still marks the word
+  }
+}
+
+/**
+ * Wire a live position to the karaoke book for ONE full-answer capture
+ * (feature 121).
+ *
+ * The source kind follows the STT route of the turn: Web Speech gets the
+ * `interim` source (the recognizer's rewritten transcript), whisper gets the
+ * `streaming` source fed by the cumulative-window pump ({@link createWindowPump}).
+ * The live position always follows REAL speech — the v1 clock source (a fixed
+ * coach cadence) was rejected in manual testing and is gone for good: without
+ * a signal the capture behaves exactly as before the feature.
+ *
+ * `feed(text)` is the single funnel: browser interims (`onInterim`) and
+ * server partials (pump) both land here, run through `matchLiveWords` once,
+ * and one coalesced rAF frame paints THREE provisional states over the full
+ * answer's spans:
+ *   - `kw-live` on the active word, plus {@link scrollLiveWord} on its
+ *     `.kw-wrap` (keeps the reading row at the ANTEPENULTIMATE visible row,
+ *     two rows of buffer below);
+ *   - `kw-live-spoken` on the words confirmed as already said;
+ *   - `kw-live-missing` on the earlier words the user skipped.
+ * The paint is monotonic and cumulative per capture: a shorter rewritten
+ * partial can neither rewind the index nor un-mark a word already confirmed
+ * as spoken. The class sits on the span, the scroll on the WRAP: in the full
+ * phase the whole answer is ONE line, so scrolling the line would move
+ * nothing.
+ *
+ * @param {string} target - the full answer being captured
+ * @param {"browser"|"whisper"} stt - engine chosen for this turn
+ * @returns {{ begin: () => void, feed: (text: string) => void, dispose: () => void, attachRecorder: (recorder: import("../speech/recorder-wave.js").WaveRecorder|null) => void }|null}
+ */
+function createLiveCapturePosition(target, stt) {
+  const targetTokens = tokenizeWords(target);
+  if (!targetTokens.length) return null;
+  /** Partial sink installed by the source's `register` (no-op until armed). */
+  let sourceFeed = () => {};
+  const source = createLivePositionSource({
+    kind: stt === "browser" ? "interim" : "streaming",
+    targetTokens,
+    register: (handler) => {
+      sourceFeed = handler;
+      return () => {
+        if (sourceFeed === handler) sourceFeed = () => {};
+      };
+    },
+  });
+  /** Recorder of the capture in flight (attached by waitForUserRecording). */
+  let recorder = null;
+  /** Whisper route only: the window pump that streams cumulative snapshots. */
+  const pump = stt === "whisper" ? createWindowPump(() => recorder, feed) : null;
+
+  // Per-capture paint state (reset by begin(), swept by dispose()).
+  /** Highest active index reached during this capture (monotonic floor). */
+  let highWater = 0;
+  /** Cumulative "already said" mask (survives shorter rewritten partials). */
+  const spokenSoFar = new Array(targetTokens.length).fill(false);
+  /** Pending rAF frame of the paint/scroll (0 = none scheduled). */
+  let frame = 0;
+  let disposed = false;
+
+  /** Apply the provisional live states to the full answer's spans. */
+  function paint() {
+    frame = 0;
+    const spans = spansForLine(-1);
+    spans.forEach((span, i) => {
+      span.classList.remove("kw-live", "kw-live-spoken", "kw-live-missing");
+      if (i === highWater) span.classList.add("kw-live");
+      else if (spokenSoFar[i]) span.classList.add("kw-live-spoken");
+      else if (i < highWater) span.classList.add("kw-live-missing");
+    });
+    const active = spans[highWater];
+    if (active) scrollLiveWord(active.parentElement);
+  }
+
+  /** Single funnel of real-speech text (browser interims + server partials). */
+  function feed(text) {
+    if (disposed) return;
+    sourceFeed(text); // the source's onWord contract keeps tracking the same text
+    const match = matchLiveWords(targetTokens, text);
+    highWater = Math.max(highWater, match.index);
+    for (let i = 0; i < spokenSoFar.length; i++) {
+      if (match.spoken[i]) spokenSoFar[i] = true;
+    }
+    if (!frame) frame = requestAnimationFrame(paint);
+  }
+
+  return {
+    // Every PTT press (re)arms: a discarded accidental tap (111) restarts at
+    // word 0 instead of inheriting the tap's position.
+    begin: () => {
+      highWater = 0;
+      spokenSoFar.fill(false);
+      source.start();
+    },
+    feed,
+    attachRecorder: (r) => {
+      recorder = r;
+    },
+    dispose: () => {
+      disposed = true;
+      pump?.dispose();
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
+      source.stop();
+      // Sweep the whole book (not just the active span): a settings-triggered
+      // rebuildBook() mid-capture may have replaced the spans under us.
+      els?.book
+        ?.querySelectorAll(".kw-live, .kw-live-spoken, .kw-live-missing")
+        .forEach((span) => span.classList.remove("kw-live", "kw-live-spoken", "kw-live-missing"));
+    },
+  };
 }
 
 /**
@@ -1117,6 +1506,9 @@ function waitForUserRecording(target, token) {
 
     const ceilingMs = maxCaptureMs(target);
     recorder = new WaveRecorder({ deviceId: getLocal("mic", "") || undefined });
+    // Feature 121 v2: the live-window pump reads the recorder's buffer, so the
+    // live position of a whisper turn gets a handle to it (no-op otherwise).
+    livePosition?.attachRecorder?.(recorder);
     // Live VU meter while the capture is held (informative, fan included).
     recorder.onLevel = (db) => dock?.setVU(db);
 
@@ -1128,6 +1520,7 @@ function waitForUserRecording(target, token) {
       hasAudio: () => (recorder?.samples.length ?? 0) > 0,
       onStart: () => {
         closeLookupPopover(); // capture start closes the lookup card (112)
+        livePosition?.begin(); // feature 121: arm the live position at the press
         dock?.setMode("recording");
         dock?.setMicLabel(PTT_RECORD_LABEL);
         syncBookInteraction(); // capture held → word interaction (112/113) off
@@ -1228,6 +1621,9 @@ function captureBrowserSpeech(target, token) {
     };
 
     const stt = new BrowserSTT({
+      // Feature 121: the rewritten interim transcript refines the live
+      // position of a full-answer capture (no-op outside one).
+      onInterim: (text) => livePosition?.feed(text),
       onFinal: () => {},
       onEnd: () => {
         if (discarding) return;
@@ -1259,6 +1655,7 @@ function captureBrowserSpeech(target, token) {
       hasAudio: () => started && Boolean(stt.result()),
       onStart: () => {
         closeLookupPopover(); // capture start closes the lookup card (112)
+        livePosition?.begin(); // feature 121: arm the live position at the press
         started = true;
         ceilingTimer = setTimeout(() => ptt.tick(), ceilingMs);
         dock?.setMode("recording");
